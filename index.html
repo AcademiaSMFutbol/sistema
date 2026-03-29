@@ -910,6 +910,52 @@ function normalizarDB(raw) {
     });
   }
 
+  // SESIONES SM Fútbol — desde hoja SESIONES (estructura real de Sheets)
+  if (raw.sesiones && raw.sesiones.length) {
+    DB.sesiones = raw.sesiones.map(s => {
+      // La hoja puede tener cualquier combinación de columnas — leer lo que exista
+      const id        = String(s.ID_SESION || s.id_sesion || s.ID || '');
+      const fecha     = s.FECHA || s.fecha || '';
+      const grupo     = s.GRUPO || s.grupo || '';
+      const monitor   = s.MONITOR || s.monitor || '';
+      const numero    = s.NUMERO_SESION || s.NUMERO || s.numero_sesion || s.numero || 0;
+      const ubicacion = s.UBICACION || s.ubicacion || '';
+      const objetivo  = s.OBJETIVO || s.objetivo || '';
+      const notas     = s.NOTAS || s.notas || '';
+      // ALUMNOS puede ser string CSV de claves alumno o array
+      const alumnosRaw = s.ALUMNOS || s.alumnos || notas || '';
+      const alumnosArr = String(alumnosRaw).split(',').map(x=>x.trim()).filter(Boolean);
+      return { id, fecha, grupo, monitor, numero: parseInt(numero)||0, ubicacion, objetivo, notas, alumnos: alumnosArr, _raw: s };
+    });
+  }
+
+  // ASISTENCIAS — desde hoja ASISTENCIAS
+  if (raw.asistencias && raw.asistencias.length) {
+    DB.asistencias = raw.asistencias.map(a => {
+      const id         = String(a.ID_ASISTENCIA || a.id_asistencia || '');
+      const sesionId   = String(a.ID_SESION || a.id_sesion || '');
+      const alumnoKey  = String(a.CLAVE_ALUMNO || a.clave_alumno || a.ID_ALUMNO || a.id_alumno || '');
+      // alumnoId = parte numérica antes del | si viene como clave, o directo si es solo número
+      const alumnoId   = alumnoKey.includes('|') ? alumnoKey.split('|')[0] : alumnoKey;
+      const presente   = String(a.PRESENTE || a.presente || 'false').toUpperCase() === 'TRUE' || a.PRESENTE === true || a.PRESENTE === 1;
+      const puntos     = parseFloat(a.PUNTOS_CAMINO || a.puntos_camino || 0) || 0;
+      // Evaluación: varios campos o JSON
+      let evaluacion = null;
+      if (a.EVALUACION_JSON || a.evaluacion_json) {
+        try { evaluacion = JSON.parse(a.EVALUACION_JSON || a.evaluacion_json); } catch(e) {}
+      } else if (a.TECNICA || a.tecnica) {
+        evaluacion = {
+          tecnica:         parseFloat(a.TECNICA || a.tecnica) || 0,
+          decision:        parseFloat(a.DECISION || a.decision) || 0,
+          competitividad:  parseFloat(a.COMPETITIVIDAD || a.competitividad) || 0,
+          actitud:         parseFloat(a.ACTITUD || a.actitud) || 0,
+          cansancio:       a.CANSANCIO || a.cansancio || ''
+        };
+      }
+      return { id, sesionId, alumnoId, claveAlumno: alumnoKey, presente, puntosCamino: puntos, evaluacion, _raw: a };
+    });
+  }
+
   // EXTRAESCOLARES — construir desde inscripciones activas en CEIP ESCALERITAS
   // Servicios extraescolares = cualquier cosa en CEIP ESCALERITAS excepto COORD.
   const SERVICIOS_EXTRA = ['RECOGIDA TEMPRANA','MULTIDEPORTE','MULTIDEPORTE ADAPTADO','INGLÉS','INGLES','BAILE','COORD. ACT. EXTRAESCOLARES'];
@@ -969,10 +1015,18 @@ async function syncAll() {
   }
 }
 
+// writeToSheet — rowData debe ser OBJETO {header: valor, ...}
+// La app ya no envía arrays — el GAS mapea por nombre de columna
 async function writeToSheet(sheet, rowData) {
   if (!GAS_URL) {
-    showToast('Modo demo — datos guardados localmente', 'warning');
+    showToast('Sin conexión GAS — datos solo en memoria', 'warning');
     return { ok: true, demo: true };
+  }
+  // Hojas read-only — nunca escribir desde la app
+  const READONLY = ['CLIENTES','ALUMNOS','INSCRIPCIONES','PAGOS'];
+  if (READONLY.includes(sheet)) {
+    showToast(`${sheet} es de solo lectura — edita directamente en Google Sheets`, 'warning');
+    return { ok: true, readonly: true };
   }
   try {
     const res = await gasRequest('APPEND', { sheet, row: rowData });
@@ -985,10 +1039,17 @@ async function writeToSheet(sheet, rowData) {
   }
 }
 
-async function updateInSheet(sheet, id, rowData) {
+// updateInSheet — rowObj debe ser OBJETO {header: valor, ...}
+// Solo actualiza los campos enviados, nunca toca el resto
+async function updateInSheet(sheet, id, rowObj) {
   if (!GAS_URL) return { ok: true, demo: true };
+  const READONLY = ['CLIENTES','ALUMNOS','INSCRIPCIONES','PAGOS'];
+  if (READONLY.includes(sheet)) {
+    showToast(`${sheet} es de solo lectura — edita en Google Sheets`, 'warning');
+    return { ok: true, readonly: true };
+  }
   try {
-    const res = await gasRequest('UPDATE', { sheet, id, row: rowData });
+    const res = await gasRequest('UPDATE', { sheet, id, row: rowObj });
     if (res.ok) showToast('Actualizado ✓', 'success');
     else showToast('Error al actualizar: ' + (res.error || '?'), 'error');
     return res;
@@ -1487,7 +1548,7 @@ async function guardarCliente() {
   };
   DB.clientes.push(nuevo);
   saveCacheLocal();
-  await writeToSheet('CLIENTES', [id, nombre.toUpperCase(), nuevo.email, nuevo.telefono, nuevo.direccion, 'ACTIVO']);
+  showToast('Cliente guardado en memoria. Añádelo manualmente en Google Sheets → hoja CLIENTES.', 'warning');
   closeModal();
   clientes();
   updateBadges();
@@ -1519,7 +1580,7 @@ async function actualizarCliente(id) {
   c.telefono = document.getElementById('ec-tel').value.trim();
   c.activo = document.getElementById('ec-activo').value === 'true';
   saveCacheLocal();
-  await updateInSheet('CLIENTES', id, [c.nombre, c.email, c.telefono, c.activo?'ACTIVO':'BAJA']);
+  showToast('Cambio guardado en memoria. Para que persista, edita directamente en Google Sheets → hoja CLIENTES.', 'warning');
   closeModal();
   clientes();
 }
@@ -1675,7 +1736,7 @@ async function guardarAlumno() {
   };
   DB.alumnos.push(nuevo);
   saveCacheLocal();
-  await writeToSheet('ALUMNOS', [id, nuevo.nombre, nuevo.fechaNac, clienteId, nuevo.actividad, nuevo.modalidad, nuevo.grupo, 'ACTIVO', 0]);
+  showToast('Alumno guardado en memoria. Añádelo manualmente en Google Sheets → hoja ALUMNOS.', 'warning');
   closeModal();
   alumnos();
   showToast(`Alumno ${nuevo.nombre} registrado ✓`, 'success');
@@ -1725,7 +1786,7 @@ async function actualizarAlumno(id) {
   a.activo = document.getElementById('eal-activo').value === 'true';
   a.observaciones = document.getElementById('eal-obs').value.trim();
   saveCacheLocal();
-  await updateInSheet('ALUMNOS', id, [a.nombre, a.fechaNac, a.actividad, a.modalidad, a.grupo, a.activo?'ACTIVO':'BAJA']);
+  showToast('Cambio guardado en memoria. Para que persista, edita en Google Sheets → hoja ALUMNOS.', 'warning');
   closeModal();
   alumnos();
 }
@@ -1776,7 +1837,7 @@ async function toggleInscripcion(id) {
   if (!i) return;
   i.estado = i.estado === 'ACTIVA' ? 'BAJA' : 'ACTIVA';
   saveCacheLocal();
-  await updateInSheet('INSCRIPCIONES', id, [i.estado]);
+  showToast('Estado actualizado en memoria. Para que persista, edita en Google Sheets → hoja INSCRIPCIONES.', 'warning');
   inscripciones();
 }
 
@@ -1832,7 +1893,7 @@ async function guardarInscripcion() {
   };
   DB.inscripciones.push(nuevo);
   saveCacheLocal();
-  await writeToSheet('INSCRIPCIONES', [id, alumnoId, alumno.clienteId, nuevo.servicio, nuevo.modalidad, nuevo.precio, nuevo.fechaAlta, 'ACTIVA']);
+  showToast('Inscripción guardada en memoria. Añádela en Google Sheets → hoja INSCRIPCIONES.', 'warning');
   closeModal();
   inscripciones();
   showToast('Inscripción registrada ✓', 'success');
@@ -1931,7 +1992,7 @@ async function marcarPagado(id) {
   p.metodo = metodo.toUpperCase();
   p.estadoPdf = 'LISTO PARA EMITIR';
   saveCacheLocal();
-  await updateInSheet('PAGOS', id, [p.estado, p.totalRecibido, p.metodo, p.estadoPdf]);
+  showToast('Pago actualizado en memoria. Para que persista, edita en Google Sheets → hoja PAGOS.', 'warning');
   pagos();
   updateBadges();
   showToast(`Pago ${id} marcado como cobrado ✓`, 'success');
@@ -2001,7 +2062,7 @@ async function guardarPago() {
   };
   DB.pagos.push(nuevo);
   saveCacheLocal();
-  await writeToSheet('PAGOS', [id, nuevo.fecha, nuevo.mes, insId, nuevo.servicio, '', nuevo.alumnoId, nuevo.clienteId, base, igicPct, igicEur, 0, 0, total, nuevo.totalRecibido, estado, nuevo.metodo, '', nuevo.estadoPdf]);
+  showToast('Pago guardado en memoria. Añádelo en Google Sheets → hoja PAGOS.', 'warning');
   closeModal();
   pagos();
   updateBadges();
@@ -2325,7 +2386,11 @@ async function guardarSesion() {
     if (alumno) alumno.camino += esMejor ? 20 : 10;
   });
   saveCacheLocal();
-  await writeToSheet('SESIONES', [id, fecha, sesion.grupo, sesion.monitor, sesion.numero, sesion.ubicacion, sesion.objetivo, checks.join(',')]);
+  await writeToSheet('SESIONES', {
+    ID_SESION: id, FECHA: fecha, GRUPO: sesion.grupo, MONITOR: sesion.monitor,
+    NUMERO_SESION: sesion.numero, UBICACION: sesion.ubicacion,
+    OBJETIVO: sesion.objetivo, NOTAS: checks.join(',')
+  });
   closeModal();
   futbol();
   updateBadges();
@@ -2519,7 +2584,14 @@ async function guardarAsistenciaExtra() {
     if (e) { e.asistenciasMes[dia] = c.checked; }
   });
   saveCacheLocal();
-  await writeToSheet('ASISTENCIAS_EXTRA', [fecha, ...checks.map(c=>c.value+':'+c.checked)]);
+  // Guardar cada asistencia extra como fila individual
+  for (const c of checks) {
+    await writeToSheet('ASISTENCIAS_EXTRA', {
+      ID_ASISTENCIA: 'AE_' + Date.now() + '_' + c.value,
+      FECHA: fecha, ACTIVIDAD: document.getElementById('ae-act')?.value || '',
+      CLAVE_ALUMNO: c.value, PRESENTE: c.checked
+    });
+  }
   closeModal();
   extraescolares();
   showToast('Asistencia registrada ✓', 'success');
@@ -2650,7 +2722,11 @@ async function guardarPersonal() {
   };
   DB.personal.push(nuevo);
   saveCacheLocal();
-  await writeToSheet('PERSONAL', [id, nombre, nuevo.rol, nuevo.email, nuevo.telefono, certFecha, certVence, 'ACTIVO']);
+  await writeToSheet('PERSONAL', {
+    ID_PERSONAL: id, NOMBRE: nombre, ROL: nuevo.rol,
+    EMAIL: nuevo.email, TELEFONO: nuevo.telefono,
+    CERT_DELITOS: certFecha, CERT_VENCE: certVence, ESTADO: 'ACTIVO'
+  });
   closeModal();
   personal();
   showToast('Personal añadido ✓', 'success');
@@ -2685,7 +2761,11 @@ async function actualizarPersonal(id) {
   }
   p.activo = document.getElementById('ep-activo').value === 'true';
   saveCacheLocal();
-  await updateInSheet('PERSONAL', id, [p.nombre, p.email, p.certDelitos, p.certVence, p.activo?'ACTIVO':'INACTIVO']);
+  await updateInSheet('PERSONAL', id, {
+    NOMBRE: p.nombre, EMAIL: p.email,
+    CERT_DELITOS: p.certDelitos, CERT_VENCE: p.certVence,
+    ESTADO: p.activo ? 'ACTIVO' : 'INACTIVO'
+  });
   closeModal();
   personal();
 }
@@ -2760,7 +2840,11 @@ async function guardarIncidencia() {
   };
   DB.incidencias.push(nueva);
   saveCacheLocal();
-  await writeToSheet('INCIDENCIAS', [id, nueva.fecha, alumnoId, nueva.tipo, desc, nueva.notificadoFamilia, false]);
+  await writeToSheet('INCIDENCIAS', {
+    ID_INCIDENCIA: id, FECHA: nueva.fecha, CLAVE_ALUMNO: alumnoId,
+    TIPO: nueva.tipo, DESCRIPCION: desc,
+    NOTIFICADO_FAMILIA: nueva.notificadoFamilia, RESUELTO: false
+  });
   closeModal();
   incidencias();
   updateBadges();
@@ -2771,7 +2855,7 @@ async function resolverIncidencia(id) {
   const i = DB.incidencias.find(x=>x.id===id); if(!i) return;
   i.resuelto = true;
   saveCacheLocal();
-  await updateInSheet('INCIDENCIAS', id, [true]);
+  await updateInSheet('INCIDENCIAS', id, { RESUELTO: true });
   incidencias();
   updateBadges();
   showToast('Incidencia marcada como resuelta ✓', 'success');

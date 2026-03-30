@@ -654,7 +654,7 @@ let currentUser = null;
 let currentPage = 'dashboard';
 let DB = {
   clientes: [], alumnos: [], inscripciones: [], pagos: [],
-  facturas: [], sesiones: [], asistencias: [], personal: [],
+  facturas: [], sesiones: [], asistencias: [], personal: [], gastos: [],
   incidencias: [], servicios: [], presupuestos: []
 };
 let lastSync = null;
@@ -857,24 +857,11 @@ function normalizarDB(raw) {
       };
     });
 
-    // Aplicar puntos Camino SM reales (si el alumno no tiene puntos en Sheet)
-    DB.alumnos.forEach(al => {
-      if (!al.camino || al.camino === 0) {
-        // Buscar por primer nombre
-        const primerNombre = (al.nombre || '').split(' ')[0].toUpperCase();
-        // Casos especiales de dos palabras
-        const nombreCompleto = al.nombre || '';
-        if (nombreCompleto.toUpperCase().includes('DIEGO LÓPEZ')) {
-          al.camino = CAMINO_SM_INICIAL['DIEGO LÓPEZ'] || 0;
-        } else if (nombreCompleto.toUpperCase().includes('LEO SUÁREZ') || nombreCompleto.toUpperCase().includes('LEO S')) {
-          al.camino = CAMINO_SM_INICIAL['LEO SUÁREZ'] || 0;
-        } else if (nombreCompleto.toUpperCase().includes('CALEB')) {
-          al.camino = CAMINO_SM_INICIAL['CALEB'] || 0;
-        } else if (CAMINO_SM_INICIAL.hasOwnProperty(primerNombre)) {
-          al.camino = CAMINO_SM_INICIAL[primerNombre];
-        }
-      }
-    });
+    // Aplicar puntos Camino SM — SOLO alumnos de TECNIFICACIÓN
+    // Los alumnos de extraescolares (Recogida, Multideporte, etc.) quedan en 0
+    // La asignación se hace después de enriquecer con inscripciones — ver paso siguiente
+    // Guardamos para aplicar tras enriquecer
+    DB._pendingCaminoSM = true;
 
     // Enriquecer alumnos con su inscripción activa más reciente
     if (raw.inscripciones && raw.inscripciones.length) {
@@ -895,6 +882,43 @@ function normalizarDB(raw) {
         }
       });
     }
+
+    // ── Camino SM: aplicar SOLO a alumnos de tecnificación ──────
+    // Identificamos por primer nombre (el formato en CLAVE ALUMNO es "id|NOMBRE APELLIDOS")
+    // Para evitar cruces con apellidos, comparamos SOLO el primer token del nombre del alumno
+    // con la clave del mapa. Los casos ambiguos (Diego López, Leo Suárez, Caleb) se tratan
+    // primero porque su primer nombre coincidiría con otras entradas.
+    if (DB._pendingCaminoSM) {
+      delete DB._pendingCaminoSM;
+      DB.alumnos.forEach(al => {
+        // Solo tecnificación
+        if (al.actividad !== 'TECNIFICACIÓN') { al.camino = 0; return; }
+        const nombre = (al.nombre || '').toUpperCase();
+        // Casos con nombre compuesto que necesitan match exacto de las primeras dos palabras
+        const especiales = {
+          'DIEGO LÓPEZ':  ['DIEGO LÓPEZ'],
+          'LEO SUÁREZ':   ['LEO SUÁREZ', 'LEO S'],
+          'DIEGO RODRÍGUEZ': ['DIEGO RODRÍGUEZ', 'DIEGO R'],  // Diego que no es Diego López
+        };
+        let pts = null;
+        // 1. Intentar match de dos palabras (especiales)
+        for (const [clave, patrones] of Object.entries(especiales)) {
+          if (patrones.some(p => nombre.startsWith(p))) {
+            pts = CAMINO_SM_INICIAL[clave] ?? null;
+            break;
+          }
+        }
+        // 2. Si no coincidió, usar solo primer nombre
+        if (pts === null) {
+          const primerNombre = nombre.split(' ')[0];
+          if (CAMINO_SM_INICIAL.hasOwnProperty(primerNombre)) {
+            pts = CAMINO_SM_INICIAL[primerNombre];
+          }
+        }
+        al.camino = pts !== null ? pts : 0;
+      });
+    }
+    // ─────────────────────────────────────────────────────────────
   }
 
   // INSCRIPCIONES: ID_INSCRIPCIÓN, ACTIVA "SÍ"/"NO"
@@ -954,6 +978,34 @@ function normalizarDB(raw) {
         _raw: p
       };
     });
+  }
+
+  // GASTOS — desde hoja GASTOS en BASE DATOS SM
+  // Columnas: ID_GASTO, FECHA, MES, PROVEEDOR, CONCEPTO,
+  //           CATEGORÍA_GASTO, IMPORTE, MÉTODO_PAGO, ASOCIADO_A, OBSERVACIONES
+  if (raw.gastos && raw.gastos.length) {
+    DB.gastos = raw.gastos
+      .filter(g => g.ID_GASTO || g.CONCEPTO)   // ignorar filas vacías
+      .map(g => {
+        // IMPORTE puede venir como "143,33 €" o como número
+        const importeRaw = String(g.IMPORTE || '0')
+          .replace(/[€\s]/g, '')
+          .replace(',', '.');
+        const importe = parseFloat(importeRaw) || 0;
+        return {
+          id:          g.ID_GASTO         || '',
+          fecha:       g.FECHA            || '',
+          mes:         String(g.MES       || '').toLowerCase().trim(),
+          proveedor:   g.PROVEEDOR        || '',
+          concepto:    g.CONCEPTO         || '',
+          categoria:   g['CATEGORÍA_GASTO'] || g.CATEGORIA_GASTO || '',
+          importe,
+          metodo:      g['MÉTODO_PAGO']   || g.METODO_PAGO || '',
+          asociadoA:   g.ASOCIADO_A       || '',
+          observaciones: g.OBSERVACIONES  || '',
+          _raw: g
+        };
+      });
   }
 
   // PERSONAL — desde hoja PERSONAL
@@ -1503,11 +1555,17 @@ function dashboard() {
   const alumnosActivos= DB.alumnos.filter(a=>a.activo===true||a.activo==='SÍ'||a.activo==='SI').length;
   const inscrActivas  = DB.inscripciones.filter(i=>i.estado==='ACTIVA'||String(i.ACTIVA||'').toUpperCase()==='SÍ'||String(i.ACTIVA||'').toUpperCase()==='SI').length;
 
-  // Gastos mensuales estimados — editar hasta tener hoja GASTOS en Sheets
-  const GASTOS_MENSUALES = { personal:1200, instalaciones:180, material:60, seguros:45, otros:30 };
-  const GASTOS_LABELS    = { personal:'Personal', instalaciones:'Instalaciones', material:'Material', seguros:'Seguros', otros:'Otros' };
-  const totalGastos    = Object.values(GASTOS_MENSUALES).reduce((s,v)=>s+v,0);
+  // ─── GASTOS REALES desde hoja GASTOS en BASE DATOS SM ──────────
+  // Filtra por mes actual y agrupa por CATEGORÍA_GASTO
+  const gastosMesActual = DB.gastos.filter(g => g.mes === mesActual.toLowerCase());
+  const categoriasGasto = {};
+  gastosMesActual.forEach(g => {
+    const cat = g.categoria || 'OTROS';
+    categoriasGasto[cat] = (categoriasGasto[cat] || 0) + g.importe;
+  });
+  const totalGastos    = gastosMesActual.reduce((s,g) => s + g.importe, 0);
   const rendimientoMes = totalCobrado - totalGastos;
+  const hayGastos      = gastosMesActual.length > 0;
 
   // Próximos cumpleaños
   const hoy = new Date();
@@ -1527,15 +1585,20 @@ function dashboard() {
   // Top Camino SM
   const topCamino = [...DB.alumnos].filter(a=>a.activo).sort((a,b)=>b.camino-a.camino).slice(0,5);
 
-  // Histórico 6 meses
+  // Histórico 6 meses — ingresos reales + gastos reales desde Sheets
   const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const historico = Array.from({length:6},(_,i)=>{
     const d = new Date(hoy.getFullYear(), hoy.getMonth()-5+i, 1);
-    const mesLabel = MESES_ES[d.getMonth()];
-    const ingresos = DB.pagos
-      .filter(p=>(p.estado||'').toUpperCase()==='PAGADO' && (p.mes||'').toLowerCase().includes(mesLabel.toLowerCase()))
-      .reduce((s,p)=>s+(parseFloat(p.totalRecibido)||0),0);
-    return { mesLabel: mesLabel.substring(0,3), ingresos, gastos: totalGastos };
+    const mesLabel  = MESES_ES[d.getMonth()];
+    const mesKey    = mesLabel.toLowerCase();
+    const ingresos  = DB.pagos
+      .filter(p => (p.estado||'').toUpperCase()==='PAGADO' &&
+                   (p.mes||'').toLowerCase().includes(mesKey))
+      .reduce((s,p) => s+(parseFloat(p.totalRecibido)||0), 0);
+    const gastosmes = DB.gastos
+      .filter(g => g.mes === mesKey)
+      .reduce((s,g) => s+g.importe, 0);
+    return { mesLabel: mesLabel.substring(0,3), ingresos, gastos: gastosmes || 0 };
   });
   const maxBar = Math.max(...historico.map(h=>Math.max(h.ingresos,h.gastos)), 1);
 
@@ -1577,27 +1640,40 @@ function dashboard() {
       <div class="card">
         <div class="card-header"><span>💸</span><div class="card-title">Gastos ${fmtMonth(mesActual)}</div></div>
         <div class="card-body">
-          ${Object.entries(GASTOS_MENSUALES).map(([k,v])=>{
-            const pct=Math.round(v/totalGastos*100);
-            return `<div style="margin-bottom:10px">
-              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
-                <span style="color:var(--grey-2)">${GASTOS_LABELS[k]||k}</span>
-                <span style="font-weight:600">${fmtEur(v)} <span style="color:var(--grey-2);font-weight:400">(${pct}%)</span></span>
-              </div>
-              <div style="height:6px;background:#f0f0f0;border-radius:3px">
-                <div style="height:6px;width:${pct}%;background:${pct>50?'var(--green)':'#90caf9'};border-radius:3px"></div>
-              </div>
-            </div>`;
-          }).join('')}
+          ${hayGastos
+            ? Object.entries(categoriasGasto)
+                .sort((a,b) => b[1]-a[1])
+                .map(([cat,val]) => {
+                  const pct = totalGastos > 0 ? Math.round(val/totalGastos*100) : 0;
+                  return `<div style="margin-bottom:10px">
+                    <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+                      <span style="color:var(--grey-2)">${cat}</span>
+                      <span style="font-weight:600">${fmtEur(val)}
+                        <span style="color:var(--grey-2);font-weight:400">(${pct}%)</span>
+                      </span>
+                    </div>
+                    <div style="height:6px;background:#f0f0f0;border-radius:3px">
+                      <div style="height:6px;width:${pct}%;background:#ef9a9a;border-radius:3px"></div>
+                    </div>
+                  </div>`;
+                }).join('')
+            : `<div style="font-size:12px;color:var(--grey-2);padding:1rem 0;text-align:center">
+                Sin gastos registrados en ${fmtMonth(mesActual)}<br>
+                <span style="font-size:11px">Comprueba que la hoja GASTOS tiene datos para este mes</span>
+              </div>`
+          }
           <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid #f0f0f0;font-weight:700;font-size:13px">
-            <span>Total gastos</span><span style="color:var(--red)">-${fmtEur(totalGastos)}</span>
+            <span>Total gastos</span>
+            <span style="color:var(--red)">${hayGastos ? '-'+fmtEur(totalGastos) : '—'}</span>
           </div>
           <div style="display:flex;justify-content:space-between;margin-top:6px;font-weight:700;font-size:14px">
             <span>Resultado neto</span>
-            <span style="color:${rendimientoMes>=0?'var(--green)':'var(--red)'}">${rendimientoMes>=0?'+':''}${fmtEur(rendimientoMes)}</span>
+            <span style="color:${rendimientoMes>=0?'var(--green)':'var(--red)'}">
+              ${hayGastos ? (rendimientoMes>=0?'+':'')+fmtEur(rendimientoMes) : '—'}
+            </span>
           </div>
-          <div style="margin-top:8px;padding:6px 10px;background:#f9f9f9;border-radius:6px;font-size:10px;color:var(--grey-2)">
-            💡 Edita GASTOS_MENSUALES en el código hasta añadir hoja GASTOS en Sheets
+          <div style="margin-top:8px;padding:5px 8px;background:#f0f8f0;border-radius:5px;font-size:10px;color:var(--grey-2)">
+            📊 Datos reales · hoja GASTOS · ${gastosMesActual.length} registros en ${fmtMonth(mesActual)}
           </div>
         </div>
       </div>
@@ -2637,19 +2713,18 @@ function modalNuevaSesion() {
 
   const nextNum = DB.sesiones.length ? Math.max(...DB.sesiones.map(s => parseInt(s.numero)||0))+1 : 1;
   const hoy = new Date().toISOString().split('T')[0];
+  const DIAS_SEMANA = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const dia = new Date().getDay();
-  const grupoPorDia = ['N/A','Lunes','N/A','Miércoles','N/A','Viernes','N/A'][dia] || 'Miércoles';
+  const grupoPorDia = DIAS_SEMANA[dia] || 'Lunes';
 
   openModal('Nueva sesión SM Fútbol', `
     <div class="form-grid">
       <div class="field-group"><label class="field-label">Fecha<span class="req">*</span></label>
         <input class="field-input" id="ns-fecha" type="date" value="${hoy}"></div>
       <div class="field-group"><label class="field-label">Grupo</label>
-        <select class="field-select" id="ns-grupo">
-          <option ${grupoPorDia==='Lunes'?'selected':''}>Lunes</option>
-          <option ${grupoPorDia==='Miércoles'?'selected':''}>Miércoles</option>
-          <option ${grupoPorDia==='Viernes'?'selected':''}>Viernes</option>
-        </select>
+        <input class="field-input" id="ns-grupo" readonly
+               style="background:#f5f5f5;cursor:default;color:var(--grey-2)"
+               value="${grupoPorDia}" title="Se calcula automáticamente según la fecha">
       </div>
       <div class="field-group"><label class="field-label">Monitor</label>
         <input class="field-input" id="ns-monitor" value="Samy Martín"></div>
@@ -2730,6 +2805,20 @@ function modalNuevaSesion() {
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" onclick="guardarSesion()">💾 Guardar sesión</button>`
   );
+
+  // Actualizar grupo automáticamente cuando cambia la fecha
+  setTimeout(() => {
+    const fechaInput = document.getElementById('ns-fecha');
+    const grupoInput = document.getElementById('ns-grupo');
+    if (fechaInput && grupoInput) {
+      const actualizarGrupo = () => {
+        const d = new Date(fechaInput.value + 'T12:00:00');
+        const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+        grupoInput.value = DIAS[d.getDay()] || '';
+      };
+      fechaInput.addEventListener('change', actualizarGrupo);
+    }
+  }, 100);
 
   // Estado de evaluaciones en memoria
   window._evalState = {};

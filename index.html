@@ -885,29 +885,52 @@ function normalizarDB(raw) {
     });
   }
 
-  // PERSONAL — desde hoja PERSONAL (antes MONITORES)
+  // PERSONAL — desde hoja PERSONAL
+  // Un monitor puede estar en múltiples filas (una por actividad/centro)
+  // Agrupar por ID_MONITOR para mostrar una sola ficha por persona
   if (raw.personal && raw.personal.length) {
-    DB.personal = raw.personal.map(p => {
-      const nombre = ((p.NOMBRE||'') + ' ' + (p.APELLIDOS||'')).trim() || p.NOMBRE || '';
-      const activo = String(p.ESTADO||'').toUpperCase() === 'ACTIVO' || String(p.ESTADO||'').toUpperCase() === 'SÍ' || String(p.ESTADO||'').toUpperCase() === 'SI' || p.ESTADO === '' || p.ESTADO === undefined;
-      const certDelitos = p.CERT_DELITOS || p['CERT. DELITOS'] || p.CERTIFICADO || '';
-      let certVence = p.CERT_VENCE || p['CERT. VENCE'] || p['FECHA VENCIMIENTO'] || '';
-      // Si no hay fecha de vencimiento, calcular +1 año desde emisión
-      if (!certVence && certDelitos) {
-        try { certVence = new Date(new Date(certDelitos).setFullYear(new Date(certDelitos).getFullYear()+1)).toISOString().split('T')[0]; } catch(e) {}
+    const personaMap = {};
+    raw.personal.filter(p => p.ID_MONITOR || p.NOMBRE).forEach(p => {
+      const idKey = String(p.ID_MONITOR || '').trim() || ((p.NOMBRE||'') + (p.APELLIDOS||'')).trim();
+      if (!idKey) return;
+      const nombre = ((p.NOMBRE||'') + ' ' + (p.APELLIDOS||'')).trim();
+      const activo = String(p.ACTIVO||p.ESTADO||'').toUpperCase() === 'SÍ' ||
+                     String(p.ACTIVO||p.ESTADO||'').toUpperCase() === 'SI'  ||
+                     String(p.ACTIVO||p.ESTADO||'').toUpperCase() === 'ACTIVO';
+      const certDelitos = p.CNDS || p.CERT_DELITOS || p['CERT. DELITOS'] || '';
+      // CNDS = string "SÍ"/"NO" en la hoja PERSONAL — no es fecha
+      // Fecha de antigüedad como proxy de inicio de cert
+      const antigüedad = p.ANTIGÜEDAD || p['FECHA ANTIGÜEDAD'] || '';
+      let certVence = p.CERT_VENCE || p['CERT. VENCE'] || '';
+      // Si CNDS es "SÍ" pero no hay fecha, usamos antigüedad +1 año como estimación
+      if (!certVence && certDelitos === 'SÍ' && antigüedad) {
+        try { certVence = new Date(new Date(antigüedad).setFullYear(new Date(antigüedad).getFullYear()+1)).toISOString().split('T')[0]; } catch(e) {}
       }
-      return {
-        id: String(p.ID_PERSONAL || p.ID || nombre),
-        nombre: nombre.toUpperCase(),
-        rol: p.ROL || p.CARGO || 'Monitor',
-        email: p.EMAIL || p['E-MAIL'] || '',
-        telefono: String(p.TELEFONO || p['TELÉFONO'] || p.TEL || ''),
-        certDelitos,
-        certVence,
-        activo,
-        _raw: p
-      };
+      const actividad = String(p.ACTIVIDAD || p.ROL || '').trim();
+      const centro    = String(p['CENTRO/CANCHA'] || p.CENTRO || '').trim();
+      if (!personaMap[idKey]) {
+        personaMap[idKey] = {
+          id:         idKey,
+          nombre:     nombre.toUpperCase(),
+          rol:        p.ROL || p.CARGO || 'Monitor',
+          email:      p.EMAIL || p['E-MAIL'] || '',
+          telefono:   String(p.TELÉFONO || p.TELEFONO || p['TELÉFONO'] || ''),
+          certDelitos,
+          certVence,
+          activo,
+          actividades: [],
+          _raw: p
+        };
+      }
+      // Añadir actividad a la lista de esta persona
+      if (actividad) {
+        const label = centro ? `${actividad} (${centro})` : actividad;
+        if (!personaMap[idKey].actividades.includes(label)) {
+          personaMap[idKey].actividades.push(label);
+        }
+      }
     });
+    DB.personal = Object.values(personaMap);
   }
 
   // SESIONES SM Fútbol — desde hoja SESIONES (estructura real de Sheets)
@@ -1205,6 +1228,18 @@ const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleDa
 const fmtMonth = m => ({ enero:'Enero',febrero:'Febrero',marzo:'Marzo',abril:'Abril',mayo:'Mayo',junio:'Junio',julio:'Julio',agosto:'Agosto',septiembre:'Septiembre',octubre:'Octubre',noviembre:'Noviembre',diciembre:'Diciembre' })[String(m||'').toLowerCase()] || m || '—';
 const getInitials = n => n ? String(n).split(' ').filter(Boolean).slice(0,2).map(p=>p[0]).join('').toUpperCase() : '??';
 const daysBetween = (a,b) => Math.ceil((b-a)/(1000*60*60*24));
+
+// Calcular edad exacta (día y mes, no solo año)
+function calcEdad(fechaNac) {
+  if (!fechaNac) return null;
+  const hoy = new Date();
+  const nac = new Date(fechaNac);
+  if (isNaN(nac.getTime())) return null;
+  let edad = hoy.getFullYear() - nac.getFullYear();
+  const mHoy = hoy.getMonth(), mNac = nac.getMonth();
+  if (mHoy < mNac || (mHoy === mNac && hoy.getDate() < nac.getDate())) edad--;
+  return edad;
+}
 
 // Buscar siempre por string — IDs reales son números, la app los trata como string
 function getAlumno(id) { return DB.alumnos.find(a => String(a.id) === String(id)) || {}; }
@@ -1594,7 +1629,7 @@ function alumnos() {
   const render = () => {
     document.getElementById('alumnos-table').innerHTML = filtered.map(a => {
       const c = getCliente(a.clienteId);
-      const edad = a.fechaNac ? (new Date().getFullYear() - new Date(a.fechaNac).getFullYear()) : '?';
+      const edad = calcEdad(a.fechaNac) ?? '?';
       return `<tr onclick="verAlumno('${a.id}')">
         <td>
           <div style="display:flex;align-items:center;gap:10px">
@@ -1646,7 +1681,7 @@ function verAlumno(id) {
   const asist = DB.asistencias.filter(x => x.alumnoId === id);
   const presentes = asist.filter(x=>x.presente).length;
   const pct = asist.length ? Math.round(presentes/asist.length*100) : 0;
-  const edad = a.fechaNac ? (new Date().getFullYear() - new Date(a.fechaNac).getFullYear()) : '?';
+  const edad = calcEdad(a.fechaNac) ?? '?';
   openModal(`Ficha: ${a.nombre}`, `
     <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
       ${a.foto ? `<img src="${a.foto}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--green-bg)">` 
@@ -2192,6 +2227,7 @@ function futbol() {
             <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
               <span class="badge badge-grey">${presentes}/${s.alumnos.length} presentes</span>
               <button class="btn btn-ghost btn-sm" onclick="verSesion('${s.id}')">Ver detalle →</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="eliminarSesion('${s.id}')">🗑</button>
             </div>
           </div>
           <div class="card-body" style="padding:.75rem 1.25rem">
@@ -2279,6 +2315,15 @@ function futbol() {
   };
 }
 
+function eliminarSesion(id) {
+  if (!confirm('¿Eliminar esta sesión de la app? Los registros en Google Sheets se conservan.')) return;
+  DB.sesiones = DB.sesiones.filter(s => s.id !== id);
+  DB.asistencias = DB.asistencias.filter(a => a.sesionId !== id);
+  saveCacheLocal();
+  futbol();
+  showToast('Sesión eliminada de la app ✓', 'success');
+}
+
 function verSesion(id) {
   const s = DB.sesiones.find(x=>x.id===id); if (!s) return;
   const asistencias = DB.asistencias.filter(a=>a.sesionId===id);
@@ -2313,14 +2358,26 @@ function verSesion(id) {
 }
 
 function modalNuevaSesion() {
-  const alumnosFutbol = DB.alumnos.filter(a=>a.activo&&a.actividad==='TECNIFICACIÓN');
-  const nextNum = DB.sesiones.length ? Math.max(...DB.sesiones.map(s=>s.numero))+1 : 1;
+  // Alumnos de tecnificación: los que tienen inscripción activa en TECNIFICACIÓN
+  const idsTecni = new Set(
+    DB.inscripciones
+      .filter(i => i.estado === 'ACTIVA' && String(i.servicio||'').toUpperCase().includes('TECNIFICACIÓN'))
+      .map(i => String(i.alumnoId))
+  );
+  const alumnosFutbol = DB.alumnos.filter(a => {
+    const activo = a.activo === true || String(a.activo||'').toUpperCase() === 'SÍ';
+    return activo && (idsTecni.has(String(a.id)) || a.actividad === 'TECNIFICACIÓN');
+  }).sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
+
+  const nextNum = DB.sesiones.length ? Math.max(...DB.sesiones.map(s => parseInt(s.numero)||0))+1 : 1;
   const hoy = new Date().toISOString().split('T')[0];
   const dia = new Date().getDay();
   const grupoPorDia = ['N/A','Lunes','N/A','Miércoles','N/A','Viernes','N/A'][dia] || 'Miércoles';
+
   openModal('Nueva sesión SM Fútbol', `
     <div class="form-grid">
-      <div class="field-group"><label class="field-label">Fecha<span class="req">*</span></label><input class="field-input" id="ns-fecha" type="date" value="${hoy}"></div>
+      <div class="field-group"><label class="field-label">Fecha<span class="req">*</span></label>
+        <input class="field-input" id="ns-fecha" type="date" value="${hoy}"></div>
       <div class="field-group"><label class="field-label">Grupo</label>
         <select class="field-select" id="ns-grupo">
           <option ${grupoPorDia==='Lunes'?'selected':''}>Lunes</option>
@@ -2328,73 +2385,206 @@ function modalNuevaSesion() {
           <option ${grupoPorDia==='Viernes'?'selected':''}>Viernes</option>
         </select>
       </div>
-      <div class="field-group"><label class="field-label">Monitor</label><input class="field-input" id="ns-monitor" value="Samy"></div>
-      <div class="field-group"><label class="field-label">Nº sesión (auto)</label><input class="field-input" id="ns-num" type="number" value="${nextNum}"></div>
+      <div class="field-group"><label class="field-label">Monitor</label>
+        <input class="field-input" id="ns-monitor" value="Samy Martín"></div>
+      <div class="field-group"><label class="field-label">Nº sesión</label>
+        <input class="field-input" id="ns-num" type="number" value="${nextNum}"></div>
       <div class="field-group"><label class="field-label">Ubicación</label>
         <select class="field-select" id="ns-ubicacion">
           <option>Cancha La Atalaya</option><option>Cuevas Torres</option>
         </select>
       </div>
-      <div class="field-group"><label class="field-label">Objetivo de sesión</label><input class="field-input" id="ns-objetivo" placeholder="Ej: Control y conducción"></div>
-      <div class="field-group full">
-        <label class="field-label">Alumnos asistentes</label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;max-height:200px;overflow-y:auto;padding:4px">
-          ${alumnosFutbol.map(a=>`
-            <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;border:1px solid var(--grey);cursor:pointer;font-size:13px">
-              <input type="checkbox" value="${a.id}" class="ns-alumno-check" style="width:auto">
-              <div class="avatar avatar-sm">${getInitials(a.nombre)}</div>
-              ${a.nombre}
-            </label>`).join('')}
-        </div>
+      <div class="field-group"><label class="field-label">Objetivo de sesión</label>
+        <input class="field-input" id="ns-objetivo" placeholder="Ej: Control y conducción"></div>
+    </div>
+
+    <div style="margin-top:1.25rem">
+      <div style="font-size:13px;font-weight:600;margin-bottom:.75rem;color:var(--black)">
+        Fichas de jugadores
+        <span style="font-weight:400;font-size:11px;color:var(--grey-2);margin-left:8px">
+          Marca ✓ Asistencia · Evalúa del 1-5 · ⭐ Mejor alumno
+        </span>
       </div>
-      <div class="field-group full"><label class="field-label">Mejor alumno (Camino SM +10)</label>
-        <select class="field-select" id="ns-mejor">
-          <option value="">— Seleccionar al finalizar —</option>
-          ${alumnosFutbol.map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('')}
-        </select>
+      <div id="ns-fichas-lista">
+        ${alumnosFutbol.map(a => {
+          const edad = calcEdad(a.fechaNac);
+          const edadStr = edad !== null ? `, ${edad} años` : '';
+          return `<div class="ns-ficha" data-id="${a.id}" style="border:1px solid var(--grey);border-radius:8px;margin-bottom:8px;overflow:hidden">
+            <!-- Cabecera ficha: asistencia + nombre + mejor alumno -->
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:#fafafa;cursor:pointer"
+                 onclick="toggleFichaEval('${a.id}')">
+              <input type="checkbox" class="ns-asist-check" value="${a.id}"
+                     onclick="event.stopPropagation();actualizarFicha('${a.id}')"
+                     style="width:18px;height:18px;accent-color:var(--green);cursor:pointer">
+              <div class="avatar avatar-sm" style="min-width:32px">${getInitials(a.nombre)}</div>
+              <div style="flex:1;min-width:0">
+                <div style="font-weight:600;font-size:13px">${a.nombre}</div>
+                <div style="font-size:11px;color:var(--grey-2)">${a.modalidad||'Tecnificación'}${edadStr}</div>
+              </div>
+              <!-- Mejor alumno: checkbox con estrella -->
+              <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;color:var(--grey-2)"
+                     onclick="event.stopPropagation()">
+                <input type="radio" name="ns-mejor" value="${a.id}" class="ns-mejor-radio"
+                       style="width:auto;accent-color:#f59e0b">
+                ⭐ Mejor
+              </label>
+              <span style="font-size:11px;color:var(--grey-2);margin-left:4px">▼</span>
+            </div>
+            <!-- Panel evaluación (oculto hasta marcar asistencia) -->
+            <div id="eval-${a.id}" style="display:none;padding:10px 12px;background:#fff;border-top:1px solid #f0f0f0">
+              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:8px">
+                ${['Técnica','Decisión','Compet.','Actitud','Cansancio'].map((campo, ci) => {
+                  const fieldId = ['tecnica','decision','competitividad','actitud','cansancio'][ci];
+                  const isCansancio = fieldId === 'cansancio';
+                  return `<div style="text-align:center">
+                    <div style="font-size:10px;color:var(--grey-2);margin-bottom:3px">${campo}</div>
+                    ${isCansancio
+                      ? `<select id="ns-${fieldId}-${a.id}" style="width:100%;font-size:11px;padding:3px;border:1px solid var(--grey);border-radius:4px">
+                           <option value="Bien">Bien</option>
+                           <option value="Regular">Regular</option>
+                           <option value="Cansado">Cansado</option>
+                         </select>`
+                      : `<div style="display:flex;gap:2px;justify-content:center">
+                           ${[1,2,3,4,5].map(n=>`<button type="button" class="eval-star" data-field="${fieldId}" data-alumno="${a.id}" data-val="${n}"
+                             onclick="setEval('${a.id}','${fieldId}',${n})"
+                             style="width:20px;height:20px;border:1px solid var(--grey);border-radius:3px;background:#fff;font-size:10px;cursor:pointer;padding:0">${n}</button>`).join('')}
+                         </div>`
+                    }
+                  </div>`;
+                }).join('')}
+              </div>
+              <input type="text" id="ns-notas-${a.id}" placeholder="Observaciones (opcional)"
+                     style="width:100%;padding:5px 8px;border:1px solid var(--grey);border-radius:5px;font-size:12px">
+            </div>
+          </div>`;
+        }).join('')}
       </div>
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-     <button class="btn btn-primary" onclick="guardarSesion()">Guardar sesión</button>`);
+     <button class="btn btn-primary" onclick="guardarSesion()">💾 Guardar sesión</button>`
+  );
+
+  // Estado de evaluaciones en memoria
+  window._evalState = {};
+  alumnosFutbol.forEach(a => {
+    window._evalState[a.id] = { tecnica:0, decision:0, competitividad:0, actitud:'Bien', cansancio:'Bien' };
+  });
 }
 
+// Abre/cierra panel evaluación de un alumno
+window.toggleFichaEval = function(id) {
+  const panel = document.getElementById('eval-' + id);
+  if (panel) panel.style.display = panel.style.display === 'none' ? '' : 'none';
+};
+
+// Muestra asistencia → abre panel evaluación automáticamente
+window.actualizarFicha = function(id) {
+  const check = document.querySelector('.ns-asist-check[value="' + id + '"]');
+  const panel = document.getElementById('eval-' + id);
+  if (panel) panel.style.display = check?.checked ? '' : 'none';
+};
+
+// Guarda valor numérico de evaluación y resalta el botón seleccionado
+window.setEval = function(alumnoId, field, val) {
+  if (!window._evalState) window._evalState = {};
+  if (!window._evalState[alumnoId]) window._evalState[alumnoId] = {};
+  window._evalState[alumnoId][field] = val;
+  // Resaltar botón seleccionado
+  document.querySelectorAll(`.eval-star[data-alumno="${alumnoId}"][data-field="${field}"]`).forEach(btn => {
+    btn.style.background = parseInt(btn.dataset.val) <= val ? 'var(--green)' : '#fff';
+    btn.style.color = parseInt(btn.dataset.val) <= val ? '#fff' : '#000';
+    btn.style.borderColor = parseInt(btn.dataset.val) <= val ? 'var(--green)' : 'var(--grey)';
+  });
+};
+
 async function guardarSesion() {
-  const fecha = document.getElementById('ns-fecha').value;
+  const fecha = document.getElementById('ns-fecha')?.value;
   if (!fecha) { showToast('La fecha es obligatoria', 'error'); return; }
-  const checks = [...document.querySelectorAll('.ns-alumno-check:checked')].map(c=>c.value);
-  if (!checks.length) { showToast('Selecciona al menos un alumno', 'error'); return; }
-  const id = 'SES' + String(DB.sesiones.length+1).padStart(3,'0');
-  const mejor = document.getElementById('ns-mejor').value;
-  const sesion = {
-    id, fecha, grupo: document.getElementById('ns-grupo').value,
-    monitor: document.getElementById('ns-monitor').value,
-    numero: parseInt(document.getElementById('ns-num').value),
-    ubicacion: document.getElementById('ns-ubicacion').value,
-    objetivo: document.getElementById('ns-objetivo').value,
-    alumnos: checks
-  };
+
+  const asistentes = [...document.querySelectorAll('.ns-asist-check:checked')].map(c => c.value);
+  if (!asistentes.length) { showToast('Marca al menos un alumno como asistente', 'error'); return; }
+
+  // Mejor alumno — radio button
+  const mejorRadio = document.querySelector('.ns-mejor-radio:checked');
+  const mejorId = mejorRadio ? mejorRadio.value : '';
+
+  const numeroSesion = parseInt(document.getElementById('ns-num')?.value) || 1;
+  const grupo        = document.getElementById('ns-grupo')?.value || '';
+  const monitor      = document.getElementById('ns-monitor')?.value || 'Samy';
+  const ubicacion    = document.getElementById('ns-ubicacion')?.value || '';
+  const objetivo     = document.getElementById('ns-objetivo')?.value || '';
+
+  // ID de sesión basado en número para coincidir con Sheets
+  const sesionId = 'SES' + String(numeroSesion).padStart(3,'0');
+
+  // Sesión en memoria de la app
+  const sesion = { id: sesionId, fecha, grupo, monitor, numero: numeroSesion, ubicacion, objetivo, alumnos: asistentes };
   DB.sesiones.push(sesion);
-  // Crear asistencias
-  checks.forEach(aid => {
-    const esMejor = aid === mejor;
+
+  // Guardar UNA FILA POR ALUMNO en Sheets (según estructura preparada)
+  const rows = [];
+  for (const aid of asistentes) {
+    const alumno     = getAlumno(aid);
+    const esMejor    = aid === mejorId;
+    const evalState  = (window._evalState || {})[aid] || {};
+    const cansancio  = document.getElementById('ns-cansancio-' + aid)?.value || evalState.cansancio || '';
+    const evaluacion = {
+      tecnica:        evalState.tecnica        || 0,
+      decision:       evalState.decision       || 0,
+      competitividad: evalState.competitividad || 0,
+      actitud:        evalState.actitud        || 0,
+      cansancio
+    };
+    const notas = document.getElementById('ns-notas-' + aid)?.value || '';
+    const puntosBase  = 10;
+    const puntosMejor = esMejor ? 10 : 0;
+    const puntosTotal = puntosBase + puntosMejor;
+
+    // Registro en DB local
+    const asistId = 'ASI' + String(DB.asistencias.length+1).padStart(4,'0');
     DB.asistencias.push({
-      id: 'ASI'+String(DB.asistencias.length+1).padStart(3,'0'),
-      sesionId: id, alumnoId: aid, presente: true,
-      evaluacion: null, puntosCamino: esMejor ? 20 : 10
+      id: asistId, sesionId, alumnoId: aid,
+      claveAlumno: alumno.claveAlumno || aid,
+      presente: true, evaluacion, puntosCamino: puntosTotal
     });
-    const alumno = DB.alumnos.find(a=>a.id===aid);
-    if (alumno) alumno.camino += esMejor ? 20 : 10;
-  });
+    if (alumno.camino !== undefined) alumno.camino += puntosTotal;
+
+    // Fila para Sheets — una fila por alumno, headers según la hoja SESIONES SM FÚTBOL
+    rows.push({
+      ID_SESION:      sesionId,
+      FECHA:          fecha,
+      NUMERO_SESION:  numeroSesion,
+      GRUPO:          grupo,
+      MONITOR:        monitor,
+      UBICACION:      ubicacion,
+      OBJETIVO:       objetivo,
+      CLAVE_ALUMNO:   alumno.claveAlumno || aid,
+      NOMBRE_ALUMNO:  alumno.nombre || '',
+      PRESENTE:       true,
+      TECNICA:        evaluacion.tecnica,
+      DECISION:       evaluacion.decision,
+      COMPETITIVIDAD: evaluacion.competitividad,
+      ACTITUD:        evaluacion.actitud,
+      CANSANCIO:      evaluacion.cansancio,
+      MEJOR_ALUMNO:   esMejor,
+      PUNTOS_CAMINO:  puntosTotal,
+      NOTAS:          notas
+    });
+  }
+
   saveCacheLocal();
-  await writeToSheet('SESIONES', {
-    ID_SESION: id, FECHA: fecha, GRUPO: sesion.grupo, MONITOR: sesion.monitor,
-    NUMERO_SESION: sesion.numero, UBICACION: sesion.ubicacion,
-    OBJETIVO: sesion.objetivo, NOTAS: checks.join(',')
-  });
   closeModal();
   futbol();
   updateBadges();
-  showToast(`Sesión #${sesion.numero} registrada ✓`, 'success');
+  showToast(`Sesión #${numeroSesion} guardada en memoria · Enviando a Sheets…`, 'success');
+
+  // Enviar cada fila a Sheets de forma asíncrona (sin bloquear la UI)
+  let filas = 0;
+  for (const rowObj of rows) {
+    const res = await writeToSheet('SESIONES', rowObj);
+    if (res.ok && !res.demo && !res.readonly) filas++;
+  }
+  if (filas > 0) showToast(`${filas} filas registradas en Google Sheets ✓`, 'success');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -2660,24 +2850,32 @@ function personal() {
   const rows = lista.map(p => {
     let certClass = 'badge-grey';
     let certLabel = 'Sin certificado';
-    if (p.certVence) {
-      try {
-        const dias = daysBetween(hoy, new Date(p.certVence));
-        certClass = dias < 0 ? 'badge-red' : dias < 30 ? 'badge-red' : dias < 60 ? 'badge-orange' : 'badge-green';
-        certLabel = dias < 0 ? 'VENCIDO' : `Vence ${fmtDate(p.certVence)} · ${dias}d`;
-      } catch(e) { certLabel = p.certVence; }
+    const tieneCert = p.certDelitos === 'SÍ' || (p.certDelitos && p.certDelitos !== 'NO' && p.certDelitos !== '');
+    if (tieneCert) {
+      if (p.certVence) {
+        try {
+          const dias = daysBetween(hoy, new Date(p.certVence));
+          certClass = dias < 0 ? 'badge-red' : dias < 30 ? 'badge-red' : dias < 60 ? 'badge-orange' : 'badge-green';
+          certLabel = dias < 0 ? 'VENCIDO' : `Vence ${fmtDate(p.certVence)} · ${dias}d`;
+        } catch(e) { certLabel = 'Cert. OK'; certClass = 'badge-green'; }
+      } else {
+        certClass = 'badge-green'; certLabel = 'Cert. en vigor';
+      }
     }
+    const activBadges = (p.actividades||[]).map(act =>
+      `<span class="badge badge-blue" style="font-size:10px;margin:1px">${act}</span>`
+    ).join('');
     return `<div style="display:flex;align-items:center;gap:14px;padding:14px 1.25rem;border-bottom:1px solid #f5f5f5">
-      <div class="avatar" style="background:${p.activo?'var(--green-bg)':'#f0f0f0'};color:${p.activo?'var(--green-dim)':'var(--grey-2)'}">${getInitials(p.nombre)}</div>
-      <div style="flex:1">
+      <div class="avatar" style="background:${p.activo?'var(--green-bg)':'#f0f0f0'};color:${p.activo?'var(--green-dim)':'var(--grey-2)'};min-width:40px">${getInitials(p.nombre)}</div>
+      <div style="flex:1;min-width:0">
         <div style="font-weight:600">${p.nombre||'—'}</div>
-        <div style="font-size:12px;color:var(--grey-2)">${p.rol||'—'} · ${p.email||'Sin email'}</div>
+        <div style="font-size:12px;color:var(--grey-2);margin-bottom:4px">${p.email||'Sin email'} · ${p.telefono||''}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:2px">${activBadges || `<span style="font-size:11px;color:var(--grey-2)">${p.rol||'Monitor'}</span>`}</div>
       </div>
-      <div style="text-align:right">
+      <div style="text-align:right;flex-shrink:0">
         <div style="font-size:11px;color:var(--grey-2);margin-bottom:3px">Cert. delitos sexuales</div>
         <span class="badge ${certClass}">${certLabel}</span>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="modalEditarPersonal('${p.id}')">Editar</button>
     </div>`;
   }).join('');
   document.getElementById('page-content').innerHTML = `
@@ -2686,7 +2884,7 @@ function personal() {
         <span style="margin-left:auto;font-size:12px;color:var(--grey-2)">${lista.length} personas</span>
       </div>
       <div class="card-body" style="padding:0">
-        ${rows || '<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Sin personal registrado</div><div class="empty-desc">La hoja PERSONAL en tu Sheet está vacía o no tiene datos.</div></div>'}
+        ${rows || '<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-title">Sin personal registrado</div><div class="empty-desc">La hoja PERSONAL en tu Sheet está vacía o no tiene datos. Comprueba que el nombre de la pestaña es exactamente PERSONAL.</div></div>'}
       </div>
     </div>`;
 }
@@ -2790,7 +2988,10 @@ function incidencias() {
               <td style="font-size:12px;max-width:220px">${i.descripcion}</td>
               <td>${i.notificadoFamilia?'<span class="badge badge-green">✓ Notificada</span>':'<span class="badge badge-red">Pendiente</span>'}</td>
               <td>${i.resuelto?'<span class="badge badge-grey">Resuelta</span>':'<span class="badge badge-orange">Abierta</span>'}</td>
-              <td>${!i.resuelto?`<button class="btn btn-ghost btn-sm" onclick="resolverIncidencia('${i.id}')">Resolver</button>`:''}</td>
+              <td style="display:flex;gap:6px;align-items:center">
+                ${!i.resuelto?`<button class="btn btn-ghost btn-sm" onclick="resolverIncidencia('${i.id}')">Resolver</button>`:''}
+                <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="eliminarIncidencia('${i.id}')">🗑</button>
+              </td>
             </tr>`;
           }).join('')||`<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">Sin incidencias abiertas</div></div></td></tr>`}
         </tbody>
@@ -2849,6 +3050,14 @@ async function guardarIncidencia() {
   incidencias();
   updateBadges();
   showToast('Incidencia registrada ✓', 'warning');
+}
+
+async function eliminarIncidencia(id) {
+  if (!confirm('¿Eliminar esta incidencia? Solo se elimina de la app (edita en Sheets para borrarla del registro permanente).')) return;
+  DB.incidencias = DB.incidencias.filter(i => i.id !== id);
+  saveCacheLocal();
+  incidencias();
+  showToast('Incidencia eliminada de la app ✓', 'success');
 }
 
 async function resolverIncidencia(id) {

@@ -430,7 +430,11 @@ tbody tr:hover { background: #fafafa; }
 <div id="login-screen">
   <div class="login-box">
     <div class="login-logo">
-      <div class="login-logo-icon">SM</div>
+      <div class="login-logo-icon" style="padding:0;overflow:hidden;background:#000">
+        <img src="https://drive.google.com/uc?export=view&id=1cULQdBcqP7C_dCf9-j-L8rUstmjb4aNI"
+             alt="SM" style="width:100%;height:100%;object-fit:contain"
+             onerror="this.style.display='none';this.parentElement.textContent='SM'">
+      </div>
       <div>
         <div class="login-logo-text">SM Academia</div>
         <div class="login-logo-sub">Sistema de Gestión 360°</div>
@@ -446,12 +450,15 @@ tbody tr:hover { background: #fafafa; }
       </select>
     </div>
     <div class="login-field" id="login-monitor-wrap" style="display:none">
-      <label>Monitor</label>
+      <label>Tu nombre</label>
       <select id="login-monitor-name">
-        <option value="Monitor 1">Monitor 1</option>
-        <option value="Monitor 2">Monitor 2</option>
-        <option value="Samy">Samy (Director)</option>
+        <option value="">— Selecciona —</option>
+        <!-- Se rellena dinámicamente con DB.personal al cargar -->
+        <option value="SAMANTHA HERNÁNDEZ SUÁREZ">Samantha Hernández</option>
+        <option value="NADIA BETANCOR MORALES">Nadia Betancor</option>
+        <option value="ANTONIO SAMUEL MARTÍN RIVERA">Samy Martín (Director)</option>
       </select>
+      <div style="font-size:11px;color:#888;margin-top:4px">Si no ves tu nombre, contacta con el administrador.</div>
     </div>
     <div class="login-field" id="login-familia-wrap" style="display:none">
       <label>Email de la familia</label>
@@ -476,7 +483,11 @@ tbody tr:hover { background: #fafafa; }
   <nav class="sidebar">
     <div class="sidebar-header">
       <div class="brand">
-        <div class="brand-icon">SM</div>
+        <div class="brand-icon" style="padding:0;overflow:hidden;background:#000">
+          <img src="https://drive.google.com/uc?export=view&id=1cULQdBcqP7C_dCf9-j-L8rUstmjb4aNI"
+               alt="SM" style="width:100%;height:100%;object-fit:contain"
+               onerror="this.style.display='none';this.parentElement.textContent='SM'">
+        </div>
         <div>
           <div class="brand-name">SM Academia</div>
           <div class="brand-sub">Sistema 360°</div>
@@ -529,9 +540,6 @@ tbody tr:hover { background: #fafafa; }
         </div>
         <div class="nav-item" onclick="navigate('extraescolares')" data-page="extraescolares">
           <span class="nav-icon">🏫</span><span>Extraescolares</span>
-        </div>
-        <div class="nav-item" onclick="navigate('asistencia')" data-page="asistencia">
-          <span class="nav-icon">✅</span><span>Asistencia</span>
         </div>
       </div>
 
@@ -752,6 +760,38 @@ function gasRequest(action, data = {}) {
   });
 }
 
+// Logo oficial SM Academia (compartido desde Google Drive)
+const LOGO_URL = 'https://drive.google.com/uc?export=view&id=1cULQdBcqP7C_dCf9-j-L8rUstmjb4aNI';
+// Fotos de jugadores y monitores — carpeta img en GitHub Pages
+// Formato: https://academiasmfutbol.github.io/img/jugadores/NOMBRE.jpg
+//          https://academiasmfutbol.github.io/img/monitores/NOMBRE.jpg
+const IMG_BASE = 'https://academiasmfutbol.github.io/img';
+function getFotoJugador(nombre) {
+  if (!nombre) return null;
+  const n = nombre.split(' ')[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  return IMG_BASE + '/jugadores/' + n + '.jpg';
+}
+function getFotoMonitor(nombre) {
+  if (!nombre) return null;
+  const n = nombre.split(' ')[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  return IMG_BASE + '/monitores/' + n + '.jpg';
+}
+function avatarHtml(nombre, tipo, extraStyle) {
+  const url = tipo === 'monitor' ? getFotoMonitor(nombre) : getFotoJugador(nombre);
+  const st = extraStyle || 'width:48px;height:48px;font-size:16px';
+  return `<div class="avatar" style="${st};overflow:hidden;position:relative">
+    <img src="${url}" alt="" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;border-radius:50%"
+         onerror="this.style.display='none'">
+    <span style="position:relative;z-index:1">${getInitials(nombre)}</span>
+  </div>`;
+}
+
+// Nombre real de la hoja de sesiones en "BASE DATOS SM"
+const SESIONES_SHEET_NAME = 'SESIONES SM FÚTBOL';
+
+const GITHUB_IMG = 'https://raw.githubusercontent.com/academiasmfutbol/academiasmfutbol.github.io/main/img/';
+const CAMINO_SM_INICIAL = {"ABEL": 40, "AIMAR": 10, "AITOR": 0, "ALBERTO": 190, "ANTOINE": 230, "ANTONY": 20, "ARAI": 40, "ARAN": 10, "BRYAN": 40, "DAVID": 40, "DAYAN": 30, "DIEGO": 40, "DYLAN": 0, "EIRIAN": 160, "ELIAN": 10, "ELOY": 0, "EZEQUIEL": 310, "HÉCTOR": 60, "IMAR": 10, "JORGE": 100, "KEVIN": 20, "LEO": 40, "LEO SUÁREZ": 10, "LUCAS": 0, "LUKA": 100, "MATEO": 10, "NADIR": 0, "NAHUEL": 220, "NAIM": 10, "NEIZAN": 0, "PABLO": 50, "RICKY": 40, "ROBERTO": 30, "TOMAS": 160, "UMAR": 0, "YAEL": 20, "ERIK": 0, "OCLAM": 10, "DIEGO LÓPEZ": 10, "CALEB": 10, "YERAY": 30};
+
 /* ═══════════════════════════════════════════════════════════
    NORMALIZACIÓN — traduce estructura real de la Sheet
    al formato interno que usa la app
@@ -803,6 +843,25 @@ function normalizarDB(raw) {
         foto: '',
         _raw: a
       };
+    });
+
+    // Aplicar puntos Camino SM reales (si el alumno no tiene puntos en Sheet)
+    DB.alumnos.forEach(al => {
+      if (!al.camino || al.camino === 0) {
+        // Buscar por primer nombre
+        const primerNombre = (al.nombre || '').split(' ')[0].toUpperCase();
+        // Casos especiales de dos palabras
+        const nombreCompleto = al.nombre || '';
+        if (nombreCompleto.toUpperCase().includes('DIEGO LÓPEZ')) {
+          al.camino = CAMINO_SM_INICIAL['DIEGO LÓPEZ'] || 0;
+        } else if (nombreCompleto.toUpperCase().includes('LEO SUÁREZ') || nombreCompleto.toUpperCase().includes('LEO S')) {
+          al.camino = CAMINO_SM_INICIAL['LEO SUÁREZ'] || 0;
+        } else if (nombreCompleto.toUpperCase().includes('CALEB')) {
+          al.camino = CAMINO_SM_INICIAL['CALEB'] || 0;
+        } else if (CAMINO_SM_INICIAL.hasOwnProperty(primerNombre)) {
+          al.camino = CAMINO_SM_INICIAL[primerNombre];
+        }
+      }
     });
 
     // Enriquecer alumnos con su inscripción activa más reciente
@@ -1148,9 +1207,64 @@ function startApp() {
   document.getElementById('user-name-chip').textContent = currentUser.name;
   document.getElementById('user-role-chip').textContent = currentUser.role;
   document.getElementById('user-avatar-small').textContent = currentUser.initials;
-  const isAdmin = currentUser.role === 'ADMIN';
-  document.getElementById('nav-admin').style.display = isAdmin ? '' : 'none';
+  const isAdmin  = currentUser.role === 'ADMIN';
+  const isMonitor = currentUser.role === 'MONITOR';
+  const isFamilia = currentUser.role === 'FAMILIA';
+  document.getElementById('nav-admin').style.display   = isAdmin ? '' : 'none';
   document.getElementById('nav-admin-2').style.display = isAdmin ? '' : 'none';
+
+  if (isMonitor) {
+    // Buscar la monitora por nombre (primer nombre basta para identificarla)
+    const monData = DB.personal.find(p =>
+      p.nombre && (p.nombre === currentUser.name ||
+                   p.nombre.includes((currentUser.name||'').split(' ')[0].toUpperCase()) ||
+                   (currentUser.name||'').toUpperCase().includes(p.nombre.split(' ')[0]))
+    );
+    const actividadesMonitor = monData ? (monData.actividades || []) : [];
+    const esTecnificacion = actividadesMonitor.some(a =>
+      a.toUpperCase().includes('TECNIF') || a.toUpperCase().includes('FÚTBOL') || a.toUpperCase().includes('FUTBOL')
+    );
+    const esExtraescolar = actividadesMonitor.some(a =>
+      a.toUpperCase().includes('RECOGIDA') || a.toUpperCase().includes('MULTIDEPORTE') ||
+      a.toUpperCase().includes('INGLÉS') || a.toUpperCase().includes('BAILE') ||
+      a.toUpperCase().includes('INGLES') || a.toUpperCase().includes('EXTRAESCOLAR')
+    );
+
+    // Guardar perfil completo en sesión
+    currentUser.actividades   = actividadesMonitor;
+    currentUser.esTecnificacion = esTecnificacion;
+    currentUser.esExtraescolar  = esExtraescolar;
+    currentUser.monitorId       = monData?.id || '';
+    localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+
+    // Ocultar TODO el sidebar
+    document.querySelectorAll('.nav-section').forEach(s => s.style.display = 'none');
+
+    // Ocultar todas las nav-section excepto Actividades
+    document.querySelectorAll('.nav-section').forEach(s => {
+      const id = s.id || '';
+      if (id !== 'nav-actividades') s.style.display = 'none';
+    });
+    // Dentro de Actividades, mostrar solo las páginas de su actividad + Mi perfil
+    document.querySelectorAll('#nav-actividades .nav-item').forEach(item => {
+      const pg = item.dataset.page;
+      const visible = (esTecnificacion && pg === 'futbol') ||
+                      (esExtraescolar  && pg === 'extraescolares') ||
+                      pg === 'personal'; // siempre puede ver su ficha
+      item.style.display = visible ? '' : 'none';
+    });
+    // "Mi perfil" se muestra como texto alternativo para MONITOR
+    const miPerfil = document.getElementById('nav-mi-perfil');
+    if (miPerfil) miPerfil.style.display = '';
+
+    const startPage = esTecnificacion ? 'futbol' : 'extraescolares';
+    if (!loadCacheLocal()) loadDemoData();
+    if (GAS_URL) syncAll(); else loadDemoData();
+    navigate(startPage);
+    updateBadges();
+    setInterval(updateSyncTime, 60000);
+    return;
+  }
   // Cargar datos
   if (!loadCacheLocal()) loadDemoData();
   if (GAS_URL) syncAll(); else { loadDemoData(); showConfigIfNeeded(); }
@@ -1193,7 +1307,7 @@ const PAGE_META = {
   facturas:       { title: 'Facturas', sub: 'Emisión y archivo VeriFactu' },
   futbol:         { title: 'SM Fútbol', sub: 'Sesiones, evaluaciones y Camino SM' },
   extraescolares: { title: 'SM Extraescolares', sub: 'CEIP Escaleritas · Actividades y asistencia' },
-  asistencia:     { title: 'Control de Asistencia', sub: 'Registro diario por actividad' },
+  // asistencia eliminada — se registra desde SM Fútbol y SM Extraescolares
   personal:       { title: 'Personal', sub: 'Monitores y certificaciones' },
   incidencias:    { title: 'Incidencias', sub: 'Registro de golpes, conflictos y emergencias' },
   informes:       { title: 'Informes', sub: 'Generación de PDFs y exportaciones' },
@@ -1201,6 +1315,20 @@ const PAGE_META = {
 };
 
 function navigate(page) {
+  // Restricción rol MONITOR: solo ve su actividad, pase de lista de la misma y sus propios datos
+  if (currentUser && currentUser.role === 'MONITOR') {
+    const permitidas = [];
+    if (currentUser.esTecnificacion) permitidas.push('futbol');
+    if (currentUser.esExtraescolar)  permitidas.push('extraescolares');
+    if (!permitidas.length) permitidas.push('extraescolares'); // fallback
+    if (!permitidas.includes(page)) {
+      page = permitidas[0];
+    }
+  }
+  // FAMILIA: solo dashboard y alumnos (solo lectura)
+  if (currentUser && currentUser.role === 'FAMILIA') {
+    if (!['dashboard','alumnos'].includes(page)) page = 'dashboard';
+  }
   currentPage = page;
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
@@ -1215,7 +1343,7 @@ function navigate(page) {
 function renderCurrentPage() {
   const pages = {
     dashboard, clientes, alumnos, inscripciones, pagos, facturas,
-    futbol, extraescolares, asistencia, personal, incidencias, informes, configuracion
+    futbol, extraescolares, personal, incidencias, informes, configuracion
   };
   if (pages[currentPage]) pages[currentPage]();
 }
@@ -1243,6 +1371,26 @@ function calcEdad(fechaNac) {
 
 // Buscar siempre por string — IDs reales son números, la app los trata como string
 function getAlumno(id) { return DB.alumnos.find(a => String(a.id) === String(id)) || {}; }
+function getPersona(id) { return DB.personal.find(p => String(p.id) === String(id)) || {}; }
+
+// URL de foto desde carpeta img en GitHub
+function fotoUrl(nombre, tipo) {
+  // tipo: 'alumnos' | 'personal'
+  const slug = (nombre||'').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')  // quitar tildes
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  return `${GITHUB_IMG}${tipo}/${slug}.jpg`;
+}
+
+// Avatar con foto (si existe) o iniciales
+function avatarHtml(nombre, tipo, size) {
+  const sz = size || 40;
+  const url = fotoUrl(nombre, tipo);
+  return `<div class="avatar" style="width:${sz}px;height:${sz}px;overflow:hidden;border-radius:50%;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-size:${Math.round(sz*0.4)}px;font-weight:600;color:var(--green-dim)">
+    <img src="${url}" alt="${nombre}" style="width:100%;height:100%;object-fit:cover"
+         onerror="this.style.display='none';this.parentElement.style.display='flex'">${getInitials(nombre)}
+  </div>`;
+}
 function getCliente(id) { return DB.clientes.find(c => String(c.id) === String(id)) || {}; }
 // Obtener mes actual en español
 function getMesActual() { return ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][new Date().getMonth()]; }
@@ -1332,11 +1480,17 @@ function addTopbarBtn(label, fn, type = 'btn-primary', icon = '') {
 function dashboard() {
   const mesActual = getMesActual();
   const pagosMes = DB.pagos.filter(p => (p.mes||'').toLowerCase() === mesActual.toLowerCase());
-  const totalCobrado = pagosMes.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+(parseFloat(p.totalRecibido)||0),0);
+  const totalCobrado  = pagosMes.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+(parseFloat(p.totalRecibido)||0),0);
   const totalEsperado = pagosMes.reduce((s,p)=>s+(parseFloat(p.totalEsperado)||0),0);
-  const impagados = DB.pagos.filter(p=>(p.estado||'').toUpperCase()==='IMPAGADO').length;
-  const alumnosActivos = DB.alumnos.filter(a=>a.activo===true||a.activo==='SÍ'||a.activo==='SI').length;
-  const inscrActivas = DB.inscripciones.filter(i=>i.estado==='ACTIVA'||String(i.ACTIVA||'').toUpperCase()==='SÍ'||String(i.ACTIVA||'').toUpperCase()==='SI').length;
+  const impagados     = DB.pagos.filter(p=>(p.estado||'').toUpperCase()==='IMPAGADO').length;
+  const alumnosActivos= DB.alumnos.filter(a=>a.activo===true||a.activo==='SÍ'||a.activo==='SI').length;
+  const inscrActivas  = DB.inscripciones.filter(i=>i.estado==='ACTIVA'||String(i.ACTIVA||'').toUpperCase()==='SÍ'||String(i.ACTIVA||'').toUpperCase()==='SI').length;
+
+  // Gastos mensuales estimados — editar hasta tener hoja GASTOS en Sheets
+  const GASTOS_MENSUALES = { personal:1200, instalaciones:180, material:60, seguros:45, otros:30 };
+  const GASTOS_LABELS    = { personal:'Personal', instalaciones:'Instalaciones', material:'Material', seguros:'Seguros', otros:'Otros' };
+  const totalGastos    = Object.values(GASTOS_MENSUALES).reduce((s,v)=>s+v,0);
+  const rendimientoMes = totalCobrado - totalGastos;
 
   // Próximos cumpleaños
   const hoy = new Date();
@@ -1348,10 +1502,25 @@ function dashboard() {
   }).sort((a,b) => a.diasParaCumple - b.diasParaCumple).slice(0,3);
 
   // Certificados venciendo
-  const certAlert = DB.personal.filter(p => p.activo && daysBetween(hoy, new Date(p.certVence)) < 60);
+  const certAlert = DB.personal.filter(p => {
+    if (!p.activo || !p.certVence) return false;
+    try { return daysBetween(hoy, new Date(p.certVence)) < 60; } catch(e) { return false; }
+  });
 
   // Top Camino SM
   const topCamino = [...DB.alumnos].filter(a=>a.activo).sort((a,b)=>b.camino-a.camino).slice(0,5);
+
+  // Histórico 6 meses
+  const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const historico = Array.from({length:6},(_,i)=>{
+    const d = new Date(hoy.getFullYear(), hoy.getMonth()-5+i, 1);
+    const mesLabel = MESES_ES[d.getMonth()];
+    const ingresos = DB.pagos
+      .filter(p=>(p.estado||'').toUpperCase()==='PAGADO' && (p.mes||'').toLowerCase().includes(mesLabel.toLowerCase()))
+      .reduce((s,p)=>s+(parseFloat(p.totalRecibido)||0),0);
+    return { mesLabel: mesLabel.substring(0,3), ingresos, gastos: totalGastos };
+  });
+  const maxBar = Math.max(...historico.map(h=>Math.max(h.ingresos,h.gastos)), 1);
 
   document.getElementById('page-content').innerHTML = `
     <div class="kpi-grid">
@@ -1359,6 +1528,11 @@ function dashboard() {
         <div class="kpi-label">Ingresos ${fmtMonth(mesActual)}</div>
         <div class="kpi-value green">${fmtEur(totalCobrado)}</div>
         <div class="kpi-delta">Esperado: ${fmtEur(totalEsperado)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Gastos ${fmtMonth(mesActual)}</div>
+        <div class="kpi-value ${totalGastos>totalCobrado?'red':''}">-${fmtEur(totalGastos)}</div>
+        <div class="kpi-delta ${rendimientoMes>=0?'up':'down'}">Resultado: ${rendimientoMes>=0?'+':''}${fmtEur(rendimientoMes)}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Alumnos activos</div>
@@ -1371,73 +1545,110 @@ function dashboard() {
         <div class="kpi-delta ${impagados>0?'down':''}">${impagados>0?'Requieren atención':'Sin morosidad'}</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Sesiones este mes</div>
+        <div class="kpi-label">Sesiones SM Fútbol</div>
         <div class="kpi-value">${DB.sesiones.length}</div>
-        <div class="kpi-delta">Últimas sesiones registradas</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Tasa asistencia</div>
-        <div class="kpi-value green">87%</div>
-        <div class="kpi-delta up">+3% vs mes anterior</div>
+        <div class="kpi-delta">Total registradas</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Personal activo</div>
         <div class="kpi-value">${DB.personal.filter(p=>p.activo).length}</div>
-        <div class="kpi-delta ${certAlert.length>0?'down':''}">${certAlert.length>0?`${certAlert.length} certificado(s) por renovar`:'Certificados al día'}</div>
+        <div class="kpi-delta ${certAlert.length>0?'down':''}">${certAlert.length>0?`${certAlert.length} cert. por renovar`:'Certificados al día'}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;margin-bottom:1rem">
+      <div class="card">
+        <div class="card-header"><span>💸</span><div class="card-title">Gastos ${fmtMonth(mesActual)}</div></div>
+        <div class="card-body">
+          ${Object.entries(GASTOS_MENSUALES).map(([k,v])=>{
+            const pct=Math.round(v/totalGastos*100);
+            return `<div style="margin-bottom:10px">
+              <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+                <span style="color:var(--grey-2)">${GASTOS_LABELS[k]||k}</span>
+                <span style="font-weight:600">${fmtEur(v)} <span style="color:var(--grey-2);font-weight:400">(${pct}%)</span></span>
+              </div>
+              <div style="height:6px;background:#f0f0f0;border-radius:3px">
+                <div style="height:6px;width:${pct}%;background:${pct>50?'var(--green)':'#90caf9'};border-radius:3px"></div>
+              </div>
+            </div>`;
+          }).join('')}
+          <div style="display:flex;justify-content:space-between;padding-top:8px;border-top:1px solid #f0f0f0;font-weight:700;font-size:13px">
+            <span>Total gastos</span><span style="color:var(--red)">-${fmtEur(totalGastos)}</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;margin-top:6px;font-weight:700;font-size:14px">
+            <span>Resultado neto</span>
+            <span style="color:${rendimientoMes>=0?'var(--green)':'var(--red)'}">${rendimientoMes>=0?'+':''}${fmtEur(rendimientoMes)}</span>
+          </div>
+          <div style="margin-top:8px;padding:6px 10px;background:#f9f9f9;border-radius:6px;font-size:10px;color:var(--grey-2)">
+            💡 Edita GASTOS_MENSUALES en el código hasta añadir hoja GASTOS en Sheets
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span>📊</span><div class="card-title">Ingresos vs Gastos · últimos 6 meses</div></div>
+        <div class="card-body">
+          <div style="display:flex;align-items:flex-end;gap:6px;height:130px">
+            ${historico.map(h=>`
+              <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px">
+                <div style="width:100%;display:flex;gap:2px;align-items:flex-end;height:100px">
+                  <div title="Ingresos: ${fmtEur(h.ingresos)}"
+                       style="flex:1;background:var(--green);border-radius:3px 3px 0 0;height:${h.ingresos?Math.max(3,Math.round(h.ingresos/maxBar*100))+'%':'3px'}"></div>
+                  <div title="Gastos: ${fmtEur(h.gastos)}"
+                       style="flex:1;background:#ef9a9a;border-radius:3px 3px 0 0;height:${Math.max(3,Math.round(h.gastos/maxBar*100))}%"></div>
+                </div>
+                <div style="font-size:10px;color:var(--grey-2)">${h.mesLabel}</div>
+              </div>`).join('')}
+          </div>
+          <div style="display:flex;gap:16px;margin-top:8px;font-size:11px">
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:var(--green);border-radius:2px;display:inline-block"></span>Ingresos</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#ef9a9a;border-radius:2px;display:inline-block"></span>Gastos</span>
+            <span style="margin-left:auto;color:var(--grey-2);font-size:10px">Gastos = estimados</span>
+          </div>
+        </div>
       </div>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;margin-bottom:1rem">
-
-      <!-- Últimos pagos -->
       <div class="card" style="grid-column:span 2">
         <div class="card-header">
-          <span style="font-size:16px">💳</span>
-          <div class="card-title">Pagos recientes</div>
+          <span>💳</span><div class="card-title">Últimos 5 pagos</div>
           <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="navigate('pagos')">Ver todos →</button>
         </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Alumno</th><th>Servicio</th><th>Mes</th><th>Total</th><th>Estado</th></tr></thead>
-            <tbody>
-              ${DB.pagos.slice(-6).reverse().map(p => {
-                const al = getAlumno(p.alumnoId);
-                return `<tr onclick="navigate('pagos')">
-                  <td><div style="display:flex;align-items:center;gap:8px"><div class="avatar avatar-sm">${getInitials(al.nombre)}</div>${al.nombre||'—'}</div></td>
-                  <td><span style="font-size:12px">${p.servicio}</span></td>
-                  <td><span style="font-size:12px;color:var(--grey-2)">${fmtMonth(p.mes)}</span></td>
-                  <td><strong>${fmtEur(p.totalEsperado)}</strong></td>
-                  <td>${estadoPagoBadge(p.estado)}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Alumno</th><th>Servicio</th><th>Mes</th><th>Total</th><th>Estado</th></tr></thead>
+          <tbody>
+            ${DB.pagos.slice(-5).reverse().map(p=>{
+              const al=getAlumno(p.alumnoId);
+              return `<tr onclick="navigate('pagos')" style="cursor:pointer">
+                <td><div style="display:flex;align-items:center;gap:8px"><div class="avatar avatar-sm">${getInitials(al.nombre)}</div>${al.nombre||'—'}</div></td>
+                <td><span style="font-size:12px">${p.servicio}</span></td>
+                <td><span style="font-size:12px;color:var(--grey-2)">${fmtMonth(p.mes)}</span></td>
+                <td><strong>${fmtEur(p.totalEsperado)}</strong></td>
+                <td>${estadoPagoBadge(p.estado)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table></div>
       </div>
 
-      <!-- Panel lateral -->
       <div style="display:flex;flex-direction:column;gap:1rem">
-        <!-- Top Camino SM -->
         <div class="card">
-          <div class="card-header">
-            <span>🏆</span><div class="card-title">Top Camino SM</div>
-          </div>
+          <div class="card-header"><span>🏆</span><div class="card-title">Top Camino SM</div></div>
           <div class="card-body" style="padding-top:.5rem">
-            ${topCamino.map((a,i) => `
+            ${topCamino.map((a,i)=>`
               <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:${i<4?'1px solid #f5f5f5':'none'}">
                 <div style="font-size:12px;font-weight:700;color:var(--grey-2);width:16px">${i+1}</div>
-                <div class="avatar avatar-sm">${getInitials(a.nombre)}</div>
+                ${avatarHtml(a.nombre,'jugador','width:32px;height:32px;font-size:11px;min-width:32px')}
                 <div style="flex:1;font-size:12px;font-weight:500;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.nombre}</div>
                 <div class="camino-badge">⭐ ${a.camino}</div>
               </div>`).join('')}
           </div>
         </div>
-
-        <!-- Cumpleaños -->
         <div class="card">
           <div class="card-header"><span>🎂</span><div class="card-title">Próximos cumpleaños</div></div>
           <div class="card-body" style="padding-top:.5rem">
-            ${cumples.map(a => `
+            ${cumples.map(a=>`
               <div style="display:flex;align-items:center;gap:10px;padding:5px 0">
                 <div class="avatar avatar-sm">${getInitials(a.nombre)}</div>
                 <div style="flex:1">
@@ -1450,49 +1661,42 @@ function dashboard() {
       </div>
     </div>
 
-    <!-- Alertas -->
-    ${certAlert.length > 0 ? `
-    <div class="card" style="border-color:#ef9a9a;background:#fff5f5">
+    ${certAlert.length>0?`
+    <div class="card" style="border-color:#ef9a9a;background:#fff5f5;margin-bottom:1rem">
       <div class="card-header"><span>⚠️</span><div class="card-title" style="color:var(--red)">Certificados de delitos sexuales por renovar</div></div>
       <div class="card-body">
-        ${certAlert.map(p => `
+        ${certAlert.map(p=>`
           <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
             <div class="avatar avatar-sm" style="background:var(--red-bg);color:var(--red)">${getInitials(p.nombre)}</div>
             <div style="flex:1;font-size:13px"><strong>${p.nombre}</strong> · Vence: ${fmtDate(p.certVence)}</div>
-            <span class="badge badge-red">En ${daysBetween(new Date(), new Date(p.certVence))} días</span>
+            <span class="badge badge-red">En ${daysBetween(new Date(),new Date(p.certVence))} días</span>
           </div>`).join('')}
       </div>
-    </div>` : ''}
+    </div>`:''}
 
-    <!-- Últimas sesiones SM Fútbol -->
-    <div class="card" style="margin-top:1rem">
+    <div class="card">
       <div class="card-header">
         <span>⚽</span><div class="card-title">Últimas sesiones SM Fútbol</div>
         <button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="navigate('futbol')">Ver todas →</button>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>#</th><th>Fecha</th><th>Grupo</th><th>Ubicación</th><th>Objetivo</th><th>Alumnos</th></tr></thead>
-          <tbody>
-            ${DB.sesiones.slice().reverse().map(s => `
-              <tr onclick="navigate('futbol')">
-                <td class="mono">#${s.numero}</td>
-                <td>${fmtDate(s.fecha)}</td>
-                <td><span class="badge badge-blue">${s.grupo}</span></td>
-                <td style="font-size:12px">${s.ubicacion}</td>
-                <td style="font-size:12px;color:var(--grey-2)">${s.objetivo}</td>
-                <td><span class="badge badge-grey">${s.alumnos.length} 👦</span></td>
-              </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>#</th><th>Fecha</th><th>Grupo</th><th>Ubicación</th><th>Objetivo</th><th>Alumnos</th></tr></thead>
+        <tbody>
+          ${DB.sesiones.slice().reverse().slice(0,5).map(s=>`
+            <tr onclick="navigate('futbol')" style="cursor:pointer">
+              <td class="mono">#${s.numero}</td>
+              <td>${fmtDate(s.fecha)}</td>
+              <td><span class="badge badge-blue">${s.grupo}</span></td>
+              <td style="font-size:12px">${s.ubicacion}</td>
+              <td style="font-size:12px;color:var(--grey-2)">${s.objetivo}</td>
+              <td><span class="badge badge-grey">${(s.alumnos||[]).length} 👦</span></td>
+            </tr>`).join('')}
+        </tbody>
+      </table></div>
     </div>
   `;
 }
 
-/* ═══════════════════════════════════════════════════════════
-   PAGE: CLIENTES
-═══════════════════════════════════════════════════════════ */
 function clientes() {
   addTopbarBtn('+ Nuevo cliente', () => modalNuevoCliente(), 'btn-primary', '');
   let filtered = [...DB.clientes];
@@ -1677,28 +1881,52 @@ function alumnos() {
 function verAlumno(id) {
   const a = getAlumno(id);
   const c = getCliente(a.clienteId);
-  const pagos = DB.pagos.filter(p => p.alumnoId === id);
-  const asist = DB.asistencias.filter(x => x.alumnoId === id);
+  const pagos = DB.pagos.filter(p => String(p.alumnoId) === String(id));
+  const asist = DB.asistencias.filter(x => String(x.alumnoId) === String(id));
   const presentes = asist.filter(x=>x.presente).length;
   const pct = asist.length ? Math.round(presentes/asist.length*100) : 0;
   const edad = calcEdad(a.fechaNac) ?? '?';
+
+  // Todas las inscripciones activas del alumno (puede estar en múltiples actividades)
+  const inscrActivas = DB.inscripciones.filter(i =>
+    String(i.alumnoId) === String(id) && i.estado === 'ACTIVA'
+  );
+  const inscBadges = inscrActivas.length
+    ? inscrActivas.map(i => {
+        const color = String(i.centro||'').includes('ATALAYA')||String(i.centro||'').includes('CUEVAS') ? 'badge-blue' : 'badge-green';
+        return `<span class="badge ${color}" style="font-size:11px;margin:2px">${i.servicio}${i.modalidad?' · '+i.modalidad:''}</span>`;
+      }).join('')
+    : `<span class="badge badge-grey" style="font-size:11px">Sin inscripciones activas</span>`;
+
+  const fotoSrc = fotoUrl(a.nombre, 'alumnos');
   openModal(`Ficha: ${a.nombre}`, `
     <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
-      ${a.foto ? `<img src="${a.foto}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--green-bg)">` 
-               : `<div class="avatar" style="width:64px;height:64px;font-size:20px">${getInitials(a.nombre)}</div>`}
+      <div style="position:relative;flex-shrink:0">
+        <div style="width:72px;height:72px;border-radius:50%;overflow:hidden;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:var(--green-dim)">
+          <img id="foto-alumno-${id}" src="${fotoSrc}" alt="${a.nombre}"
+               style="width:100%;height:100%;object-fit:cover"
+               onerror="this.style.display='none'">
+          ${getInitials(a.nombre)}
+        </div>
+      </div>
       <div>
         <div style="font-size:18px;font-weight:600">${a.nombre}</div>
-        <div style="font-size:13px;color:var(--grey-2)">${edad} años · ${a.grupo||'Sin grupo'}</div>
-        <div style="margin-top:6px">${actividadBadge(a.actividad)} &nbsp; <div class="camino-badge" style="display:inline-flex">⭐ ${a.camino} pts</div></div>
+        <div style="font-size:13px;color:var(--grey-2)">${edad} años · ${a.grupo||'Sin grupo asignado'}</div>
+        <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${inscBadges}</div>
+        ${a.camino !== undefined ? `<div style="margin-top:6px"><div class="camino-badge" style="display:inline-flex">⭐ ${a.camino} pts Camino SM</div></div>` : ''}
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem">
       <div><div class="kpi-label">Familia</div><div style="margin-top:4px;font-size:13px">${c.nombre||'—'}</div></div>
       <div><div class="kpi-label">Teléfono</div><div style="margin-top:4px;font-size:13px">${c.telefono||'—'}</div></div>
-      <div><div class="kpi-label">Modalidad</div><div style="margin-top:4px;font-size:13px">${a.modalidad}</div></div>
       <div><div class="kpi-label">Fecha nacimiento</div><div style="margin-top:4px;font-size:13px">${fmtDate(a.fechaNac)}</div></div>
+      <div><div class="kpi-label">Cesión imagen</div><div style="margin-top:4px;font-size:13px">${a.cesionImagen||a['CESIÓN IMAGEN']||'—'}</div></div>
+      ${a.observaciones ? `<div style="grid-column:1/-1"><div class="kpi-label">Observaciones</div><div style="margin-top:4px;font-size:12px;color:var(--grey-2)">${a.observaciones}</div></div>` : ''}
     </div>
-    <div class="section-divider">Asistencia general</div>
+    <div style="font-size:11px;color:var(--grey-2);padding:8px 12px;background:#f9f9f9;border-radius:6px;margin-bottom:1rem">
+      📷 Foto: sube <strong>${a.nombre?.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')}.jpg</strong> a la carpeta <code>img/alumnos/</code> en GitHub
+    </div>
+    <div class="section-divider">Asistencia registrada en sesiones</div>
     <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
       <div style="flex:1"><div class="progress-bar"><div class="progress-fill ${pct<60?'danger':pct<80?'warn':''}" style="width:${pct}%"></div></div></div>
       <div style="font-size:14px;font-weight:600">${pct}%</div>
@@ -2171,7 +2399,14 @@ function descargarFacturaPdf(fid) {
     .total-row td{font-weight:bold;font-size:16px;border-top:2px solid #2e7d32;padding-top:12px}
     .footer{margin-top:2rem;font-size:11px;color:#888;border-top:1px solid #eee;padding-top:1rem}
   </style></head><body>
-    <h1>SM Academia · Factura ${fid}</h1>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:1rem">
+      <img src="https://drive.google.com/uc?export=view&id=1cULQdBcqP7C_dCf9-j-L8rUstmjb4aNI"
+           alt="SM" style="height:60px;object-fit:contain" onerror="this.style.display='none'">
+      <div>
+        <h1 style="margin:0;font-size:20px;color:#2e7d32">SM Academia · Factura ${fid}</h1>
+        <div style="font-size:12px;color:#666">academiasmfutbol.com</div>
+      </div>
+    </div>
     <h2>Antonio Samuel Martín Rivera · DNI 45766626F<br>
     Calle Teobaldo Power, 15, Las Palmas de Gran Canaria<br>
     academiasmfutbol@outlook.es</h2>
@@ -2181,7 +2416,7 @@ function descargarFacturaPdf(fid) {
     <table>
       <thead><tr><th>Alumno</th><th>Servicio</th><th>Mes</th><th>Base</th><th>IGIC</th><th>Total</th></tr></thead>
       <tbody>
-        ${ps.map(p=>{const a=getAlumno(p.alumnoId);return`<tr><td>${a.nombre||'—'}</td><td>${p.servicio}</td><td>${fmtMonth(p.mes)}</td><td>${fmtEur(p.base)}</td><td>${p.igicPct}% = ${fmtEur(p.igicEur)}</td><td>${fmtEur(p.totalEsperado)}</td></tr>`;}).join('')}
+        ${ps.map(p=>{const a=getAlumno(p.alumnoId);const igicPct=Math.round(parseFloat(p.igicPct||0));const base=Math.round(parseFloat(p.base||0)*100)/100;const igicEur=Math.round(parseFloat(p.igicEur||0)*100)/100;return`<tr><td>${a.nombre||'—'}</td><td>${p.servicio}</td><td>${fmtMonth(p.mes)}</td><td>${fmtEur(base)}</td><td>${igicPct}% = ${fmtEur(igicEur)}</td><td>${fmtEur(p.totalEsperado)}</td></tr>`;}).join('')}
         <tr class="total-row"><td colspan="5">TOTAL FACTURA</td><td>${fmtEur(ps.reduce((s,p)=>s+p.totalEsperado,0))}</td></tr>
       </tbody>
     </table>
@@ -2199,8 +2434,22 @@ function generarFacturaPago(pid) { navigate('facturas'); }
    PAGE: SM FÚTBOL
 ═══════════════════════════════════════════════════════════ */
 function futbol() {
-  const role = currentUser.role;
-  addTopbarBtn('+ Nueva sesión', () => modalNuevaSesion(), 'btn-primary');
+  const role      = currentUser.role;
+  const isMonitor = role === 'MONITOR';
+
+  // MONITOR: solo puede registrar pase de lista de su actividad, no ve sesiones de otros ni edita fichas
+  if (isMonitor && !currentUser.esTecnificacion) {
+    document.getElementById('page-content').innerHTML =
+      '<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Acceso restringido</div><div class="empty-desc">Tu actividad es Extraescolares. Accede desde esa sección.</div></div>';
+    return;
+  }
+
+  // Solo ADMIN puede crear sesiones con todos los datos; MONITOR solo hace pase de lista de hoy
+  if (isMonitor) {
+    addTopbarBtn('📋 Pase de lista hoy', () => modalPaseListaMonitor(), 'btn-primary');
+  } else {
+    addTopbarBtn('+ Nueva sesión', () => modalNuevaSesion(), 'btn-primary');
+  }
 
   // Camino SM ranking
   const topCamino = [...DB.alumnos].filter(a=>a.activo&&(a.actividad==='TECNIFICACIÓN')).sort((a,b)=>b.camino-a.camino);
@@ -2443,6 +2692,7 @@ function modalNuevaSesion() {
                            <option value="Bien">Bien</option>
                            <option value="Regular">Regular</option>
                            <option value="Cansado">Cansado</option>
+                           <option value="Muy cansado">Muy cansado</option>
                          </select>`
                       : `<div style="display:flex;gap:2px;justify-content:center">
                            ${[1,2,3,4,5].map(n=>`<button type="button" class="eval-star" data-field="${fieldId}" data-alumno="${a.id}" data-val="${n}"
@@ -2591,114 +2841,155 @@ async function guardarSesion() {
    PAGE: EXTRAESCOLARES
 ═══════════════════════════════════════════════════════════ */
 function extraescolares() {
-  const role = currentUser.role;
-  // Fuente de verdad: inscripciones activas en CEIP ESCALERITAS, excluyendo COORD y alumno AMPA (id 68)
-  const EXCLUIR_SERVICIOS = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+  const role      = currentUser.role;
+  const isMonitor = role === 'MONITOR';
+  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+
+  // MONITOR de extraescolares: restringir a su actividad concreta
+  // Obtener su actividad desde currentUser.actividades (cargado en startApp)
+  let filtroActividad = null; // null = todas (ADMIN)
+  if (isMonitor) {
+    if (!currentUser.esExtraescolar) {
+      document.getElementById('page-content').innerHTML =
+        '<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Acceso restringido</div><div class="empty-desc">Tu actividad es SM Fútbol. Accede desde esa sección.</div></div>';
+      return;
+    }
+    // Filtrar por la actividad específica del monitor
+    const actsMonitor = (currentUser.actividades || []).filter(a =>
+      !a.toUpperCase().includes('TECNIF') && !a.toUpperCase().includes('FÚTBOL') && !a.toUpperCase().includes('FUTBOL')
+    );
+    // Extraer solo el nombre de actividad (sin el centro entre paréntesis)
+    filtroActividad = actsMonitor.map(a => a.replace(/\s*\(.*?\)/g,'').trim().toUpperCase());
+    if (!isMonitor) addTopbarBtn('Informe AMPA', () => generarInformeAMPA(), 'btn-secondary', '📄 ');
+    addTopbarBtn('📋 Pase de lista hoy', () => modalPaseListaExtraMonitor(filtroActividad), 'btn-primary', '+ ');
+  }
   const inscrExtra = DB.inscripciones.filter(i => {
-    const centro = String(i.centro || i.CENTRO || '').toUpperCase();
-    const servicio = String(i.servicio || i.SERVICIO || '').toUpperCase();
-    const activa = i.estado === 'ACTIVA';
-    const alumnoId = String(i.alumnoId || '');
-    return centro.includes('ESCALERITAS') && activa && !EXCLUIR_SERVICIOS.includes(servicio) && alumnoId !== '68';
+    const centro  = String(i.centro || i.CENTRO || '').toUpperCase();
+    const serv    = String(i.servicio || i.SERVICIO || '').toUpperCase();
+    const activa  = i.estado === 'ACTIVA';
+    const alumnoId= String(i.alumnoId || '');
+    return centro.includes('ESCALERITAS') && activa && !EXCLUIR.some(x=>serv===x) && alumnoId !== '68';
   });
 
-  // Agrupar: un alumno puede tener varias actividades — mostrar una fila por inscripción activa
+  // Agrupar por alumno — un alumno puede tener N actividades
+  const alumnosMap = {};
+  inscrExtra.forEach(i => {
+    const aid = String(i.alumnoId || '');
+    if (!alumnosMap[aid]) alumnosMap[aid] = { alumnoId: aid, inscripciones: [] };
+    alumnosMap[aid].inscripciones.push(i);
+  });
+  const alumnosExtra = Object.values(alumnosMap);
+
+  // KPIs por actividad
   const actividades = [...new Set(inscrExtra.map(i => i.servicio || i.SERVICIO || ''))].filter(Boolean);
   const resumen = actividades.map(act => ({
-    act,
-    alumnos: inscrExtra.filter(i => (i.servicio || i.SERVICIO || '') === act).length
+    act, alumnos: inscrExtra.filter(i => (i.servicio||i.SERVICIO||'') === act).length
   }));
 
-  addTopbarBtn('Informe AMPA', () => generarInformeAMPA(), 'btn-secondary', '📄 ');
-  if (role === 'ADMIN') addTopbarBtn('Registrar asistencia', () => modalAsistenciaExtra(), 'btn-primary', '+ ');
+  if (role === 'ADMIN') {
+    addTopbarBtn('Informe AMPA', () => generarInformeAMPA(), 'btn-secondary', '📄 ');
+    addTopbarBtn('Registrar asistencia', () => modalAsistenciaExtra(), 'btn-primary', '+ ');
+  }
+  if (role === 'MONITOR') {
+    addTopbarBtn('Pase de lista', () => modalPaseListaMonitor(), 'btn-primary', '📋 ');
+    addTopbarBtn('Mis datos', () => modalMisDatos(), 'btn-secondary', '👤 ');
+  }
 
   const mesActual = getMesActual();
-  document.getElementById('page-content').innerHTML = `
+  document.getElementById('page-content').innerHTML = \`
     <div class="kpi-grid">
-      ${resumen.map(r=>`
+      \${resumen.map(r=>\`
         <div class="kpi-card">
-          <div class="kpi-label">${r.act}</div>
-          <div class="kpi-value">${r.alumnos} alumnos</div>
+          <div class="kpi-label">\${r.act}</div>
+          <div class="kpi-value">\${r.alumnos} alumnos</div>
           <div class="kpi-delta">CEIP Escaleritas</div>
-        </div>`).join('')}
+        </div>\`).join('')}
       <div class="kpi-card">
-        <div class="kpi-label">Total inscritos</div>
-        <div class="kpi-value green">${inscrExtra.length}</div>
-        <div class="kpi-delta">inscripciones activas</div>
+        <div class="kpi-label">Alumnos únicos</div>
+        <div class="kpi-value green">\${alumnosExtra.length}</div>
+        <div class="kpi-delta">\${inscrExtra.length} inscripciones activas</div>
       </div>
     </div>
 
     <div class="card">
       <div class="card-header">
         <span>📋</span>
-        <div class="card-title">Alumnos CEIP Escaleritas · ${fmtMonth(mesActual)}</div>
-        <span style="margin-left:auto;font-size:12px;color:var(--grey-2)">${inscrExtra.length} inscripciones activas</span>
+        <div class="card-title">Alumnos CEIP Escaleritas · \${fmtMonth(mesActual)}</div>
+        <span style="margin-left:auto;font-size:12px;color:var(--grey-2)">\${alumnosExtra.length} alumnos · \${inscrExtra.length} inscripciones</span>
       </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Alumno</th><th>Actividad</th><th>Modalidad</th><th>Familia</th><th>Precio</th></tr></thead>
+        <thead><tr><th>Alumno</th><th>Actividades</th><th>Curso</th><th>Familia</th></tr></thead>
         <tbody>
-          ${inscrExtra.length ? inscrExtra.map(i => {
-            const a = getAlumno(i.alumnoId);
-            const c = getCliente(i.clienteId);
-            const nombreAlumno = a.nombre || String(i.claveAlumno || '').split('|').slice(1).join('|') || '—';
-            const nombreCliente = c.nombre || String(i.claveCliente || '').split('|').slice(1).join('|') || '—';
-            return `<tr>
+          \${alumnosExtra.length ? alumnosExtra.map(({ alumnoId, inscripciones }) => {
+            const a = getAlumno(alumnoId);
+            const c = getCliente(inscripciones[0]?.clienteId || '');
+            const nombreAlumno = a.nombre || String(inscripciones[0]?.claveAlumno||'').split('|').slice(1).join('|') || '—';
+            const nombreCliente = c.nombre || String(inscripciones[0]?.claveCliente||'').split('|').slice(1).join('|') || '—';
+            const badges = inscripciones.map(i => actividadBadge(i.servicio || i.SERVICIO || '—')).join(' ');
+            return \`<tr onclick="verExtraAlumno('\${alumnoId}')" style="cursor:pointer">
               <td><div style="display:flex;align-items:center;gap:8px">
-                <div class="avatar avatar-sm">${getInitials(nombreAlumno)}</div>
-                <div><div style="font-weight:500">${nombreAlumno}</div>
-                <div style="font-size:11px;color:var(--grey-2)">${a.curso||''}</div></div>
+                <div class="avatar avatar-sm">\${getInitials(nombreAlumno)}</div>
+                <div style="font-weight:500">\${nombreAlumno}</div>
               </div></td>
-              <td>${actividadBadge(i.servicio || i.SERVICIO || '—')}</td>
-              <td style="font-size:12px">${i.modalidad || i.MODALIDAD || '—'}</td>
-              <td style="font-size:12px;color:var(--grey-2)">${nombreCliente}</td>
-              <td><strong>${i.precio || i.PRECIO ? fmtEur(parseFloat(i.precio || i.PRECIO)||0) : '—'}</strong></td>
-            </tr>`;
-          }).join('') : '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🏫</div><div class="empty-title">Sin alumnos en CEIP Escaleritas</div><div class="empty-desc">Verifica que hay inscripciones activas en la hoja INSCRIPCIONES.</div></div></td></tr>'}
+              <td style="line-height:2">\${badges}</td>
+              <td style="font-size:12px;color:var(--grey-2)">\${a.curso||'—'}</td>
+              <td style="font-size:12px;color:var(--grey-2)">\${nombreCliente}</td>
+            </tr>\`;
+          }).join('') : '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">🏫</div><div class="empty-title">Sin alumnos en CEIP Escaleritas</div></div></td></tr>'}
         </tbody>
       </table></div>
-    </div>`;
+    </div>\`;
 }
 
-function verExtraAlumno(id) {
-  const e = DB.extraescolares.find(x=>x.id===id); if(!e) return;
-  const a = getAlumno(e.alumnoId);
-  const dias = Object.keys(e.asistenciasMes);
-  const totalDias = dias.length;
-  const pres = Object.values(e.asistenciasMes).filter(Boolean).length;
-  openModal(`${a.nombre} · ${e.actividad}`, `
+function verExtraAlumno(alumnoId) {
+  const a = getAlumno(alumnoId);
+  if (!a.nombre) { showToast('Alumno no encontrado', 'error'); return; }
+  // Todas las inscripciones activas del alumno en Escaleritas
+  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+  const inscrAlumno = DB.inscripciones.filter(i => {
+    const centro = String(i.centro||i.CENTRO||'').toUpperCase();
+    const serv   = String(i.servicio||i.SERVICIO||'').toUpperCase();
+    const activa = i.estado === 'ACTIVA';
+    return centro.includes('ESCALERITAS') && activa && !EXCLUIR.some(x=>serv===x) && String(i.alumnoId)===String(alumnoId);
+  });
+  const c = getCliente(inscrAlumno[0]?.clienteId || '');
+  const edad = calcEdad(a.fechaNac);
+  const fotoSrcExtra = fotoUrl(a.nombre, 'alumnos');
+  openModal(a.nombre, `
     <div style="display:flex;gap:1rem;align-items:center;margin-bottom:1.5rem">
-      <div class="avatar" style="width:48px;height:48px;font-size:16px">${getInitials(a.nombre)}</div>
+      <div style="width:60px;height:60px;border-radius:50%;overflow:hidden;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:var(--green-dim);flex-shrink:0">
+        <img src="${fotoSrcExtra}" alt="${a.nombre}" style="width:100%;height:100%;object-fit:cover"
+             onerror="this.style.display='none'">
+        ${getInitials(a.nombre)}
+      </div>
       <div>
         <div style="font-size:16px;font-weight:600">${a.nombre}</div>
-        <div style="font-size:13px;color:var(--grey-2)">${e.actividad} · ${e.centro} · ${e.monitor}</div>
-        <div style="margin-top:4px"><div class="camino-badge">⭐ ${e.camino} pts Camino SM</div></div>
+        <div style="font-size:13px;color:var(--grey-2)">${a.curso||'—'} · ${edad !== null ? edad + ' años' : ''}</div>
+        <div style="font-size:12px;color:var(--grey-2);margin-top:2px">Familia: ${c.nombre||'—'} · ${c.telefono||'Sin teléfono'}</div>
+        <div style="margin-top:6px"><div class="camino-badge">⭐ ${a.camino||0} pts Camino SM</div></div>
       </div>
     </div>
-    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
-      <div style="flex:1"><div class="progress-bar"><div class="progress-fill" style="width:${Math.round(pres/totalDias*100)}%"></div></div></div>
-      <strong>${Math.round(pres/totalDias*100)}%</strong>
-    </div>
-    <div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">${pres} días asistidos de ${totalDias} en marzo</div>
-    <div class="section-divider">Registro diario marzo</div>
-    <div class="attendance-grid">
-      ${dias.map(d => `
-        <div class="att-day ${e.asistenciasMes[d]?'present':'absent'}" title="Día ${d}">
-          ${d}
-        </div>`).join('')}
-    </div>`,
+    <div class="section-divider">Actividades en CEIP Escaleritas</div>
+    ${inscrAlumno.length ? inscrAlumno.map(i => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f5f5f5">
+        ${actividadBadge(i.servicio||i.SERVICIO||'—')}
+        <span style="font-size:12px;color:var(--grey-2)">${i.modalidad||i.MODALIDAD||'Mensualidad'}</span>
+        <span style="margin-left:auto;font-size:13px;font-weight:600">${i.precio ? fmtEur(parseFloat(i.precio)||0) : '—'}</span>
+      </div>`).join('') : '<div style="color:var(--grey-2);font-size:13px">Sin inscripciones activas encontradas.</div>'}
+    ${a.observaciones ? `<div style="margin-top:1rem;padding:.75rem;background:#f5f5f5;border-radius:6px;font-size:12px"><strong>Observaciones:</strong> ${a.observaciones}</div>` : ''}
+    `,
     `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
-     <button class="btn btn-primary" onclick="closeModal();darCaminoExtra('${id}')">⭐ Mejor alumno +10</button>`);
+     <button class="btn btn-primary" onclick="closeModal();darCaminoExtra('${alumnoId}')">⭐ Dar puntos Camino SM</button>`
+  );
 }
 
-function darCaminoExtra(eid) {
-  const e = DB.extraescolares.find(x=>x.id===eid); if(!e) return;
-  const a = getAlumno(e.alumnoId);
-  const cats = ['Compañerismo','Superación','Responsabilidad','Iniciativa'];
-  const cat = prompt(`Categoría Camino SM para ${a.nombre}:\n${cats.map((c,i)=>`${i+1}. ${c}`).join('\n')}`, '1');
+function darCaminoExtra(alumnoId) {
+  const a = getAlumno(alumnoId); if (!a.nombre) return;
+  const cats = ['Compañerismo','Superación','Responsabilidad','Iniciativa','Esfuerzo'];
+  const cat = prompt(`Categoría Camino SM para ${a.nombre}:\n${cats.map((c,i)=>`${i+1}. ${c}`).join('\n')}\nEscribe el número:`, '1');
   if (!cat) return;
-  e.camino += 10;
-  const al = DB.alumnos.find(x=>x.id===e.alumnoId);
-  if (al) al.camino += 10;
+  if (!a.camino) a.camino = 0;
+  a.camino += 10;
   saveCacheLocal();
   showToast(`+10 puntos Camino SM a ${a.nombre} (${cats[parseInt(cat)-1]||'Valores'}) ✓`, 'success');
   extraescolares();
@@ -2730,6 +3021,221 @@ function generarInformeAMPA() {
     <p style="margin-top:2rem;font-size:11px;color:#888">Informe generado por SM Academia · ${new Date().toLocaleDateString('es-ES')}</p>
   </body></html>`);
   w.document.close(); w.print();
+}
+
+// Pase de lista rápido para MONITOR de extraescolares (solo su actividad del día)
+function modalPaseListaExtraMonitor(filtroActividades) {
+  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+  const hoy = new Date().toISOString().split('T')[0];
+  // Alumnos de su actividad
+  const misAlumnos = DB.inscripciones.filter(i => {
+    const centro = String(i.centro||'').toUpperCase();
+    const serv   = String(i.servicio||'').toUpperCase();
+    const activa = i.estado === 'ACTIVA';
+    const esExcluido = EXCLUIR.some(x => serv === x);
+    const esSuActiv = !filtroActividades || filtroActividades.length === 0 ||
+                      filtroActividades.some(fa => serv.includes(fa) || fa.includes(serv));
+    return centro.includes('ESCALERITAS') && activa && !esExcluido && esSuActiv && String(i.alumnoId) !== '68';
+  });
+  const alumnosUnicos = [...new Set(misAlumnos.map(i => String(i.alumnoId)))]
+    .map(id => getAlumno(id)).filter(a => a.nombre)
+    .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
+
+  const actLabel = (filtroActividades && filtroActividades.length > 0)
+    ? filtroActividades.join(', ')
+    : 'Tu actividad';
+
+  openModal(`📋 Pase de lista · ${actLabel}`, `
+    <div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">${hoy} · ${alumnosUnicos.length} alumnos</div>
+    <div style="max-height:380px;overflow-y:auto">
+      ${alumnosUnicos.map(a => `
+        <label style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f5f5f5;cursor:pointer">
+          <input type="checkbox" class="pase-check" value="${a.id}"
+                 style="width:20px;height:20px;accent-color:var(--green);cursor:pointer">
+          <div class="avatar avatar-sm" style="min-width:32px">${getInitials(a.nombre)}</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${a.nombre}</div>
+            <div style="font-size:11px;color:var(--grey-2)">${a.curso||'—'}</div>
+          </div>
+        </label>`).join('')}
+    </div>
+    <div style="margin-top:.75rem;padding:.75rem;background:var(--green-bg);border-radius:6px;font-size:12px">
+      Selecciona los alumnos <strong>presentes</strong> hoy y pulsa Confirmar.
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="confirmarPaseListaMonitor('${actLabel}','${hoy}')">✅ Confirmar asistencia</button>`
+  );
+}
+
+async function confirmarPaseListaMonitor(actividad, fecha) {
+  const presentes = [...document.querySelectorAll('.pase-check:checked')].map(c => c.value);
+  const total     = document.querySelectorAll('.pase-check').length;
+  for (const aid of presentes) {
+    const a = getAlumno(aid);
+    await writeToSheet('ASISTENCIAS_EXTRA', {
+      FECHA: fecha, CLAVE_ALUMNO: a.claveAlumno || aid,
+      NOMBRE_ALUMNO: a.nombre || '',
+      ACTIVIDAD: actividad, PRESENTE: true,
+      MONITOR: currentUser.name
+    });
+  }
+  closeModal();
+  showToast(`Pase de lista guardado: ${presentes.length}/${total} presentes ✓`, 'success');
+}
+
+// Modal pase de lista para MONITOR de Tecnificación
+function modalPaseListaMonitor() {
+  const hoy = new Date().toISOString().split('T')[0];
+  const idsTecni = new Set(
+    DB.inscripciones
+      .filter(i => i.estado === 'ACTIVA' && String(i.servicio||'').toUpperCase().includes('TECNIFICACIÓN'))
+      .map(i => String(i.alumnoId))
+  );
+  const alumnos = DB.alumnos.filter(a => {
+    const activo = a.activo === true || String(a.activo||'').toUpperCase() === 'SÍ';
+    return activo && (idsTecni.has(String(a.id)) || a.actividad === 'TECNIFICACIÓN');
+  }).sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
+
+  openModal('📋 Pase de lista · Tecnificación', `
+    <div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">${hoy} · ${alumnos.length} alumnos</div>
+    <div style="max-height:380px;overflow-y:auto">
+      ${alumnos.map(a => `
+        <label style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f5f5f5;cursor:pointer">
+          <input type="checkbox" class="pase-check" value="${a.id}"
+                 style="width:20px;height:20px;accent-color:var(--green);cursor:pointer">
+          <div class="avatar avatar-sm" style="min-width:32px">${getInitials(a.nombre)}</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:600">${a.nombre}</div>
+            <div style="font-size:11px;color:var(--grey-2)">${a.grupo||'—'}</div>
+          </div>
+        </label>`).join('')}
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="confirmarPaseListaMonitor('TECNIFICACIÓN','${hoy}')">✅ Confirmar asistencia</button>`
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MONITOR — Pase de lista diario (filtrado por su actividad)
+═══════════════════════════════════════════════════════════ */
+function modalPaseListaMonitor() {
+  const hoy = new Date().toISOString().split('T')[0];
+  const monActividades = currentUser.actividades || [];
+  const esFutbol = currentUser.esTecnificacion;
+
+  // Alumnos según actividad del monitor
+  let alumnosDia = [];
+  if (esFutbol) {
+    // Tecnificación: alumnos con inscripción activa en TECNIFICACIÓN
+    const idsTecni = new Set(
+      DB.inscripciones
+        .filter(i => i.estado === 'ACTIVA' && String(i.servicio||'').toUpperCase().includes('TECNIFICACIÓN'))
+        .map(i => String(i.alumnoId))
+    );
+    alumnosDia = DB.alumnos.filter(a => idsTecni.has(String(a.id)) && a.activo).sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+  } else {
+    // Extraescolares: solo alumnos de SU(S) actividad(es) en CEIP Escaleritas
+    const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+    const actividadesMonitor = monActividades.map(a => a.split('(')[0].trim().toUpperCase());
+    const ids = new Set();
+    DB.inscripciones.filter(i => {
+      const centro = String(i.centro||'').toUpperCase();
+      const serv   = String(i.servicio||'').toUpperCase();
+      const activa = i.estado === 'ACTIVA';
+      const esActividadSuya = actividadesMonitor.some(am => serv.includes(am) || am.includes(serv));
+      return centro.includes('ESCALERITAS') && activa && !EXCLUIR.some(x=>serv===x) && esActividadSuya;
+    }).forEach(i => ids.add(String(i.alumnoId)));
+    alumnosDia = DB.alumnos.filter(a => ids.has(String(a.id)) && a.activo).sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||''));
+  }
+
+  openModal(`📋 Pase de lista · ${new Date().toLocaleDateString('es-ES')}`, `
+    <div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">
+      Marca los alumnos <strong>presentes</strong> hoy. Los ausentes quedan desmarcados.
+    </div>
+    <div style="max-height:380px;overflow-y:auto">
+      ${alumnosDia.map(a => `
+        <label style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;border:1px solid var(--grey);margin-bottom:6px;cursor:pointer;font-size:13px">
+          <input type="checkbox" class="pl-check" value="${a.id}" checked
+                 style="width:20px;height:20px;accent-color:var(--green)">
+          <div class="avatar avatar-sm" style="flex-shrink:0">${getInitials(a.nombre)}</div>
+          <div style="flex:1"><strong>${a.nombre}</strong></div>
+        </label>`).join('')}
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="guardarPaseListaMonitor('${hoy}',${esFutbol?'true':'false'})">✅ Confirmar asistencia</button>`
+  );
+}
+
+async function guardarPaseListaMonitor(fecha, esFutbol) {
+  const checks = [...document.querySelectorAll('.pl-check')];
+  const presentes = checks.filter(c=>c.checked).map(c=>c.value);
+  const ausentes  = checks.filter(c=>!c.checked).map(c=>c.value);
+  const actividad = esFutbol ? 'TECNIFICACIÓN' : (currentUser.actividades?.[0]||'EXTRAESCOLARES');
+
+  // Guardar en Sheets: una fila por alumno
+  for (const aid of [...presentes, ...ausentes]) {
+    const a = getAlumno(aid);
+    const presente = presentes.includes(aid);
+    await writeToSheet('ASISTENCIAS_EXTRA', {
+      ID_ASISTENCIA: `PL_${fecha}_${aid}`,
+      FECHA:         fecha,
+      ACTIVIDAD:     actividad,
+      MONITOR:       currentUser.name,
+      CLAVE_ALUMNO:  a.claveAlumno || aid,
+      NOMBRE_ALUMNO: a.nombre || '',
+      PRESENTE:      presente
+    });
+  }
+  closeModal();
+  showToast(`Pase de lista guardado: ${presentes.length} presentes, ${ausentes.length} ausentes ✓`, 'success');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   MONITOR — Mis datos personales y foto
+═══════════════════════════════════════════════════════════ */
+function modalMisDatos() {
+  const monNombre = (currentUser.name||'').toUpperCase();
+  const p = DB.personal.find(per => per.nombre && per.nombre.toUpperCase().includes(monNombre.split(' ')[0])) || {};
+  const fotoSrcMon = fotoUrl(p.nombre || currentUser.name, 'personal');
+  const slugMon = (p.nombre||currentUser.name||'').toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+  openModal('👤 Mis datos', `
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
+      <div style="width:72px;height:72px;border-radius:50%;overflow:hidden;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:var(--green-dim);flex-shrink:0">
+        <img id="foto-mon-preview" src="${fotoSrcMon}" style="width:100%;height:100%;object-fit:cover"
+             onerror="this.style.display='none'">
+        ${getInitials(p.nombre||currentUser.name)}
+      </div>
+      <div>
+        <div style="font-size:16px;font-weight:600">${p.nombre||currentUser.name||'—'}</div>
+        <div style="font-size:12px;color:var(--grey-2);margin-top:4px">${(p.actividades||[]).join(' · ')||'—'}</div>
+        <div style="font-size:11px;color:var(--grey-2);margin-top:6px;background:#f5f5f5;padding:5px 8px;border-radius:5px">
+          📷 Foto: sube <code>${slugMon}.jpg</code> a <code>img/personal/</code> en GitHub
+        </div>
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="field-group"><label class="field-label">Email</label>
+        <input class="field-input" id="mon-email" type="email" value="${p.email||''}"></div>
+      <div class="field-group"><label class="field-label">Teléfono</label>
+        <input class="field-input" id="mon-tel" value="${p.telefono||''}"></div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="guardarMisDatos('${p.id||''}')">Guardar</button>`
+  );
+}
+
+async function guardarMisDatos(pid) {
+  const email = document.getElementById('mon-email')?.value.trim();
+  const tel   = document.getElementById('mon-tel')?.value.trim();
+  const p = DB.personal.find(x => String(x.id) === String(pid));
+  if (p) { p.email = email; p.telefono = tel; }
+  saveCacheLocal();
+  if (pid) {
+    await updateInSheet('PERSONAL', pid, { EMAIL: email, TELEFONO: tel });
+  }
+  closeModal();
+  showToast('Datos actualizados ✓', 'success');
 }
 
 function modalAsistenciaExtra() {
@@ -2844,6 +3350,46 @@ function asistencia() {
    PAGE: PERSONAL
 ═══════════════════════════════════════════════════════════ */
 function personal() {
+  const role = currentUser.role;
+  // MONITOR: solo ve su propia ficha, solo edita sus datos y foto
+  if (role === 'MONITOR') {
+    const monNombre = (currentUser.name || '').toUpperCase();
+    const p = DB.personal.find(x =>
+      x.nombre === monNombre ||
+      x.nombre.includes(monNombre.split(' ')[0]) ||
+      monNombre.includes(x.nombre.split(' ')[0])
+    );
+    if (!p) {
+      document.getElementById('page-content').innerHTML =
+        '<div class="empty-state"><div class="empty-icon">👤</div><div class="empty-title">Ficha no encontrada</div><div class="empty-desc">No se ha encontrado tu ficha en la hoja PERSONAL. Contacta con el administrador.</div></div>';
+      return;
+    }
+    // Mostrar solo su ficha
+    const fotoSrcMon = fotoUrl(p.nombre, 'personal');
+    const nombreSlug = (p.nombre||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+    const actBadges = (p.actividades||[]).map(a => `<span class="badge badge-blue" style="margin:2px;font-size:11px">${a}</span>`).join('');
+    document.getElementById('page-content').innerHTML = `
+      <div class="card" style="max-width:480px;margin:0 auto">
+        <div class="card-body" style="padding:1.5rem">
+          <div style="display:flex;gap:1rem;align-items:center;margin-bottom:1.5rem">
+            <div style="width:72px;height:72px;border-radius:50%;overflow:hidden;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:var(--green-dim);flex-shrink:0">
+              <img src="${fotoSrcMon}" alt="${p.nombre}" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display='none'">
+              ${getInitials(p.nombre)}
+            </div>
+            <div>
+              <div style="font-size:18px;font-weight:700">${p.nombre}</div>
+              <div style="font-size:13px;color:var(--grey-2);margin-top:2px">${p.email||'Sin email'} · ${p.telefono||''}</div>
+              <div style="margin-top:6px;display:flex;flex-wrap:wrap">${actBadges}</div>
+            </div>
+          </div>
+          <div style="padding:10px 14px;background:#f9f9f9;border-radius:6px;font-size:11px;color:var(--grey-2);margin-bottom:1.25rem">
+            📷 Foto: sube <strong>${nombreSlug}.jpg</strong> a <code>img/personal/</code> en GitHub para que aparezca aquí
+          </div>
+          <button class="btn btn-primary" style="width:100%" onclick="modalEditarPersonal('${p.id}')">✏️ Editar mis datos</button>
+        </div>
+      </div>`;
+    return;
+  }
   addTopbarBtn('+ Añadir personal', () => modalNuevoPersonal(), 'btn-primary');
   const hoy = new Date();
   const lista = DB.personal || [];
@@ -2866,7 +3412,10 @@ function personal() {
       `<span class="badge badge-blue" style="font-size:10px;margin:1px">${act}</span>`
     ).join('');
     return `<div style="display:flex;align-items:center;gap:14px;padding:14px 1.25rem;border-bottom:1px solid #f5f5f5">
-      <div class="avatar" style="background:${p.activo?'var(--green-bg)':'#f0f0f0'};color:${p.activo?'var(--green-dim)':'var(--grey-2)'};min-width:40px">${getInitials(p.nombre)}</div>
+      <div class="avatar" style="background:${p.activo?'var(--green-bg)':'#f0f0f0'};color:${p.activo?'var(--green-dim)':'var(--grey-2)'};min-width:40px;overflow:hidden;position:relative">
+      <img src="${fotoUrl(p.nombre, 'personal')}" alt="" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;border-radius:50%" onerror="this.style.display='none'">
+      <span style="position:relative;z-index:1">${getInitials(p.nombre)}</span>
+    </div>
       <div style="flex:1;min-width:0">
         <div style="font-weight:600">${p.nombre||'—'}</div>
         <div style="font-size:12px;color:var(--grey-2);margin-bottom:4px">${p.email||'Sin email'} · ${p.telefono||''}</div>

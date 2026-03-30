@@ -473,6 +473,11 @@ tbody tr:hover { background: #fafafa; }
     <div style="margin-top:1rem;font-size:11px;color:#444;text-align:center">
       Sistema vinculado a Google Sheets · BASE DATOS SM
     </div>
+    <div style="margin-top:.75rem;text-align:center">
+      <button onclick="limpiarSesionEmergencia()" style="background:none;border:none;color:#888;font-size:11px;cursor:pointer;text-decoration:underline">
+        ¿Problemas para entrar? Limpiar sesión anterior
+      </button>
+    </div>
   </div>
 </div>
 
@@ -657,6 +662,13 @@ let lastSync = null;
 /* ═══════════════════════════════════════════════════════════
    CREDENTIALS (producción: Firebase Auth)
 ═══════════════════════════════════════════════════════════ */
+// Limpiar todo el localStorage y recargar (botón de emergencia en login)
+function limpiarSesionEmergencia() {
+  localStorage.clear();
+  showToast && showToast('Sesión limpiada. Vuelve a entrar.', 'success');
+  setTimeout(() => location.reload(), 800);
+}
+
 const CREDENTIALS = {
   'ADMIN': { pass: 'sm2026admin', name: 'Samy Martín', role: 'ADMIN', initials: 'SM' },
   'MONITOR': { pass: 'monitor2026', name: 'Monitor', role: 'MONITOR', initials: 'MO' },
@@ -3765,13 +3777,23 @@ function configuracion() {
 /* ═══════════════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════════════ */
-// Restaurar sesión si existe
+// Restaurar sesión si existe Y es válida
 const savedSession = localStorage.getItem(SESSION_KEY);
 if (savedSession) {
   try {
-    currentUser = JSON.parse(savedSession);
-    startApp();
-  } catch(e) { localStorage.removeItem(SESSION_KEY); }
+    const parsed = JSON.parse(savedSession);
+    // Solo restaurar si el rol existe en CREDENTIALS (evita bucles con sesiones rotas)
+    if (parsed && parsed.role && CREDENTIALS[parsed.role]) {
+      currentUser = parsed;
+      startApp();
+    } else {
+      // Sesión inválida o de versión anterior — limpiar y mostrar login
+      localStorage.removeItem(SESSION_KEY);
+      console.log('[SM] Sesión obsoleta eliminada, mostrando login');
+    }
+  } catch(e) {
+    localStorage.removeItem(SESSION_KEY);
+  }
 }
 </script>
 </body>

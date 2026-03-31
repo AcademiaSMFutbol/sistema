@@ -1579,9 +1579,15 @@ function getAlumnoFlex(ref) {
   // Match exacto por nombre completo
   const byNombre = DB.alumnos.find(a => (a.nombre||'').toUpperCase() === refU);
   if (byNombre) return byNombre;
-  // Match por primer nombre (para casos como "ANTONIO EZEQUIEL" → busca "ANTONIO")
+  // Match por primer nombre solo como último recurso
+  // NO usar para nombres genéricos como "VICTORIA", "MARTÍN", etc.
   const primerToken = refU.split(' ')[0];
-  return DB.alumnos.find(a => (a.nombre||'').toUpperCase().startsWith(primerToken)) || { nombre: ref };
+  // Solo aplicar si el primer token tiene ≥5 caracteres (reduce falsos positivos)
+  if (primerToken.length >= 5) {
+    const byPrimer = DB.alumnos.find(a => (a.nombre||'').toUpperCase().startsWith(primerToken));
+    if (byPrimer) return byPrimer;
+  }
+  return { nombre: ref };
 }
 function getPersona(id) { return DB.personal.find(p => String(p.id) === String(id)) || {}; }
 
@@ -3459,15 +3465,15 @@ function generarInformeAMPA() {
         .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
 
       const filas = alumnosAct.map(a => {
+        const nombreA = (a.nombre||'').toUpperCase();
         const presentes = asistMes.filter(x => {
           const xAid  = String(x.alumnoId || '');
           const xNom  = String(x.nombreAlumno || '').toUpperCase();
           const xAct  = String(x.actividad || '').toUpperCase();
-          const xPres = x.presente === true;
-          const matchAlumno = xAid === String(a.id) ||
-                              xNom === (a.nombre||'').toUpperCase() ||
-                              xNom.startsWith((a.nombre||'').split(' ')[0].toUpperCase());
-          return matchAlumno && xAct === act.toUpperCase() && xPres;
+          // Match estricto: por ID resuelto O nombre completo exacto
+          // NO usar primer token — evita que "VICTORIA X" matchee "VICTORIA Y"
+          const matchAlumno = (xAid && xAid === String(a.id)) || xNom === nombreA;
+          return matchAlumno && xAct.includes(act.toUpperCase()) && x.presente === true;
         }).length;
 
         const pct      = hayDatos ? Math.round(presentes / totalDias * 100) : null;

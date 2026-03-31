@@ -1148,33 +1148,42 @@ function normalizarDB(raw) {
       });
   }
 
-  // ASISTENCIAS_EXTRA — pases de lista registrados por los monitores
+  // ASISTENCIAS_EXTRA — headers reales: Fecha | Centro | Servicio | Alumno | Presente | Guardado por
   if (raw.asistencias_extra && raw.asistencias_extra.length) {
-    DB.asistencias_extra = raw.asistencias_extra.map(a => ({
-      id:          a.ID_ASISTENCIA  || '',
-      fecha:       String(a.FECHA   || '').split('T')[0],
-      mes:         String(a.MES     || a.mes || '').toLowerCase().trim(),
-      actividad:   String(a.ACTIVIDAD || '').trim(),
-      grupoDia:    String(a.GRUPO_DIA || '').trim(),
-      monitor:     String(a.MONITOR  || '').trim(),
-      alumnoId:    String(a.CLAVE_ALUMNO || '').split('|')[0],
-      nombreAlumno: String(a.NOMBRE_ALUMNO || '').trim(),
-      presente:    a.PRESENTE === true || String(a.PRESENTE||'').toUpperCase() === 'TRUE',
-      _raw: a
-    }));
+    const MESES_IDX = ['enero','febrero','marzo','abril','mayo','junio',
+                       'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    DB.asistencias_extra = raw.asistencias_extra
+      .filter(a => a.Fecha || a.FECHA)
+      .map((a, idx) => {
+        const fecha = String(a.Fecha || a.FECHA || '').split('T')[0];
+        const d     = new Date(fecha + 'T12:00:00');
+        const mes   = isNaN(d) ? '' : MESES_IDX[d.getMonth()];
+        // Actividad: normalizar a mayúsculas para comparar con INSCRIPCIONES
+        const actividad = String(a.Servicio || a.SERVICIO || a.ACTIVIDAD || '').trim().toUpperCase()
+          .replace('_', ' ');  // multideporte_adaptado → MULTIDEPORTE ADAPTADO
+        const nombreAlumno = String(a.Alumno || a.ALUMNO || a.NOMBRE_ALUMNO || '').trim().toUpperCase();
+        const presente = a.Presente === true || String(a.Presente || a.PRESENTE || '').toUpperCase() === 'TRUE';
+        // Resolver alumnoId por nombre
+        const alumnoObj = DB.alumnos.find(al => {
+          const n = (al.nombre || '').toUpperCase();
+          return n === nombreAlumno || n.startsWith(nombreAlumno.split(' ')[0]);
+        });
+        return {
+          id:           'AE_' + idx,
+          fecha,
+          mes,
+          centro:       String(a.Centro || a.CENTRO || '').trim(),
+          actividad,
+          alumnoId:     alumnoObj ? String(alumnoObj.id) : '',
+          nombreAlumno,
+          presente,
+          guardadoPor:  String(a['Guardado por'] || '').trim(),
+          _raw: a
+        };
+      });
   } else {
     DB.asistencias_extra = [];
   }
-
-  // Añadir campo mes a asistencias_extra si viene solo FECHA
-  DB.asistencias_extra.forEach(a => {
-    if (!a.mes && a.fecha) {
-      const d = new Date(a.fecha + 'T12:00:00');
-      const MESES = ['enero','febrero','marzo','abril','mayo','junio',
-                     'julio','agosto','septiembre','octubre','noviembre','diciembre'];
-      a.mes = MESES[d.getMonth()] || '';
-    }
-  });
 
   // Añadir GRUPO_DIA a inscripciones desde la columna de Sheets
   // (la app lo lee del campo grupoDia que mapearemos desde GRUPO_DIA en INSCRIPCIONES)

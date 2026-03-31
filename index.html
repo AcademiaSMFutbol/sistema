@@ -489,7 +489,7 @@ tbody tr:hover { background: #fafafa; }
     <div class="sidebar-header">
       <div class="brand">
         <div class="brand-icon" style="padding:0;overflow:hidden;background:#000">
-          <img src="https://drive.google.com/uc?export=view&id=1cULQdBcqP7C_dCf9-j-L8rUstmjb4aNI"
+          <img src="https://academiasmfutbol.github.io/img/LOGO%20ACADEMIA%20SM%20F%C3%9ATBOL.png"
                alt="SM" style="width:100%;height:100%;object-fit:contain"
                onerror="this.style.display='none';this.parentElement.textContent='SM'">
         </div>
@@ -773,7 +773,7 @@ function gasRequest(action, data = {}) {
 }
 
 // Logo oficial SM Academia (compartido desde Google Drive)
-const LOGO_URL = 'https://drive.google.com/uc?export=view&id=1cULQdBcqP7C_dCf9-j-L8rUstmjb4aNI';
+const LOGO_URL = 'https://academiasmfutbol.github.io/img/LOGO%20ACADEMIA%20SM%20F%C3%9ATBOL.png';
 // Fotos de jugadores y monitores — carpeta img en GitHub Pages
 // Formato: https://academiasmfutbol.github.io/img/jugadores/NOMBRE.jpg
 //          https://academiasmfutbol.github.io/img/monitores/NOMBRE.jpg
@@ -2426,7 +2426,7 @@ async function guardarInscripcion() {
 ═══════════════════════════════════════════════════════════ */
 function pagos() {
   addTopbarBtn('+ Registrar pago', () => modalNuevoPago(), 'btn-primary');
-  let filtered = [...DB.pagos];
+  let filtered = [...DB.pagos].sort((a,b) => new Date(b.fecha||0) - new Date(a.fecha||0));
   const totalIng = filtered.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+p.totalRecibido,0);
   const totalPend = filtered.filter(p=>(p.estado||'').toUpperCase()!=='PAGADO').reduce((s,p)=>s+(p.totalEsperado-p.totalRecibido),0);
   const render = () => {
@@ -2474,9 +2474,10 @@ function pagos() {
       </table></div>
     </div>`;
   render();
-  window.filtrarPagosQ = (q) => { filtered = DB.pagos.filter(p => { const a=getAlumno(p.alumnoId); return a.nombre&&a.nombre.toLowerCase().includes(q.toLowerCase()); }); render(); };
-  window.filtrarPagosMes = (v) => { filtered = v ? DB.pagos.filter(p=>p.mes===v) : [...DB.pagos]; render(); };
-  window.filtrarPagosEstado = (v) => { filtered = v ? DB.pagos.filter(p=>p.estado===v) : [...DB.pagos]; render(); };
+  const sortDesc = arr => [...arr].sort((a,b) => new Date(b.fecha||0) - new Date(a.fecha||0));
+  window.filtrarPagosQ = (q) => { filtered = sortDesc(DB.pagos.filter(p => { const a=getAlumno(p.alumnoId); return a.nombre&&a.nombre.toLowerCase().includes(q.toLowerCase()); })); render(); };
+  window.filtrarPagosMes = (v) => { filtered = sortDesc(v ? DB.pagos.filter(p=>p.mes===v) : [...DB.pagos]); render(); };
+  window.filtrarPagosEstado = (v) => { filtered = sortDesc(v ? DB.pagos.filter(p=>p.estado===v) : [...DB.pagos]); render(); };
 }
 
 function verPago(id) {
@@ -2601,7 +2602,7 @@ function facturas() {
     const pagos = DB.pagos.filter(p=>p.facturaId===fid);
     const cliente = getCliente(pagos[0]?.clienteId||'');
     return { id: fid, pagos, cliente, fecha: pagos[0]?.fecha, total: pagos.reduce((s,p)=>s+p.totalEsperado,0) };
-  });
+  }).sort((a,b) => new Date(b.fecha||0) - new Date(a.fecha||0));
   document.getElementById('page-content').innerHTML = `
     ${listos.length>0?`<div class="card" style="border-color:var(--orange);background:var(--orange-bg);margin-bottom:1rem">
       <div class="card-header"><span>⏳</span><div class="card-title">${listos.length} pagos listos para facturar</div>

@@ -963,31 +963,33 @@ function normalizarDB(raw) {
       // El filtro fuerte lo aplica GET_PAGOS en el GAS
       .filter(p => String(p.id_pago || '').trim() !== '')
       .map(p => {
+      // Claves normalizadas por getPagosData() en el GAS
       const alumnoId  = String(p.clave_alumno  || '').split('|')[0];
       const clienteId = String(p.clave_cliente || '').split('|')[0];
+      const fmtNum    = v => parseFloat(String(v||'0').replace(',','.')) || 0;
       return {
-        id: String(p.id_pago || ''),
-        fecha: p.fecha || '',
-        mes: p.mes || '',
-        inscripcionId: String(p.clave_inscripcion || '').split('|')[0],
+        id:               String(p.id_pago || '').trim(),
+        fecha:            String(p.fecha   || '').split('T')[0],
+        mes:              String(p.mes     || '').toLowerCase().trim(),
+        inscripcionId:    String(p.clave_inscripcion || '').split('|')[0],
         claveInscripcion: p.clave_inscripcion || '',
-        servicio: p.servicio || '',
-        modalidad: p.modalidad || '',
+        servicio:         String(p.servicio  || '').trim(),
+        modalidad:        String(p.modalidad || '').trim(),
         alumnoId,
         clienteId,
-        claveAlumno: p.clave_alumno || '',
-        claveCliente: p.clave_cliente || '',
-        base: parseFloat(p.base_imponible) || 0,
-        igicPct: parseFloat(p.igic) || 0,        // campo normalizado del GAS
-        igicEur: parseFloat(p.igic) || 0,
-        descPct: 0,
-        descEur: parseFloat(p.descuento) || 0,
-        totalEsperado: parseFloat(p.total_esperado) || 0,
-        totalRecibido: parseFloat(p.total_recibido) || 0,
-        estado: p.estado_pago || 'PENDIENTE',
-        metodo: p.metodo_de_pago || '',
-        facturaId: String(p.id_factura || ''),
-        estadoPdf: p.estado_pdf || '',
+        claveAlumno:   p.clave_alumno  || '',
+        claveCliente:  p.clave_cliente || '',
+        base:          fmtNum(p.base_imponible),
+        igicPct:       fmtNum(p.igic_pct),
+        igicEur:       fmtNum(p.igic_eur),
+        descPct:       fmtNum(p.descuento_pct),
+        descEur:       fmtNum(p.descuento_eur),
+        totalEsperado: fmtNum(p.total_esperado),
+        totalRecibido: fmtNum(p.total_recibido),
+        estado:        String(p.estado_pago    || 'PENDIENTE').toUpperCase().trim(),
+        metodo:        String(p.metodo_de_pago || '').trim(),
+        facturaId:     String(p.id_factura     || '').trim(),
+        estadoPdf:     String(p.estado_pdf     || '').trim(),
         _raw: p
       };
     });  // fin .map

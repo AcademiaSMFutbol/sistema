@@ -1245,15 +1245,9 @@ async function syncAll() {
     const res = await gasRequest('GET_ALL');
     if (res.ok && res.data) {
       normalizarDB(res.data);
-      // Verificar si PAGOS llegó completo — si no, sincronizar por separado
-      const pagosRecibidos = res.data.pagos ? res.data.pagos.length : 0;
-      const pagosLocales   = DB.pagos.length;
-      if (pagosRecibidos < pagosLocales * 0.8 && pagosLocales > 0) {
-        // GET_ALL parece incompleto — sincronizar PAGOS por separado
-        await syncPagos(true);
-      }
       renderCurrentPage();
-      showToast(`Datos sincronizados ✓ · ${pagosRecibidos} pagos`, 'success');
+      const np = DB.pagos.length;
+      showToast(`Datos sincronizados ✓ · ${np} pago${np!==1?'s':''}`, 'success');
       saveCacheLocal();
       updateBadges();
     } else {
@@ -1265,23 +1259,31 @@ async function syncAll() {
   }
 }
 
-// Sincronizar solo la hoja PAGOS (llamada independiente)
-async function syncPagos(silencioso) {
-  if (!GAS_URL) return;
+// Sincronizar solo PAGOS — llamada independiente al GAS
+// Útil cuando GET_ALL no trae todos los pagos por límite de respuesta
+async function syncPagos() {
+  if (!GAS_URL) { showToast('Sin URL GAS configurada', 'error'); return; }
+  showToast('Actualizando pagos…', 'info');
+  setSyncState('syncing');
   try {
     const res = await gasRequest('GET_SHEET', { sheet: 'PAGOS' });
-    if (res.ok && res.rows) {
-      // Normalizar solo pagos y reemplazar en DB
-      const rawPagos = { pagos: res.rows };
-      normalizarDB(rawPagos);
+    if (res.ok && res.rows && res.rows.length) {
+      // GET_SHEET devuelve { rows: [...filas crudas...] }
+      // Pasamos como si fuera raw.pagos directamente a normalizarDB
+      normalizarDB({ pagos: res.rows });
+      renderCurrentPage();
       saveCacheLocal();
-      if (!silencioso) {
-        renderCurrentPage();
-        showToast(`${DB.pagos.length} pagos sincronizados ✓`, 'success');
-      }
+      setSyncState('ok');
+      showToast(`${DB.pagos.length} pagos actualizados ✓`, 'success');
+    } else if (res.ok && res.rows && res.rows.length === 0) {
+      showToast('La hoja PAGOS está vacía o no se encontró', 'warning');
+      setSyncState('ok');
+    } else {
+      throw new Error(res.error || 'Sin datos');
     }
   } catch(e) {
-    if (!silencioso) showToast('Error al sincronizar pagos: ' + e.message, 'error');
+    setSyncState('error');
+    showToast('Error al actualizar pagos: ' + e.message, 'error');
   }
 }
 
@@ -2453,6 +2455,7 @@ async function guardarInscripcion() {
 ═══════════════════════════════════════════════════════════ */
 function pagos() {
   addTopbarBtn('+ Registrar pago', () => modalNuevoPago(), 'btn-primary');
+  addTopbarBtn('🔄 Actualizar', () => syncPagos(), 'btn-secondary');
   let filtered = [...DB.pagos].sort((a,b) => new Date(b.fecha||0) - new Date(a.fecha||0));
   const totalIng = filtered.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+p.totalRecibido,0);
   const totalPend = filtered.filter(p=>(p.estado||'').toUpperCase()!=='PAGADO').reduce((s,p)=>s+(p.totalEsperado-p.totalRecibido),0);

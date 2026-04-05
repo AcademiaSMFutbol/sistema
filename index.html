@@ -651,7 +651,14 @@ const DATA_KEY = 'sm_data_cache';
 const SESSION_KEY = 'sm_session';
 const SYNC_KEY = 'sm_last_sync';
 
-let GAS_URL = localStorage.getItem(CONFIG_KEY) || '';
+// URL del GAS hardcodeada como fallback para incógnito/móvil/dispositivos nuevos
+// Si existe en localStorage (guardada desde Configuración) tiene prioridad
+const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzOBn9pwpWRYL8MDm_xS-vYJNk2WGcJ2WluO24fgBmjtdUBHPkJ7G349fPR22cPSI8Qfg/exec'; // ← reemplazar con la URL real del Web App
+let GAS_URL = localStorage.getItem(CONFIG_KEY) || GAS_URL_DEFAULT;
+// Sincronizar: si se cargó el default, guardarlo en localStorage para próximas visitas
+if (!localStorage.getItem(CONFIG_KEY) && GAS_URL_DEFAULT !== 'PEGA_TU_URL_GAS_AQUI') {
+  localStorage.setItem(CONFIG_KEY, GAS_URL_DEFAULT);
+}
 let currentUser = null;
 let currentPage = 'dashboard';
 let DB = {
@@ -1074,7 +1081,6 @@ function normalizarDB(raw) {
       }
     });
     DB.personal = Object.values(personaMap);
-    // El select se puebla desde poblarSelectMonitores() — llamada tras sync y caché
   }
 
   // SESIONES SM Fútbol — desde hoja SESIONES (estructura real de Sheets)
@@ -1272,7 +1278,6 @@ async function syncAll() {
     if (resPagos.ok && Array.isArray(resPagos.pagos)) {
       normalizarDB({ pagos: resPagos.pagos });
     }
-    poblarSelectMonitores(); // actualizar select login con datos reales
     renderCurrentPage();
     const np = DB.pagos.length;
     showToast(`Sincronizado ✓ · ${np} pago${np!==1?'s':''}`, 'success');
@@ -1574,6 +1579,17 @@ function startApp() {
     // Ocultar todo el sidebar excepto el logout
     document.querySelectorAll('.nav-section').forEach(s => s.style.display = 'none');
     if (!loadCacheLocal()) loadDemoData();
+    // Mostrar spinner mientras cargan los datos
+    const pc = document.getElementById('page-content');
+    if (pc) pc.innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:1.5rem">
+        <div style="width:48px;height:48px;border:4px solid #e0e0e0;border-top-color:var(--green);
+                    border-radius:50%;animation:spin 0.8s linear infinite"></div>
+        <div style="text-align:center">
+          <div style="font-size:15px;font-weight:600;margin-bottom:.25rem">Cargando tu portal…</div>
+          <div style="font-size:12px;color:var(--grey-2)">Conectando con Google Sheets</div>
+        </div>
+      </div>`;
     if (GAS_URL) syncAll().then(() => portalFamilia()).catch(() => portalFamilia());
     else portalFamilia();
     setInterval(updateSyncTime, 60000);
@@ -4579,6 +4595,32 @@ function portalFamilia() {
       </table></div>
     </div>` : '';
 
+  // ── Informes mensuales disponibles ──
+  const mesesConPagos = [...new Set(
+    misPagos.filter(p=>p.mes).map(p => {
+      const f = p.fecha ? new Date(p.fecha).getFullYear() : new Date().getFullYear();
+      return (p.mes||'').toLowerCase() + '|' + f;
+    })
+  )].slice(0,6); // últimos 6 meses con actividad
+
+  let informesBlock = '';
+  if (mesesConPagos.length) {
+    const botonesInformes = mesesConPagos.map(mk => {
+      const [mes, anyo] = mk.split('|');
+      const ps  = misPagos.filter(p=>(p.mes||'').toLowerCase()===mes && (p.fecha?new Date(p.fecha).getFullYear():0)==+anyo);
+      const tot = ps.reduce((s,p)=>s+p.totalEsperado,0);
+      return '<button class="btn btn-secondary btn-sm" onclick="informeMensualFamilia(\'' + mes + '\',' + anyo + ')" ' +
+        'style="display:flex;flex-direction:column;align-items:start;padding:.5rem .75rem;height:auto">' +
+        '<span style="font-size:12px;font-weight:600">' + fmtMonth(mes) + ' ' + anyo + '</span>' +
+        '<span style="font-size:11px;color:var(--grey-2)">' + fmtEur(tot) + '</span>' +
+        '</button>';
+    }).join('');
+    informesBlock = '<div class="card" style="margin-bottom:1rem">' +
+      '<div class="card-header"><span>📊</span><div class="card-title">Informes mensuales</div></div>' +
+      '<div class="card-body"><div style="display:flex;flex-wrap:wrap;gap:.5rem">' + botonesInformes + '</div></div>' +
+      '</div>';
+  }
+
   // ── Render final ──
   document.getElementById('page-title').textContent = 'Mi portal';
   document.getElementById('page-sub').textContent   = 'Seguimiento de ' + (misAlumnos.length > 1 ? 'tus alumnos' : misAlumnos[0].nombre||'tu alumno');
@@ -4592,11 +4634,74 @@ function portalFamilia() {
       <button onclick="logout()" class="btn btn-secondary btn-sm" style="margin-left:auto">⏏ Salir</button>
     </div>
     ${tarjetasAlumnos}
+    ${informesBlock}
     ${pagosBlock}
     ${facturasBlock}`;
 
   // Ocultar topbar-actions heredadas
   document.getElementById('topbar-actions').innerHTML = '';
+}
+
+// Informe mensual para familia — resumen de pagos del mes seleccionado
+function informeMensualFamilia(mes, anyo) {
+  const clienteId = currentUser.clienteId || '';
+  const cliente   = getCliente(clienteId);
+  const misPagos  = DB.pagos.filter(p =>
+    String(p.clienteId) === String(clienteId) &&
+    (p.mes||'').toLowerCase() === mes.toLowerCase() &&
+    (p.fecha ? new Date(p.fecha).getFullYear() : 0) === anyo
+  );
+
+  const totalEsperado = misPagos.reduce((s,p)=>s+p.totalEsperado,0);
+  const totalPagado   = misPagos.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+p.totalRecibido,0);
+  const pendiente     = totalEsperado - totalPagado;
+
+  const filas = misPagos.map(p => {
+    const a = getAlumno(p.alumnoId);
+    return '<tr>' +
+      '<td>' + (a.nombre||'—') + '</td>' +
+      '<td>' + (p.servicio||'—') + '</td>' +
+      '<td style="text-align:right">' + fmtEur(p.base) + '</td>' +
+      '<td style="text-align:right">' + fmtEur(p.igicEur) + '</td>' +
+      '<td style="text-align:right;font-weight:600">' + fmtEur(p.totalEsperado) + '</td>' +
+      '<td style="text-align:center">' + estadoPagoBadge(p.estado) + '</td>' +
+    '</tr>';
+  }).join('');
+
+  const css = '<style>body{font-family:Arial,sans-serif;margin:1.5cm 2cm;color:#000;font-size:13px}' +
+    'h1{font-size:18px;color:#2e7d32;margin:0}h2{font-size:12px;font-weight:normal;color:#666;margin-bottom:1.5rem}' +
+    'table{width:100%;border-collapse:collapse;margin:.75rem 0}' +
+    'th{background:#e8f5e9;padding:7px 10px;font-size:11px;text-transform:uppercase;text-align:left;border-bottom:2px solid #2e7d32}' +
+    'td{padding:7px 10px;border-bottom:1px solid #f0f0f0}' +
+    '.kpi{display:flex;gap:1rem;margin-bottom:1rem}' +
+    '.kbox{flex:1;background:#f9f9f9;border:1px solid #eee;border-radius:6px;padding:.75rem;text-align:center}' +
+    '.klabel{font-size:10px;color:#888;text-transform:uppercase}' +
+    '.kval{font-size:20px;font-weight:700;color:#2e7d32;margin-top:2px}' +
+    '.kval.red{color:#c62828}' +
+    '.footer{margin-top:2rem;font-size:10px;color:#aaa;border-top:1px solid #eee;padding-top:.5rem}</style>';
+
+  const mesLabel = fmtMonth(mes);
+  const html = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Informe ' + mesLabel + ' ' + anyo + '</title>' + css + '</head><body>' +
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.2rem">' +
+      '<img src="https://academiasmfutbol.github.io/sistema/img/logo.png" style="height:50px;object-fit:contain" onerror="this.style.display=\'none\'">' +
+      '<div><h1>Resumen mensual · ' + mesLabel + ' ' + anyo + '</h1>' +
+        '<h2>' + (cliente.nombre||currentUser.name) + ' · academiasmfutbol.com</h2></div>' +
+    '</div>' +
+    '<div class="kpi">' +
+      '<div class="kbox"><div class="klabel">Total facturado</div><div class="kval">' + fmtEur(totalEsperado) + '</div></div>' +
+      '<div class="kbox"><div class="klabel">Pagado</div><div class="kval">' + fmtEur(totalPagado) + '</div></div>' +
+      '<div class="kbox"><div class="klabel">Pendiente</div><div class="kval' + (pendiente>0?' red':'') + '">' + fmtEur(pendiente) + '</div></div>' +
+    '</div>' +
+    (misPagos.length ?
+      '<table><thead><tr><th>Alumno</th><th>Servicio</th><th>Base</th><th>IGIC</th><th>Total</th><th style="text-align:center">Estado</th></tr></thead><tbody>' + filas + '</tbody></table>'
+      : '<p style="color:#999;font-style:italic">Sin pagos registrados en ' + mesLabel + ' ' + anyo + '</p>') +
+    '<div class="footer">Generado por SM Academia · ' + new Date().toLocaleDateString('es-ES') + '</div>' +
+    '</body></html>';
+
+  const w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
+  w.print();
 }
 
 function informes() {

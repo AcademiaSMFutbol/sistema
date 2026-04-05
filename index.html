@@ -1281,7 +1281,7 @@ async function syncAll() {
   } catch (e) {
     setSyncState('error');
     showToast('Error de conexión: ' + e.message, 'error');
-    throw e; // relanzar para que initApp lo capture
+    // No relanzar — permite que .then() y await continúen sin romper flujo
   }
 }
 
@@ -1574,7 +1574,7 @@ function startApp() {
     // Ocultar todo el sidebar excepto el logout
     document.querySelectorAll('.nav-section').forEach(s => s.style.display = 'none');
     if (!loadCacheLocal()) loadDemoData();
-    if (GAS_URL) syncAll().then(() => portalFamilia());
+    if (GAS_URL) syncAll().then(() => portalFamilia()).catch(() => portalFamilia());
     else portalFamilia();
     setInterval(updateSyncTime, 60000);
     return;

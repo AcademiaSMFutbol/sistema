@@ -1071,25 +1071,7 @@ function normalizarDB(raw) {
       }
     });
     DB.personal = Object.values(personaMap);
-    // Poblar select de monitores en login (excluye al director)
-    const EXCLUIR_ADMIN = ['ANTONIO SAMUEL', 'SAMY', 'SAMUEL'];
-    const monSelect = document.getElementById('login-monitor-name');
-    if (monSelect) {
-      monSelect.innerHTML = '<option value="">— Selecciona tu nombre —</option>';
-      DB.personal
-        .filter(p => {
-          const n = (p.nombre || '').toUpperCase();
-          return p.activo && !EXCLUIR_ADMIN.some(x => n.startsWith(x));
-        })
-        .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''))
-        .forEach(p => {
-          const opt = document.createElement('option');
-          opt.value = p.nombre;
-          const primerosNombres = (p.nombre||'').split(' ').slice(0,2).join(' ');
-          opt.textContent = primerosNombres;
-          monSelect.appendChild(opt);
-        });
-    }
+    // El select se puebla desde poblarSelectMonitores() — llamada tras sync y caché
   }
 
   // SESIONES SM Fútbol — desde hoja SESIONES (estructura real de Sheets)
@@ -1287,6 +1269,7 @@ async function syncAll() {
     if (resPagos.ok && Array.isArray(resPagos.pagos)) {
       normalizarDB({ pagos: resPagos.pagos });
     }
+    poblarSelectMonitores(); // actualizar select login con datos reales
     renderCurrentPage();
     const np = DB.pagos.length;
     showToast(`Sincronizado ✓ · ${np} pago${np!==1?'s':''}`, 'success');
@@ -1444,6 +1427,38 @@ document.getElementById('login-role').addEventListener('change', function() {
   document.getElementById('login-familia-wrap').style.display = this.value === 'FAMILIA' ? '' : 'none';
 });
 document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+// Puebla el select de monitores desde DB.personal
+// Se llama tras syncAll, loadCacheLocal y loadDemoData
+function poblarSelectMonitores() {
+  const monSelect = document.getElementById('login-monitor-name');
+  if (!monSelect) return;
+  // Solo NOMBRE — columna NOMBRE en hoja PERSONAL
+  const EXCLUIR = ['ANTONIO SAMUEL', 'SAMY', 'SAMUEL'];
+  const monitores = DB.personal
+    .filter(p => {
+      const n = (p.nombre || '').toUpperCase();
+      // Activo y no es el director
+      return !EXCLUIR.some(x => n.startsWith(x));
+    })
+    .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
+
+  monSelect.innerHTML = '<option value="">— Selecciona tu nombre —</option>';
+  monitores.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.nombre;
+    // Mostrar solo primeros dos tokens (ESTHER MARRERO en lugar de ESTHER MARRERO DÍAZ)
+    opt.textContent = (p.nombre||'').split(' ').slice(0,2).join(' ');
+    monSelect.appendChild(opt);
+  });
+  // Feedback si no hay monitores cargados aún
+  if (monitores.length === 0) {
+    const opt = document.createElement('option');
+    opt.disabled = true;
+    opt.textContent = 'Cargando datos…';
+    monSelect.appendChild(opt);
+  }
+}
 
 function doLogin() {
   const role = document.getElementById('login-role').value;

@@ -465,7 +465,10 @@ tbody tr:hover { background: #fafafa; }
       <input type="password" id="login-pass" placeholder="••••••••">
     </div>
     <div class="login-error" id="login-error">Credenciales incorrectas. Verifica tus datos.</div>
-    <button class="btn-login" onclick="doLogin()">Entrar al sistema</button>
+    <div id="login-loading" style="text-align:center;padding:.75rem;font-size:12px;color:#888;display:none">
+      <span id="login-loading-txt">⏳ Cargando datos del sistema…</span>
+    </div>
+    <button class="btn-login" id="btn-login" onclick="doLogin()">Entrar al sistema</button>
     <div style="margin-top:1rem;font-size:11px;color:#444;text-align:center">
       Sistema vinculado a Google Sheets · BASE DATOS SM
     </div>
@@ -1277,7 +1280,8 @@ async function syncAll() {
     updateBadges();
   } catch (e) {
     setSyncState('error');
-    showToast('Error: ' + e.message, 'error');
+    showToast('Error de conexión: ' + e.message, 'error');
+    throw e; // relanzar para que initApp lo capture
   }
 }
 
@@ -4654,24 +4658,56 @@ function configuracion() {
 /* ═══════════════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════════════ */
-// Restaurar sesión si existe Y es válida
-const savedSession = localStorage.getItem(SESSION_KEY);
-if (savedSession) {
-  try {
-    const parsed = JSON.parse(savedSession);
-    // Solo restaurar si el rol existe en CREDENTIALS (evita bucles con sesiones rotas)
-    if (parsed && parsed.role && CREDENTIALS[parsed.role]) {
-      currentUser = parsed;
-      startApp();
-    } else {
-      // Sesión inválida o de versión anterior — limpiar y mostrar login
-      localStorage.removeItem(SESSION_KEY);
-      console.log('[SM] Sesión obsoleta eliminada, mostrando login');
-    }
-  } catch(e) {
-    localStorage.removeItem(SESSION_KEY);
+async function initApp() {
+  // 1. Restaurar sesión activa
+  const savedSession = localStorage.getItem(SESSION_KEY);
+  if (savedSession) {
+    try {
+      const parsed = JSON.parse(savedSession);
+      if (parsed && parsed.role && CREDENTIALS[parsed.role]) {
+        currentUser = parsed;
+        // Cargar datos y arrancar
+        loadCacheLocal();
+        if (GAS_URL) await syncAll();
+        startApp();
+        return;
+      } else {
+        localStorage.removeItem(SESSION_KEY);
+      }
+    } catch(e) { localStorage.removeItem(SESSION_KEY); }
   }
+
+  // 2. Sin sesión — mostrar login y cargar datos en paralelo
+  // Mostrar spinner mientras cargan los datos
+  const loadingEl = document.getElementById('login-loading');
+  const btnLogin  = document.getElementById('btn-login');
+  if (loadingEl) loadingEl.style.display = 'block';
+  if (btnLogin)  btnLogin.disabled = true;
+
+  // Intentar cargar desde caché primero (instantáneo)
+  const hasCaché = loadCacheLocal();
+
+  // Siempre sincronizar con Sheets para tener datos frescos
+  if (GAS_URL) {
+    try {
+      await syncAll();
+    } catch(e) {
+      console.warn('[SM] syncAll falló en init:', e.message);
+    }
+  }
+
+  // Datos listos — habilitar login
+  if (loadingEl) {
+    const nPersonal = DB.personal.length;
+    const nClientes = DB.clientes.length;
+    loadingEl.innerHTML = nPersonal > 0 || nClientes > 0
+      ? '<span style="color:#66bb6a">✓ Datos listos · ' + nPersonal + ' monitores · ' + nClientes + ' familias</span>'
+      : '<span style="color:#ffa726">⚠️ Sin datos cargados — verifica la conexión GAS</span>';
+  }
+  if (btnLogin) btnLogin.disabled = false;
 }
+
+initApp();
 </script>
 </body>
 </html>

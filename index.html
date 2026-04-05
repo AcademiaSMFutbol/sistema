@@ -1277,20 +1277,21 @@ async function syncAll() {
   showToast('Sincronizando con Google Sheets…', 'info');
   setSyncState('syncing');
   try {
-    // GET_ALL trae todo excepto PAGOS (que va por separado para garantizar integridad)
-    const [resAll, resPagos] = await Promise.all([
-      gasRequest('GET_ALL'),
-      gasRequest('GET_PAGOS')
-    ]);
+    // SECUENCIAL — JSONP no soporta paralelismo real (usa callbacks globales)
+    // Paso 1: GET_ALL trae alumnos, clientes, inscripciones, sesiones, personal, gastos…
+    const resAll = await gasRequest('GET_ALL');
     if (resAll.ok && resAll.data) {
       normalizarDB(resAll.data);
-    } else {
-      throw new Error(resAll.error || 'GET_ALL falló');
     }
-    // Sobrescribir pagos con datos limpios de GET_PAGOS
-    if (resPagos.ok && Array.isArray(resPagos.pagos)) {
-      normalizarDB({ pagos: resPagos.pagos });
-    }
+    // Paso 2: GET_PAGOS garantiza pagos completos y filtrados (sin filas vacías)
+    try {
+      const resPagos = await gasRequest('GET_PAGOS');
+      if (resPagos.ok && Array.isArray(resPagos.pagos)) {
+        normalizarDB({ pagos: resPagos.pagos });
+      }
+    } catch(ep) { /* pagos fallan silenciosamente — no bloquear flujo */ }
+
+    setSyncState('ok');
     renderCurrentPage();
     const np = DB.pagos.length;
     showToast(`Sincronizado ✓ · ${np} pago${np!==1?'s':''}`, 'success');
@@ -1299,7 +1300,6 @@ async function syncAll() {
   } catch (e) {
     setSyncState('error');
     showToast('Error de conexión: ' + e.message, 'error');
-    // No relanzar — permite que .then() y await continúen sin romper flujo
   }
 }
 
@@ -1593,18 +1593,20 @@ function startApp() {
     document.querySelectorAll('.nav-section').forEach(s => s.style.display = 'none');
     if (!loadCacheLocal()) loadDemoData();
     // Mostrar spinner mientras cargan los datos
-    const pc = document.getElementById('page-content');
-    if (pc) pc.innerHTML = `
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:1.5rem">
-        <div style="width:48px;height:48px;border:4px solid #e0e0e0;border-top-color:var(--green);
-                    border-radius:50%;animation:spin 0.8s linear infinite"></div>
-        <div style="text-align:center">
-          <div style="font-size:15px;font-weight:600;margin-bottom:.25rem">Cargando tu portal…</div>
-          <div style="font-size:12px;color:var(--grey-2)">Conectando con Google Sheets</div>
-        </div>
-      </div>`;
-    if (GAS_URL) syncAll().then(() => portalFamilia()).catch(() => portalFamilia());
-    else portalFamilia();
+    const pcf = document.getElementById('page-content');
+    if (pcf) pcf.innerHTML =
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:1.5rem">' +
+        '<div style="width:48px;height:48px;border:4px solid #e0e0e0;border-top-color:var(--green);' +
+             'border-radius:50%;animation:spin 0.8s linear infinite"></div>' +
+        '<div style="text-align:center">' +
+          '<div style="font-size:15px;font-weight:600;margin-bottom:.25rem">Cargando tu portal…</div>' +
+          '<div style="font-size:12px;color:var(--grey-2)">Conectando con Google Sheets</div>' +
+        '</div></div>';
+    if (GAS_URL) {
+      syncAll().then(() => portalFamilia()).catch(() => portalFamilia());
+    } else {
+      portalFamilia();
+    }
     setInterval(updateSyncTime, 60000);
     return;
   }
@@ -4439,8 +4441,18 @@ function portalFamilia() {
   const cliente    = getCliente(clienteId);
   const pc         = document.getElementById('page-content');
 
-  // Alumnos vinculados a esta familia
-  const misAlumnos = DB.alumnos.filter(a => String(a.clienteId) === String(clienteId));
+  // Alumnos vinculados — match por clienteId directo
+  // Fallback: por CLAVE CLIENTE en inscripciones activas
+  let misAlumnos = DB.alumnos.filter(a => String(a.clienteId) === String(clienteId));
+  if (!misAlumnos.length && clienteId) {
+    // Intentar match por claveCliente (formato "3|NOMBRE")
+    const ids = new Set(
+      DB.inscripciones
+        .filter(i => String(i.clienteId) === String(clienteId) && i.estado === 'ACTIVA')
+        .map(i => String(i.alumnoId))
+    );
+    if (ids.size) misAlumnos = DB.alumnos.filter(a => ids.has(String(a.id)));
+  }
   if (!misAlumnos.length) {
     pc.innerHTML = `
       <div class="card" style="text-align:center;padding:3rem">

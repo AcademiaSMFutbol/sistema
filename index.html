@@ -807,7 +807,13 @@ function gasRequest(action, data = {}) {
     });
     if (data.sheet) params.append('sheet', data.sheet);
     if (data.id)    params.append('id', String(data.id));
-    if (data.row)   params.append('row', JSON.stringify(data.row));
+    if (data.row) {
+      // Codificar en base64 para evitar corrupción de tildes y caracteres especiales en URL
+      const rowJson = JSON.stringify(data.row);
+      const rowB64  = btoa(unescape(encodeURIComponent(rowJson)));
+      params.append('row', rowB64);
+      params.append('enc', 'b64');
+    }
 
     // Crear tag <script> — esto nunca falla por CORS
     const script = document.createElement('script');
@@ -1269,16 +1275,22 @@ function normalizarDB(raw) {
   if (raw.asistencias_extra && raw.asistencias_extra.length) {
     const MESES_IDX = ['enero','febrero','marzo','abril','mayo','junio',
                        'julio','agosto','septiembre','octubre','noviembre','diciembre'];
-    // Deduplicar: misma fecha+actividad+alumno → quedarse con el último registro
-    const deduped = [];
-    const seen = new Set();
-    for (const a of [...raw.asistencias_extra].reverse()) {
+    // Deduplicar: misma fecha+actividad+alumno
+    // Si hay duplicados, preferir el que tiene Presente=TRUE
+    const dedupMap = {};
+    for (const a of raw.asistencias_extra) {
       const fecha = String(a.Fecha || a.FECHA || '').split('T')[0];
-      const act   = String(a.Servicio || a.ACTIVIDAD || '').trim().toUpperCase();
+      const act   = String(a.Servicio || a.SERVICIO || a.ACTIVIDAD || '').trim().toUpperCase();
       const nom   = String(a.Alumno || a.ALUMNO || '').trim().toUpperCase();
-      const key   = fecha + '|' + act + '|' + nom;
-      if (!seen.has(key)) { seen.add(key); deduped.push(a); }
+      if (!fecha && !nom) continue;
+      const key = fecha + '|' + act + '|' + nom;
+      const presente = a.Presente === true || String(a.Presente || a.PRESENTE || '').toUpperCase() === 'TRUE';
+      // Si ya existe el key, solo sobreescribir si el nuevo tiene presente=TRUE
+      if (!dedupMap[key] || presente) {
+        dedupMap[key] = a;
+      }
     }
+    const deduped = Object.values(dedupMap);
     DB.asistencias_extra = deduped
       .filter(a => a.Fecha || a.FECHA)
       .map((a, idx) => {
@@ -4040,12 +4052,10 @@ function generarInformeAMPA() {
     // Opción 2: calcular desde fecha (robusto ante formatos variables)
     if (a.fecha) {
       const fStr = String(a.fecha).trim();
-      // yyyy-MM-dd
-      if (fStr.length >= 7) {
+      if (fStr.length >= 7 && fStr.includes('-')) {
         const m = parseInt(fStr.substring(5,7)) - 1;
         if (m === mesIdx) return true;
       }
-      // dd/mm/yyyy
       if (fStr.includes('/')) {
         const parts = fStr.split('/');
         if (parts.length === 3 && parseInt(parts[1])-1 === mesIdx) return true;
@@ -4053,6 +4063,8 @@ function generarInformeAMPA() {
     }
     return false;
   });
+  console.log('[AMPA] mes:', mesNombre, 'idx:', mesIdx, 'total asistencias:', (DB.asistencias_extra||[]).length, 'del mes:', asistMes.length);
+  if (asistMes.length > 0) console.log('[AMPA] ejemplo:', JSON.stringify(asistMes[0]));
 
   // ── Denominador: fechas DISTINTAS en que se impartió cada actividad ──
   // Si hay registros en ASISTENCIAS_EXTRA → contamos fechas reales con ≥1 alumno
@@ -4061,9 +4073,11 @@ function generarInformeAMPA() {
   const actividadesUnicas = [...new Set(inscrExtra.map(i => String(i.servicio||'').trim()))];
 
   actividadesUnicas.forEach(act => {
-    const registrosAct = asistMes.filter(a =>
-      String(a.actividad||'').toUpperCase() === act.toUpperCase()
-    );
+    const actU = act.toUpperCase();
+    const registrosAct = asistMes.filter(a => {
+      const aActU = String(a.actividad||'').toUpperCase();
+      return aActU === actU || aActU.includes(actU) || actU.includes(aActU);
+    });
     if (registrosAct.length > 0) {
       // Fechas distintas en que hubo pase de lista para esta actividad
       const fechasDistintas = new Set(registrosAct.map(a => a.fecha));
@@ -4105,8 +4119,16 @@ function generarInformeAMPA() {
           const xAct  = String(x.actividad || '').toUpperCase();
           // Match estricto: por ID resuelto O nombre completo exacto
           // NO usar primer token — evita que "VICTORIA X" matchee "VICTORIA Y"
-          const matchAlumno = (xAid && xAid === String(a.id)) || xNom === nombreA;
-          return matchAlumno && xAct.includes(act.toUpperCase()) && x.presente === true;
+          // Match por ID resuelto (más fiable) o nombre exacto
+          // Fallback: todos los tokens del nombre registrado están en el nombre completo
+          let matchAlumno = (xAid && xAid === String(a.id)) || xNom === nombreA;
+          if (!matchAlumno && xNom && nombreA) {
+            const xToks = xNom.split(' ').filter(t => t.length >= 3);
+            const aToks = nombreA.split(' ');
+            if (xToks.length > 0 && xToks.every(t => aToks.includes(t))) matchAlumno = true;
+          }
+          const matchAct = xAct === act.toUpperCase() || xAct.includes(act.toUpperCase()) || act.toUpperCase().includes(xAct);
+          return matchAlumno && matchAct && x.presente === true;
         }).length;
 
         const pct      = hayDatos ? Math.round(presentes / totalDias * 100) : null;

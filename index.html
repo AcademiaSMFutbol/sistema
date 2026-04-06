@@ -5119,82 +5119,103 @@ function portalFamilia() {
 ═══════════════════════════════════════════════════════════ */
 function registroHorario() {
   document.getElementById('topbar-actions').innerHTML = '';
-  const isAdmin   = currentUser.role === 'ADMIN';
-  const isMonitor = currentUser.role === 'MONITOR';
-
-  // Monitor: acceso restringido solo a su propio registro
-  if (isMonitor) {
-    _registroHorarioMonitor();
-    return;
-  }
-  if (!isAdmin) {
+  if (currentUser.role === 'MONITOR') { _registroHorarioMonitor(); return; }
+  if (currentUser.role !== 'ADMIN') {
     document.getElementById('page-content').innerHTML =
       '<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Acceso restringido</div></div>';
     return;
   }
   addTopbarBtn('+ Registrar entrada/salida', () => modalRegistroHorario(), 'btn-primary', '🕐 ');
+  addTopbarBtn('📄 Informe mensual', () => modalInformeHorario(), 'btn-secondary');
 
-  // Leer registros desde DB.registroHorario (poblado en normalizarDB)
   const registros = (DB.registroHorario || [])
     .slice().sort((a,b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora));
 
-  // Resumen: última entrada/salida por trabajadora
-  const trabajadoras = [...new Set(DB.personal
-    .filter(p => p.activo)
-    .map(p => p.nombre))].sort();
+  // Trabajadoras desde PERSONAL activo
+  const trabajadoras = DB.personal.filter(p => p.activo && p.nombre)
+    .map(p => p.nombre).sort();
 
   const hoy = new Date().toISOString().split('T')[0];
+
+  // Función de match robusto nombre — insensible a mayúsculas y tildes
+  const matchNombre = (a, b) => {
+    const norm = s => String(s||'').toUpperCase().trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    return norm(a) === norm(b);
+  };
+
   const resumenHTML = trabajadoras.map(nombre => {
-    const regsHoy = registros.filter(r => r.trabajadora.toUpperCase() === nombre.toUpperCase() && r.fecha === hoy);
-    const entrada = regsHoy.filter(r => r.tipo === 'ENTRADA').sort((a,b)=>a.hora.localeCompare(b.hora))[0];
-    const salida  = regsHoy.filter(r => r.tipo === 'SALIDA').sort((a,b)=>b.hora.localeCompare(a.hora))[0];
-    const estado  = entrada && salida ? '✅ Completo'
-                  : entrada ? '🟡 En centro'
-                  : '⚪ Sin registro';
-    return `
-      <div style="display:flex;align-items:center;gap:12px;padding:.75rem;background:#f9f9f9;border-radius:8px;margin-bottom:.5rem">
-        <div class="avatar avatar-sm">${getInitials(nombre)}</div>
-        <div style="flex:1">
-          <div style="font-size:13px;font-weight:600">${nombre}</div>
-          <div style="font-size:11px;color:var(--grey-2)">
-            ${entrada ? '🟢 Entrada: ' + entrada.hora : ''}
-            ${salida  ? ' · 🔴 Salida: ' + salida.hora  : ''}
-          </div>
-        </div>
-        <span style="font-size:11px">${estado}</span>
-      </div>`;
+    const regsHoy = registros.filter(r => matchNombre(r.trabajadora, nombre) && r.fecha === hoy);
+    // Múltiples entradas/salidas posibles en un día
+    const entradas = regsHoy.filter(r => r.tipo === 'ENTRADA').sort((a,b)=>a.hora.localeCompare(b.hora));
+    const salidas  = regsHoy.filter(r => r.tipo === 'SALIDA').sort((a,b)=>a.hora.localeCompare(b.hora));
+    const ultimaEntrada = entradas[entradas.length-1];
+    const ultimaSalida  = salidas[salidas.length-1];
+    const estado = entradas.length && salidas.length ? '✅ Completo'
+                 : entradas.length ? '🟡 En centro'
+                 : '⚪ Sin registro';
+    // Calcular horas totales si hay pares entrada/salida
+    let horasTxt = '';
+    if (entradas.length && salidas.length) {
+      let totalMins = 0;
+      salidas.forEach((s,i) => {
+        const e = entradas[i] || entradas[0];
+        const [eh,em] = e.hora.split(':').map(Number);
+        const [sh,sm] = s.hora.split(':').map(Number);
+        totalMins += (sh*60+sm) - (eh*60+em);
+      });
+      if (totalMins > 0) horasTxt = ' · ' + Math.floor(totalMins/60) + 'h ' + (totalMins%60) + 'min';
+    }
+    const movimientos = regsHoy.map(r =>
+      '<span style="font-size:11px;margin-right:8px">' +
+      (r.tipo==='ENTRADA'?'🟢':'🔴') + ' ' + r.hora + '</span>'
+    ).join('');
+    return (
+      '<div style="display:flex;align-items:center;gap:12px;padding:.75rem;background:#f9f9f9;border-radius:8px;margin-bottom:.5rem">' +
+        '<div class="avatar avatar-sm">' + getInitials(nombre) + '</div>' +
+        '<div style="flex:1">' +
+          '<div style="font-size:13px;font-weight:600">' + nombre + '</div>' +
+          '<div style="margin-top:2px">' + (movimientos || '<span style="font-size:11px;color:var(--grey-2)">Sin registros hoy</span>') + '</div>' +
+        '</div>' +
+        '<div style="text-align:right">' +
+          '<div style="font-size:11px">' + estado + '</div>' +
+          '<div style="font-size:11px;color:var(--green);font-weight:600">' + horasTxt + '</div>' +
+        '</div>' +
+      '</div>'
+    );
   }).join('');
 
-  // Tabla histórico
-  const filas = registros.slice(0, 60).map(r => `
-    <tr>
-      <td>${fmtDate(r.fecha)}</td>
-      <td>${r.trabajadora}</td>
-      <td><span class="badge ${r.tipo==='ENTRADA'?'badge-green':'badge-red'}">${r.tipo}</span></td>
-      <td style="font-weight:600">${r.hora}</td>
-      <td>${r.actividad||'—'}</td>
-      <td>${r.centro||'—'}</td>
-      <td style="font-size:11px;color:var(--grey-2)">${r.registradoPor||'—'}</td>
-      <td style="font-size:11px;color:var(--grey-2)">${r.notas||''}</td>
-    </tr>`).join('');
+  // Tabla histórico completo
+  const filas = registros.slice(0, 100).map(r =>
+    '<tr>' +
+      '<td>' + fmtDate(r.fecha) + '</td>' +
+      '<td>' + r.trabajadora + '</td>' +
+      '<td><span class="badge ' + (r.tipo==='ENTRADA'?'badge-green':'badge-red') + '">' + r.tipo + '</span></td>' +
+      '<td style="font-weight:600">' + r.hora + '</td>' +
+      '<td>' + (r.actividad||'—') + '</td>' +
+      '<td>' + (r.centro||'—') + '</td>' +
+      '<td style="font-size:11px;color:var(--grey-2)">' + (r.registradoPor||'—') + '</td>' +
+      '<td style="font-size:11px;color:var(--grey-2)">' + (r.notas||'') + '</td>' +
+    '</tr>'
+  ).join('');
 
-  document.getElementById('page-content').innerHTML = `
-    <div class="card" style="margin-bottom:1rem">
-      <div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Estado hoy · ${new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</div>
-      ${resumenHTML || '<div style="color:var(--grey-2);font-size:13px">Sin personal activo registrado</div>'}
-    </div>
-    <div class="card">
-      <div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Histórico de registros</div>
-      <div style="overflow-x:auto">
-        <table class="data-table">
-          <thead><tr>
-            <th>Fecha</th><th>Trabajadora</th><th>Tipo</th><th>Hora</th>
-            <th>Actividad</th><th>Centro</th><th>Registrado por</th><th>Notas</th>
-          </tr></thead>
-          <tbody>${filas || '<tr><td colspan="8" style="text-align:center;color:var(--grey-2);padding:2rem">Sin registros aún</td></tr>'}</tbody>
-        </table>
-      </div>
-    </div>`;
+  document.getElementById('page-content').innerHTML =
+    '<div class="card" style="margin-bottom:1rem">' +
+      '<div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">' +
+        'Estado hoy · ' + new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'}) +
+      '</div>' +
+      (resumenHTML || '<div style="color:var(--grey-2);font-size:13px">Sin personal activo registrado</div>') +
+    '</div>' +
+    '<div class="card">' +
+      '<div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Histórico de registros</div>' +
+      '<div style="overflow-x:auto">' +
+        '<table class="data-table"><thead><tr>' +
+          '<th>Fecha</th><th>Trabajadora</th><th>Tipo</th><th>Hora</th>' +
+          '<th>Actividad</th><th>Centro</th><th>Registrado por</th><th>Notas</th>' +
+        '</tr></thead>' +
+        '<tbody>' + (filas || '<tr><td colspan="8" style="text-align:center;color:var(--grey-2);padding:2rem">Sin registros aún</td></tr>') + '</tbody>' +
+      '</table></div>' +
+    '</div>';
 }
 
 // Vista registro horario para MONITOR — solo sus propios fichajes
@@ -5359,6 +5380,138 @@ async function guardarFichajeMonitor(fecha) {
   } else if (!res.ok) {
     showToast('⚠️ Error al guardar — revisa conexión', 'error');
   }
+}
+
+function modalInformeHorario() {
+  const anyo = new Date().getFullYear();
+  const mes  = new Date().getMonth();
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  const trabajadoras = DB.personal.filter(p => p.activo && p.nombre)
+    .map(p => p.nombre).sort();
+
+  openModal('Informe mensual de registro horario',
+    '<div class="form-grid">' +
+      '<div class="field-group"><label class="field-label">Mes</label>' +
+      '<select class="field-select" id="ihm-mes">' +
+      meses.map((m,i) => '<option value="'+i+'"'+(i===mes?' selected':'')+'>'+m+'</option>').join('') +
+      '</select></div>' +
+      '<div class="field-group"><label class="field-label">Año</label>' +
+      '<input class="field-input" type="number" id="ihm-anyo" value="'+anyo+'" min="2024" max="2030">' +
+      '</div>' +
+      '<div class="field-group"><label class="field-label">Trabajadora</label>' +
+      '<select class="field-select" id="ihm-trabajadora">' +
+      '<option value="">— Todas —</option>' +
+      trabajadoras.map(t => '<option value="'+t+'">'+t+'</option>').join('') +
+      '</select></div>' +
+    '</div>',
+    '<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>' +
+    '<button class="btn btn-primary" onclick="generarInformeHorarioPdf()">📄 Generar PDF</button>'
+  );
+}
+
+async function generarInformeHorarioPdf() {
+  const mesIdx    = parseInt(document.getElementById('ihm-mes')?.value ?? new Date().getMonth());
+  const anyo      = parseInt(document.getElementById('ihm-anyo')?.value ?? new Date().getFullYear());
+  const filtroTrab = document.getElementById('ihm-trabajadora')?.value || '';
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                 'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+  closeModal();
+
+  const matchNombrePdf = (a, b) => {
+    const norm = s => String(s||'').toUpperCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    return norm(a) === norm(b);
+  };
+
+  // Filtrar registros del mes/año seleccionado
+  const prefix = anyo + '-' + String(mesIdx+1).padStart(2,'0');
+  let registros = (DB.registroHorario||[]).filter(r => String(r.fecha||'').startsWith(prefix));
+  if (filtroTrab) registros = registros.filter(r => matchNombrePdf(r.trabajadora, filtroTrab));
+  registros.sort((a,b) => (a.trabajadora+a.fecha+a.hora).localeCompare(b.trabajadora+b.fecha+b.hora));
+
+  // Agrupar por trabajadora
+  const grupos = {};
+  registros.forEach(r => {
+    const k = r.trabajadora.toUpperCase().trim();
+    if (!grupos[k]) grupos[k] = { nombre: r.trabajadora, registros: [] };
+    grupos[k].registros.push(r);
+  });
+
+  // Calcular horas por trabajadora y día
+  let tablasTrabajadoras = '';
+  let totalGeneral = 0;
+  Object.values(grupos).forEach(g => {
+    // Agrupar por fecha
+    const porFecha = {};
+    g.registros.forEach(r => {
+      if (!porFecha[r.fecha]) porFecha[r.fecha] = { entradas:[], salidas:[] };
+      if (r.tipo==='ENTRADA') porFecha[r.fecha].entradas.push(r.hora);
+      else porFecha[r.fecha].salidas.push(r.hora);
+    });
+    let totalMins = 0;
+    let filasDia = '';
+    Object.keys(porFecha).sort().forEach(fecha => {
+      const d = porFecha[fecha];
+      d.entradas.sort(); d.salidas.sort();
+      let minsDia = 0;
+      const pares = Math.min(d.entradas.length, d.salidas.length);
+      for (let i=0; i<pares; i++) {
+        const [eh,em] = d.entradas[i].split(':').map(Number);
+        const [sh,sm] = d.salidas[i].split(':').map(Number);
+        minsDia += (sh*60+sm) - (eh*60+em);
+      }
+      totalMins += minsDia;
+      const horasDia = minsDia>0 ? Math.floor(minsDia/60)+'h '+(minsDia%60)+'min' : '—';
+      const movs = [...d.entradas.map(h=>'🟢'+h), ...d.salidas.map(h=>'🔴'+h)]
+        .sort((a,b)=>a.slice(2).localeCompare(b.slice(2))).join('  ');
+      filasDia += '<tr><td>'+fmtDate(fecha)+'</td><td style="font-size:11px">'+movs+'</td><td style="font-weight:600">'+horasDia+'</td></tr>';
+    });
+    totalGeneral += totalMins;
+    const totalH = Math.floor(totalMins/60)+'h '+(totalMins%60)+'min';
+    tablasTrabajadoras +=
+      '<h2 style="font-size:14px;color:#2e7d32;margin:1.5rem 0 .5rem;border-bottom:1px solid #2e7d32;padding-bottom:4px">' +
+        g.nombre + ' · Total: ' + totalH +
+      '</h2>' +
+      '<table style="width:100%;border-collapse:collapse;margin-bottom:1rem;font-size:12px">' +
+        '<thead><tr style="background:#e8f5e9">' +
+          '<th style="padding:6px;text-align:left;border-bottom:2px solid #2e7d32">Fecha</th>' +
+          '<th style="padding:6px;text-align:left;border-bottom:2px solid #2e7d32">Movimientos</th>' +
+          '<th style="padding:6px;text-align:left;border-bottom:2px solid #2e7d32">Horas</th>' +
+        '</tr></thead><tbody>' + filasDia + '</tbody>' +
+      '</table>';
+  });
+
+  if (!tablasTrabajadoras) {
+    showToast('Sin registros para ese mes/trabajadora', 'warning'); return;
+  }
+
+  const totalGH = Math.floor(totalGeneral/60)+'h '+(totalGeneral%60)+'min';
+  const html =
+    '<!DOCTYPE html><html><head><meta charset="UTF-8">'+
+    '<title>Informe Horario '+meses[mesIdx]+' '+anyo+'</title>'+
+    '<style>body{font-family:Arial,sans-serif;margin:2cm;color:#000;font-size:12px}'+
+    'h1{font-size:18px;color:#2e7d32;margin:0}'+
+    'td{padding:5px 6px;border-bottom:1px solid #f0f0f0}'+
+    '.footer{margin-top:2rem;font-size:10px;color:#888;border-top:1px solid #eee;padding-top:.5rem}'+
+    '@media print{body{margin:1cm}}</style></head><body>'+
+    '<div style="display:flex;align-items:center;gap:12px;margin-bottom:1.5rem">'+
+      '<img src="https://academiasmfutbol.github.io/sistema/img/logo.png" style="height:50px;object-fit:contain" onerror="this.style.display=\'none\'">'+
+      '<div><h1>Informe de Registro Horario</h1>'+
+      '<div style="font-size:12px;color:#666">'+meses[mesIdx]+' '+anyo+(filtroTrab?' · '+filtroTrab:'')+'</div>'+
+      '<div style="font-size:12px;color:#666">SM Extraescolares · CEIP Escaleritas</div></div>'+
+      '<div style="margin-left:auto;text-align:right">'+
+        '<div style="font-size:22px;font-weight:800;color:#2e7d32">'+totalGH+'</div>'+
+        '<div style="font-size:10px;color:#888">Total horas mes</div>'+
+      '</div>'+
+    '</div>'+
+    tablasTrabajadoras +
+    '<div class="footer">Documento generado por SM Academia · '+new Date().toLocaleDateString('es-ES')+'</div>'+
+    '</body></html>';
+
+  const w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
+  w.print();
 }
 
 function modalRegistroHorario(trabajadoraPre) {

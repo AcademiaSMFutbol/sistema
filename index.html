@@ -844,26 +844,7 @@ function getFotoMonitor(nombre) {
   const n = nombre.split(' ')[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   return IMG_BASE + '/monitores/' + n + '.jpg';
 }
-function avatarHtml(nombre, tipo, extraStyle) {
-  const url = tipo === 'monitor' ? getFotoMonitor(nombre) : getFotoJugador(nombre);
-  const st = extraStyle || 'width:48px;height:48px;font-size:16px';
-  return `<div class="avatar" style="${st};overflow:hidden;position:relative">
-    <img src="${url}" alt="" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;border-radius:50%"
-         onerror="this.style.display='none'">
-    <span style="position:relative;z-index:1">${getInitials(nombre)}</span>
-  </div>`;
-}
 
-// Nombre real de la hoja de sesiones en "BASE DATOS SM"
-const SESIONES_SHEET_NAME = 'SESIONES SM FÚTBOL';
-
-const GITHUB_IMG = 'https://raw.githubusercontent.com/academiasmfutbol/academiasmfutbol.github.io/main/img/';
-const CAMINO_SM_INICIAL = {"ABEL": 40, "AIMAR": 10, "AITOR": 0, "ALBERTO": 190, "ANTOINE": 230, "ANTONY": 20, "ARAI": 40, "ARAN": 10, "BRYAN": 40, "DAVID": 40, "DAYAN": 30, "DIEGO": 40, "DYLAN": 0, "EIRIAN": 160, "ELIAN": 10, "ELOY": 0, "EZEQUIEL": 310, "HÉCTOR": 60, "IMAR": 10, "JORGE": 100, "KEVIN": 20, "LEO": 40, "LEO SUÁREZ": 10, "LUCAS": 0, "LUKA": 100, "MATEO": 10, "NADIR": 0, "NAHUEL": 220, "NAIM": 10, "NEIZAN": 0, "PABLO": 50, "RICKY": 40, "ROBERTO": 30, "TOMAS": 160, "UMAR": 0, "YAEL": 20, "ERIK": 0, "OCLAM": 10, "DIEGO LÓPEZ": 10, "CALEB": 10, "YERAY": 30};
-
-/* ═══════════════════════════════════════════════════════════
-   NORMALIZACIÓN — traduce estructura real de la Sheet
-   al formato interno que usa la app
-═══════════════════════════════════════════════════════════ */
 function normalizarDB(raw) {
 
   // CLIENTES: NOMBRE + APELLIDOS → nombre completo, ID_CLIENTE → id
@@ -1301,7 +1282,8 @@ function normalizarDB(raw) {
         const actividad = String(a.Servicio || a.SERVICIO || a.ACTIVIDAD || '').trim().toUpperCase()
           .replace('_', ' ');  // multideporte_adaptado → MULTIDEPORTE ADAPTADO
         const nombreAlumno = String(a.Alumno || a.ALUMNO || a.NOMBRE_ALUMNO || '').trim().toUpperCase();
-        const presente = a.Presente === true || String(a.Presente || a.PRESENTE || '').toUpperCase() === 'TRUE';
+        const presenteVal = String(a.Presente || a.PRESENTE || '').toUpperCase().trim();
+        const presente = a.Presente === true || presenteVal === 'TRUE' || presenteVal === 'VERDADERO' || presenteVal === 'SI' || presenteVal === 'SÍ';
         // Resolver alumnoId por nombre
         // Match estricto — solo nombre completo, nunca por primer token
         // Evita que "VICTORIA X" resuelva igual que "VICTORIA Y"
@@ -1400,6 +1382,14 @@ async function syncAll() {
         normalizarDB({ 'registro horario': resRH.registros });
       }
     } catch(erh) {}
+
+    // GET_ASISTENCIAS_EXTRA — garantiza datos AMPA completos
+    try {
+      const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA');
+      if (resAE.ok && Array.isArray(resAE.asistencias)) {
+        normalizarDB({ asistencias_extra: resAE.asistencias });
+      }
+    } catch(eae) {}
 
     setSyncState('ok');
     renderCurrentPage();
@@ -1913,12 +1903,12 @@ const PAGE_META = {
 function navigate(page) {
   // Restricción rol MONITOR: solo ve su actividad, pase de lista de la misma y sus propios datos
   if (currentUser && currentUser.role === 'MONITOR') {
-    const permitidas = [];
+    const permitidas = ['registro-horario']; // siempre permitido para fichar
     if (currentUser.esTecnificacion) permitidas.push('futbol');
     if (currentUser.esExtraescolar)  permitidas.push('extraescolares');
-    if (!permitidas.length) permitidas.push('extraescolares'); // fallback
+    if (permitidas.length === 1) permitidas.push('extraescolares'); // fallback si sin actividad
     if (!permitidas.includes(page)) {
-      page = permitidas[0];
+      page = permitidas[1] || 'extraescolares';
     }
   }
   // FAMILIA: siempre su portal propio

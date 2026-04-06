@@ -549,13 +549,16 @@ tbody tr:hover { background: #fafafa; }
       </div>
 
       <!-- Actividades -->
-      <div class="nav-section">
+      <div class="nav-section" id="nav-actividades">
         <div class="nav-section-label">Actividades</div>
         <div class="nav-item" onclick="navigate('futbol')" data-page="futbol">
           <span class="nav-icon">⚽</span><span>SM Fútbol</span>
         </div>
         <div class="nav-item" onclick="navigate('extraescolares')" data-page="extraescolares">
           <span class="nav-icon">🏫</span><span>Extraescolares</span>
+        </div>
+        <div class="nav-item" onclick="navigate('registro-horario')" data-page="registro-horario" id="nav-reg-horario">
+          <span class="nav-icon">🕐</span><span>Mi horario</span>
         </div>
       </div>
 
@@ -564,6 +567,9 @@ tbody tr:hover { background: #fafafa; }
         <div class="nav-section-label">Sistema</div>
         <div class="nav-item" onclick="navigate('personal')" data-page="personal">
           <span class="nav-icon">👥</span><span>Personal</span>
+        </div>
+        <div class="nav-item" onclick="navigate('registro-horario')" data-page="registro-horario">
+          <span class="nav-icon">🕐</span><span>Reg. Horario</span>
         </div>
         <div class="nav-item" onclick="navigate('incidencias')" data-page="incidencias">
           <span class="nav-icon">⚠️</span><span>Incidencias</span>
@@ -673,7 +679,7 @@ let currentPage = 'dashboard';
 let DB = {
   clientes: [], alumnos: [], inscripciones: [], pagos: [],
   facturas: [], sesiones: [], asistencias: [], personal: [], gastos: [],
-  incidencias: [], servicios: [], presupuestos: []
+  incidencias: [], servicios: [], presupuestos: [], registroHorario: []
 };
 let lastSync = null;
 
@@ -1229,6 +1235,25 @@ function normalizarDB(raw) {
       });
   }
 
+  // REGISTRO HORARIO — Fecha | Trabajadora | Tipo | Hora | Actividad | Centro | Registrado por | Notas
+  if (raw['registro horario'] && raw['registro horario'].length) {
+    DB.registroHorario = raw['registro horario']
+      .filter(r => r['Fecha'] && r['Trabajadora'])
+      .map((r, idx) => ({
+        id:            'RH_' + idx,
+        fecha:         String(r['Fecha'] || '').split('T')[0],
+        trabajadora:   String(r['Trabajadora'] || '').trim(),
+        tipo:          String(r['Tipo'] || '').toUpperCase().trim(),
+        hora:          String(r['Hora'] || '').trim(),
+        actividad:     String(r['Actividad'] || '').trim(),
+        centro:        String(r['Centro'] || '').trim(),
+        registradoPor: String(r['Registrado por'] || '').trim(),
+        notas:         String(r['Notas'] || '').trim()
+      }));
+  } else {
+    DB.registroHorario = [];
+  }
+
   // ASISTENCIAS_EXTRA — headers reales: Fecha | Centro | Servicio | Alumno | Presente | Guardado por
   if (raw.asistencias_extra && raw.asistencias_extra.length) {
     const MESES_IDX = ['enero','febrero','marzo','abril','mayo','junio',
@@ -1739,7 +1764,8 @@ function startApp() {
       const pg = item.dataset.page;
       const visible = (esTecnificacion && pg === 'futbol') ||
                       (esExtraescolar  && pg === 'extraescolares') ||
-                      pg === 'personal'; // siempre puede ver su ficha
+                      pg === 'personal' ||         // siempre puede ver su ficha
+                      pg === 'registro-horario';   // siempre puede fichar entrada/salida
       item.style.display = visible ? '' : 'none';
     });
     // "Mi perfil" se muestra como texto alternativo para MONITOR
@@ -1826,6 +1852,7 @@ const PAGE_META = {
   informes:       { title: 'Informes', sub: 'Generación de PDFs y exportaciones' },
   configuracion:  { title: 'Configuración', sub: 'Sistema y conexión Google Sheets' },
   familia:        { title: 'Mi portal', sub: 'Seguimiento de tus alumnos' },
+  'registro-horario': { title: 'Registro Horario', sub: 'Control de entradas y salidas del personal' },
 };
 
 function navigate(page) {
@@ -1834,6 +1861,7 @@ function navigate(page) {
     const permitidas = [];
     if (currentUser.esTecnificacion) permitidas.push('futbol');
     if (currentUser.esExtraescolar)  permitidas.push('extraescolares');
+    permitidas.push('registro-horario'); // siempre permitido para fichar
     if (!permitidas.length) permitidas.push('extraescolares'); // fallback
     if (!permitidas.includes(page)) {
       page = permitidas[0];
@@ -1859,7 +1887,8 @@ function renderCurrentPage() {
   if (currentUser && currentUser.role === 'FAMILIA') { portalFamilia(); return; }
   const pages = {
     dashboard, clientes, alumnos, inscripciones, pagos, facturas,
-    futbol, extraescolares, personal, incidencias, informes, configuracion
+    futbol, extraescolares, personal, incidencias, informes, configuracion,
+    'registro-horario': registroHorario
   };
   if (pages[currentPage]) pages[currentPage]();
 }
@@ -3759,7 +3788,7 @@ function extraescolares() {
     addTopbarBtn('Registrar asistencia', () => modalAsistenciaExtra(), 'btn-primary', '+ ');
   }
   if (role === 'MONITOR') {
-    addTopbarBtn('Pase de lista', () => modalPaseListaMonitor(), 'btn-primary', '📋 ');
+    // Solo un botón de pase de lista — modalPaseListaExtraMonitor ya añadido arriba (línea filtroActividad)
     addTopbarBtn('Mis datos', () => modalMisDatos(), 'btn-secondary', '👤 ');
   }
 
@@ -4089,9 +4118,20 @@ function modalPaseListaExtraMonitor(filtroActividades) {
     .map(id => getAlumno(id)).filter(a => a.nombre)
     .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
 
+  // actLabel: nombre legible para el modal, servicio: valor exacto para Sheets
   const actLabel = (filtroActividades && filtroActividades.length > 0)
     ? filtroActividades.join(', ')
     : 'Tu actividad';
+  // Obtener el servicio real desde inscripciones (con el formato exacto de Sheets)
+  const servicioReal = (() => {
+    const fa = filtroActividades && filtroActividades.length > 0 ? filtroActividades[0] : null;
+    if (!fa) return actLabel;
+    const insc = DB.inscripciones.find(i => {
+      const s = String(i.servicio||'').toUpperCase();
+      return s.includes(fa) || fa.includes(s);
+    });
+    return insc ? insc.servicio : actLabel; // valor exacto de Sheets
+  })();
 
   openModal(`📋 Pase de lista · ${actLabel}`, `
     <div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">${hoy} · ${alumnosUnicos.length} alumnos</div>
@@ -4111,28 +4151,33 @@ function modalPaseListaExtraMonitor(filtroActividades) {
       Selecciona los alumnos <strong>presentes</strong> hoy y pulsa Confirmar.
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-     <button class="btn btn-primary" onclick="confirmarPaseListaMonitor('${actLabel}','${hoy}')">✅ Confirmar asistencia</button>`
+     <button class="btn btn-primary" onclick="confirmarPaseListaMonitor('${servicioReal}','${hoy}','CEIP ESCALERITAS')">✅ Confirmar asistencia</button>`
   );
 }
 
-async function confirmarPaseListaMonitor(actividad, fecha) {
+async function confirmarPaseListaMonitor(actividad, fecha, centro) {
   const presentes = new Set([...document.querySelectorAll('.pase-check:checked')].map(c => c.value));
   const todos     = [...document.querySelectorAll('.pase-check')].map(c => c.value);
-  // Guardar TODOS — presentes y ausentes — con el valor correcto de Presente
+  if (!todos.length) { showToast('Sin alumnos en el listado', 'warning'); return; }
+  const centroFinal = centro || 'CEIP ESCALERITAS';
+  closeModal(); // cerrar antes para evitar doble click
+  showToast('Guardando asistencia…', 'info');
+  let errores = 0;
   for (const aid of todos) {
     const a = getAlumno(aid);
-    await writeToSheet('ASISTENCIAS_EXTRA', {
+    const res = await writeToSheet('ASISTENCIAS_EXTRA', {
       'Fecha':        fecha,
-      'Centro':       a.centro || currentUser.centro || '',
+      'Centro':       centroFinal,
       'Servicio':     actividad,
       'Alumno':       a.nombre || aid,
       'Presente':     presentes.has(aid),
       'Guardado por': currentUser.name
     });
+    if (!res.ok && !res.demo) errores++;
   }
-  closeModal();
+  if (errores > 0) showToast(`⚠️ ${errores} registros no guardados — revisa conexión`, 'error');
+  else showToast(`✅ Pase guardado: ${presentes.size}/${todos.length} presentes`, 'success');
   await syncAll();
-  showToast(`Pase de lista guardado: ${presentes.size}/${todos.length} presentes ✓`, 'success');
 }
 
 // Modal pase de lista para MONITOR de Tecnificación
@@ -4189,26 +4234,37 @@ function modalPaseListaMonitor() {
 
 async function guardarPaseListaMonitor(fecha, esFutbol) {
   const checks = [...document.querySelectorAll('.pl-check')];
+  if (!checks.length) { showToast('Sin alumnos en el listado', 'warning'); return; }
   const presentes = checks.filter(c=>c.checked).map(c=>c.value);
   const ausentes  = checks.filter(c=>!c.checked).map(c=>c.value);
-  const actividad = esFutbol ? 'TECNIFICACIÓN' : (currentUser.actividades?.[0]||'EXTRAESCOLARES');
-
-  // Guardar en Sheets: una fila por alumno con headers reales
-  for (const aid of [...presentes, ...ausentes]) {
-    const a = getAlumno(aid);
-    const presente = presentes.includes(aid);
-    await writeToSheet('ASISTENCIAS_EXTRA', {
-      'Fecha':        fecha,
-      'Centro':       a.centro || currentUser.centro || '',
-      'Servicio':     actividad,
-      'Alumno':       a.nombre || aid,
-      'Presente':     presente,
-      'Guardado por': currentUser.name
+  // Servicio: para tecnificación usar nombre exacto de la inscripción
+  let actividad = 'TECNIFICACIÓN';
+  if (!esFutbol) {
+    const actsMonitor = (currentUser.actividades||[]).filter(a => !a.toUpperCase().includes('TECNIF'));
+    const insc = DB.inscripciones.find(i => {
+      const s = String(i.servicio||'').toUpperCase();
+      return actsMonitor.some(am => s.includes(am.toUpperCase().replace(/\s*\(.*\)/,'').trim()));
     });
+    actividad = insc ? insc.servicio : (actsMonitor[0]||'EXTRAESCOLARES');
   }
   closeModal();
+  showToast('Guardando asistencia…', 'info');
+  let errores = 0;
+  for (const aid of [...presentes, ...ausentes]) {
+    const a = getAlumno(aid);
+    const res = await writeToSheet('ASISTENCIAS_EXTRA', {
+      'Fecha':        fecha,
+      'Centro':       'CEIP ESCALERITAS',
+      'Servicio':     actividad,
+      'Alumno':       a.nombre || aid,
+      'Presente':     presentes.includes(aid),
+      'Guardado por': currentUser.name
+    });
+    if (!res.ok && !res.demo) errores++;
+  }
+  if (errores > 0) showToast(`⚠️ ${errores} registros no guardados`, 'error');
+  else showToast(`✅ Pase guardado: ${presentes.length} presentes, ${ausentes.length} ausentes`, 'success');
   await syncAll();
-  showToast(`Pase de lista guardado: ${presentes.length} presentes, ${ausentes.length} ausentes ✓`, 'success');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -4260,63 +4316,89 @@ async function guardarMisDatos(pid) {
 }
 
 function modalAsistenciaExtra() {
-  openModal('Registrar asistencia diaria', `
+  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+  // Actividades disponibles desde inscripciones activas en ESCALERITAS
+  const actividades = [...new Set(
+    DB.inscripciones
+      .filter(i => String(i.centro||'').toUpperCase().includes('ESCALERITAS')
+               && i.estado === 'ACTIVA'
+               && !EXCLUIR.some(x => String(i.servicio||'').toUpperCase() === x))
+      .map(i => i.servicio)
+  )].filter(Boolean).sort();
+
+  openModal('📋 Registrar asistencia diaria', `
     <div class="form-grid">
       <div class="field-group"><label class="field-label">Fecha</label>
         <input class="field-input" id="ae-fecha" type="date" value="${new Date().toISOString().split('T')[0]}">
       </div>
       <div class="field-group"><label class="field-label">Actividad</label>
         <select class="field-select" id="ae-act">
-          ${[...new Set(DB.extraescolares.map(e=>e.actividad))].map(a=>`<option>${a}</option>`).join('')}
+          ${actividades.map(a=>`<option value="${a}">${a}</option>`).join('')}
         </select>
       </div>
     </div>
     <div style="margin-top:1rem">
-      <label class="field-label" style="margin-bottom:.5rem;display:block">Alumnos</label>
+      <label class="field-label" style="margin-bottom:.5rem;display:block">Alumnos (todos presentes por defecto)</label>
       <div id="ae-alumnos-list"></div>
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-     <button class="btn btn-primary" onclick="guardarAsistenciaExtra()">Guardar asistencia</button>`);
+     <button class="btn btn-primary" onclick="guardarAsistenciaExtra()">✅ Guardar asistencia</button>`);
+
   const updateList = () => {
-    const act = document.getElementById('ae-act')?.value;
-    const es = DB.extraescolares.filter(e=>e.actividad===act);
+    const act = document.getElementById('ae-act')?.value || '';
+    // Buscar alumnos por inscripciones activas de esa actividad
+    const ids = [...new Set(
+      DB.inscripciones
+        .filter(i => i.servicio === act
+                  && String(i.centro||'').toUpperCase().includes('ESCALERITAS')
+                  && i.estado === 'ACTIVA')
+        .map(i => String(i.alumnoId))
+    )];
+    const alumnos = ids.map(id => getAlumno(id)).filter(a => a.nombre)
+      .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
     const lista = document.getElementById('ae-alumnos-list');
-    if (lista) lista.innerHTML = es.map(e=>{const a=getAlumno(e.alumnoId);return`
-      <label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;border:1px solid var(--grey);margin-bottom:6px;cursor:pointer">
-        <input type="checkbox" class="ae-check" value="${e.id}" checked style="width:auto">
-        <div class="avatar avatar-sm">${getInitials(a.nombre)}</div>
-        <span style="font-size:13px">${a.nombre}</span>
-      </label>`;}).join('');
+    if (lista) lista.innerHTML = alumnos.map(a => `
+      <label style="display:flex;align-items:center;gap:10px;padding:10px;border-radius:8px;border:1px solid var(--grey);margin-bottom:6px;cursor:pointer">
+        <input type="checkbox" class="ae-check" value="${a.id}" checked
+               style="width:20px;height:20px;accent-color:var(--green)">
+        <div class="avatar avatar-sm" style="flex-shrink:0">${getInitials(a.nombre)}</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600">${a.nombre}</div>
+          <div style="font-size:11px;color:var(--grey-2)">${a.curso||'—'}</div>
+        </div>
+      </label>`).join('') || '<div style="color:var(--grey-2);font-size:13px">Sin alumnos inscritos en esta actividad</div>';
   };
-  setTimeout(()=>{ document.getElementById('ae-act')?.addEventListener('change',updateList); updateList(); },100);
+  setTimeout(() => {
+    document.getElementById('ae-act')?.addEventListener('change', updateList);
+    updateList();
+  }, 100);
 }
 
 async function guardarAsistenciaExtra() {
-  const fecha = document.getElementById('ae-fecha')?.value;
-  if (!fecha) return;
-  const dia = new Date(fecha).getDate();
-  const checks = [...document.querySelectorAll('.ae-check')];
-  checks.forEach(c => {
-    const e = DB.extraescolares.find(x=>x.id===c.value);
-    if (e) { e.asistenciasMes[dia] = c.checked; }
-  });
-  saveCacheLocal();
-  // Guardar cada asistencia extra con headers reales de la hoja
+  const fecha   = document.getElementById('ae-fecha')?.value;
   const servicio = document.getElementById('ae-act')?.value || '';
+  if (!fecha || !servicio) { showToast('Completa fecha y actividad', 'error'); return; }
+  const checks = [...document.querySelectorAll('.ae-check')];
+  if (!checks.length) { showToast('Sin alumnos en el listado', 'warning'); return; }
+  closeModal();
+  showToast('Guardando asistencia…', 'info');
+  let errores = 0;
   for (const c of checks) {
     const al = getAlumno(c.value);
-    await writeToSheet('ASISTENCIAS_EXTRA', {
+    const res = await writeToSheet('ASISTENCIAS_EXTRA', {
       'Fecha':        fecha,
-      'Centro':       al.centro || '',
+      'Centro':       'CEIP ESCALERITAS',
       'Servicio':     servicio,
       'Alumno':       al.nombre || c.value,
       'Presente':     c.checked,
       'Guardado por': currentUser.name
     });
+    if (!res.ok && !res.demo) errores++;
   }
-  closeModal();
+  if (errores > 0) showToast(`⚠️ ${errores} registros no guardados`, 'error');
+  else showToast(`✅ Asistencia guardada`, 'success');
+  await syncAll();
   extraescolares();
-  showToast('Asistencia registrada ✓', 'success');
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -4973,6 +5055,334 @@ function portalFamilia() {
 
   // Ocultar topbar-actions heredadas
   document.getElementById('topbar-actions').innerHTML = '';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE: REGISTRO HORARIO (solo ADMIN)
+═══════════════════════════════════════════════════════════ */
+function registroHorario() {
+  clearTopbarBtns();
+  const isAdmin   = currentUser.role === 'ADMIN';
+  const isMonitor = currentUser.role === 'MONITOR';
+
+  // Monitor: acceso restringido solo a su propio registro
+  if (isMonitor) {
+    _registroHorarioMonitor();
+    return;
+  }
+  if (!isAdmin) {
+    document.getElementById('page-content').innerHTML =
+      '<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Acceso restringido</div></div>';
+    return;
+  }
+  addTopbarBtn('+ Registrar entrada/salida', () => modalRegistroHorario(), 'btn-primary', '🕐 ');
+
+  // Leer registros desde DB.registroHorario (poblado en normalizarDB)
+  const registros = (DB.registroHorario || [])
+    .slice().sort((a,b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora));
+
+  // Resumen: última entrada/salida por trabajadora
+  const trabajadoras = [...new Set(DB.personal
+    .filter(p => p.activo)
+    .map(p => p.nombre))].sort();
+
+  const hoy = new Date().toISOString().split('T')[0];
+  const resumenHTML = trabajadoras.map(nombre => {
+    const regsHoy = registros.filter(r => r.trabajadora === nombre && r.fecha === hoy);
+    const entrada = regsHoy.filter(r => r.tipo === 'ENTRADA').sort((a,b)=>a.hora.localeCompare(b.hora))[0];
+    const salida  = regsHoy.filter(r => r.tipo === 'SALIDA').sort((a,b)=>b.hora.localeCompare(a.hora))[0];
+    const estado  = entrada && salida ? '✅ Completo'
+                  : entrada ? '🟡 En centro'
+                  : '⚪ Sin registro';
+    return `
+      <div style="display:flex;align-items:center;gap:12px;padding:.75rem;background:#f9f9f9;border-radius:8px;margin-bottom:.5rem">
+        <div class="avatar avatar-sm">${getInitials(nombre)}</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:600">${nombre}</div>
+          <div style="font-size:11px;color:var(--grey-2)">
+            ${entrada ? '🟢 Entrada: ' + entrada.hora : ''}
+            ${salida  ? ' · 🔴 Salida: ' + salida.hora  : ''}
+          </div>
+        </div>
+        <span style="font-size:11px">${estado}</span>
+      </div>`;
+  }).join('');
+
+  // Tabla histórico
+  const filas = registros.slice(0, 60).map(r => `
+    <tr>
+      <td>${fmtDate(r.fecha)}</td>
+      <td>${r.trabajadora}</td>
+      <td><span class="badge ${r.tipo==='ENTRADA'?'badge-green':'badge-red'}">${r.tipo}</span></td>
+      <td style="font-weight:600">${r.hora}</td>
+      <td>${r.actividad||'—'}</td>
+      <td>${r.centro||'—'}</td>
+      <td style="font-size:11px;color:var(--grey-2)">${r.registradoPor||'—'}</td>
+      <td style="font-size:11px;color:var(--grey-2)">${r.notas||''}</td>
+    </tr>`).join('');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Estado hoy · ${new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</div>
+      ${resumenHTML || '<div style="color:var(--grey-2);font-size:13px">Sin personal activo registrado</div>'}
+    </div>
+    <div class="card">
+      <div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Histórico de registros</div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>Fecha</th><th>Trabajadora</th><th>Tipo</th><th>Hora</th>
+            <th>Actividad</th><th>Centro</th><th>Registrado por</th><th>Notas</th>
+          </tr></thead>
+          <tbody>${filas || '<tr><td colspan="8" style="text-align:center;color:var(--grey-2);padding:2rem">Sin registros aún</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Vista registro horario para MONITOR — solo sus propios fichajes
+function _registroHorarioMonitor() {
+  addTopbarBtn('🟢 Registrar entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
+  addTopbarBtn('🔴 Registrar salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
+
+  const nombre   = currentUser.name;
+  const hoy      = new Date().toISOString().split('T')[0];
+  const regsHoy  = (DB.registroHorario || [])
+    .filter(r => r.trabajadora === nombre && r.fecha === hoy)
+    .sort((a,b) => a.hora.localeCompare(b.hora));
+  const entrada  = regsHoy.filter(r => r.tipo === 'ENTRADA')[0];
+  const salida   = regsHoy.filter(r => r.tipo === 'SALIDA').slice(-1)[0];
+
+  // Calcular horas trabajadas si hay entrada y salida
+  let horasTrab = '';
+  if (entrada && salida) {
+    const [eh,em] = entrada.hora.split(':').map(Number);
+    const [sh,sm] = salida.hora.split(':').map(Number);
+    const mins = (sh*60+sm) - (eh*60+em);
+    if (mins > 0) horasTrab = `${Math.floor(mins/60)}h ${mins%60}min`;
+  }
+
+  // Últimos 10 registros de esta trabajadora
+  const historial = (DB.registroHorario || [])
+    .filter(r => r.trabajadora === nombre)
+    .sort((a,b) => (b.fecha+b.hora).localeCompare(a.fecha+a.hora))
+    .slice(0, 10);
+
+  const filasHist = historial.map(r => `
+    <tr>
+      <td>${fmtDate(r.fecha)}</td>
+      <td><span class="badge ${r.tipo==='ENTRADA'?'badge-green':'badge-red'}">${r.tipo}</span></td>
+      <td style="font-weight:600">${r.hora}</td>
+      <td>${r.actividad||'—'}</td>
+      <td style="font-size:11px;color:var(--grey-2)">${r.notas||''}</td>
+    </tr>`).join('');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="card" style="margin-bottom:1rem;text-align:center">
+      <div style="font-size:28px;margin-bottom:.5rem">👋</div>
+      <div style="font-size:16px;font-weight:700">Hola, ${nombre.split(' ')[0]}</div>
+      <div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">${new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</div>
+      <div style="display:flex;justify-content:center;gap:2rem;margin-bottom:1rem">
+        <div style="text-align:center">
+          <div style="font-size:11px;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em">Entrada</div>
+          <div style="font-size:22px;font-weight:700;color:${entrada?'#2e7d32':'#ccc'}">${entrada?entrada.hora:'--:--'}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:11px;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em">Salida</div>
+          <div style="font-size:22px;font-weight:700;color:${salida?'#c62828':'#ccc'}">${salida?salida.hora:'--:--'}</div>
+        </div>
+        ${horasTrab ? `<div style="text-align:center">
+          <div style="font-size:11px;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em">Horas</div>
+          <div style="font-size:22px;font-weight:700;color:var(--green)">${horasTrab}</div>
+        </div>` : ''}
+      </div>
+      <div style="font-size:12px;color:var(--grey-2)">
+        ${!entrada ? '⚪ Sin entrada registrada hoy' :
+          !salida  ? '🟡 En centro — recuerda fichar la salida' :
+                     '✅ Jornada completa registrada'}
+      </div>
+    </div>
+    <div class="card">
+      <div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Mis últimos registros</div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Hora</th><th>Actividad</th><th>Notas</th></tr></thead>
+          <tbody>${filasHist || '<tr><td colspan="5" style="text-align:center;color:var(--grey-2);padding:2rem">Sin registros aún</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// Modal fichar para MONITOR — sin selector de trabajadora (es ella misma)
+function modalFicharMonitor(tipoDefault) {
+  const ahora = new Date();
+  const horaAct = ahora.toTimeString().slice(0,5);
+  const hoy     = ahora.toISOString().split('T')[0];
+
+  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+  // Actividad: pre-seleccionar la actividad del monitor si tiene una sola
+  const actsMonitor = (currentUser.actividades || [])
+    .filter(a => !a.toUpperCase().includes('TECNIF'));
+  const actPre = actsMonitor.length === 1
+    ? DB.inscripciones.find(i => {
+        const s = String(i.servicio||'').toUpperCase();
+        return actsMonitor.some(am => s.includes(am.toUpperCase().replace(/\s*\(.*\)/,'').trim()));
+      })?.servicio || actsMonitor[0]
+    : '';
+
+  const actividades = [...new Set(
+    DB.inscripciones
+      .filter(i => String(i.centro||'').toUpperCase().includes('ESCALERITAS')
+               && i.estado === 'ACTIVA'
+               && !EXCLUIR.some(x => String(i.servicio||'').toUpperCase() === x))
+      .map(i => i.servicio)
+  )].filter(Boolean).sort();
+
+  openModal(`🕐 Fichar ${tipoDefault === 'ENTRADA' ? '🟢 Entrada' : '🔴 Salida'}`, `
+    <div style="text-align:center;padding:.5rem 0 1rem">
+      <div style="font-size:36px;font-weight:800;color:${tipoDefault==='ENTRADA'?'#2e7d32':'#c62828'}">${horaAct}</div>
+      <div style="font-size:12px;color:var(--grey-2)">${ahora.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</div>
+    </div>
+    <div class="form-grid">
+      <div class="field-group"><label class="field-label">Tipo</label>
+        <select class="field-select" id="fm-tipo">
+          <option value="ENTRADA" ${tipoDefault==='ENTRADA'?'selected':''}>🟢 ENTRADA</option>
+          <option value="SALIDA"  ${tipoDefault==='SALIDA' ?'selected':''}>🔴 SALIDA</option>
+        </select>
+      </div>
+      <div class="field-group"><label class="field-label">Hora</label>
+        <input class="field-input" type="time" id="fm-hora" value="${horaAct}">
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Actividad</label>
+      <select class="field-select" id="fm-actividad">
+        <option value="">— Sin especificar —</option>
+        ${actividades.map(a=>`<option value="${a}" ${a===actPre?'selected':''}>${a}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Notas (opcional)</label>
+      <input class="field-input" type="text" id="fm-notas" placeholder="Observaciones…">
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="guardarFichajeMonitor('${hoy}')">💾 Confirmar fichaje</button>`
+  );
+}
+
+async function guardarFichajeMonitor(fecha) {
+  const tipo      = document.getElementById('fm-tipo')?.value || '';
+  const hora      = document.getElementById('fm-hora')?.value || '';
+  const actividad = document.getElementById('fm-actividad')?.value || '';
+  const notas     = document.getElementById('fm-notas')?.value || '';
+  if (!tipo || !hora) { showToast('Selecciona tipo y hora', 'error'); return; }
+  closeModal();
+  showToast('Guardando fichaje…', 'info');
+  const res = await writeToSheet('REGISTRO HORARIO', {
+    'Fecha':          fecha,
+    'Trabajadora':    currentUser.name,
+    'Tipo':           tipo,
+    'Hora':           hora,
+    'Actividad':      actividad,
+    'Centro':         'CEIP ESCALERITAS',
+    'Registrado por': currentUser.name,
+    'Notas':          notas
+  });
+  if (res.ok && !res.demo) {
+    showToast(`✅ ${tipo} registrada a las ${hora}`, 'success');
+    await syncAll();
+    _registroHorarioMonitor();
+  } else if (!res.ok) {
+    showToast('⚠️ Error al guardar — revisa conexión', 'error');
+  }
+}
+
+function modalRegistroHorario(trabajadoraPre) {
+  const ahora   = new Date();
+  const horaAct = ahora.toTimeString().slice(0,5);
+  const hoy     = ahora.toISOString().split('T')[0];
+
+  const trabajadoras = DB.personal.filter(p => p.activo && p.nombre)
+    .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
+
+  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+  const actividades = [...new Set(
+    DB.inscripciones
+      .filter(i => String(i.centro||'').toUpperCase().includes('ESCALERITAS')
+               && i.estado === 'ACTIVA'
+               && !EXCLUIR.some(x => String(i.servicio||'').toUpperCase() === x))
+      .map(i => i.servicio)
+  )].filter(Boolean).sort();
+
+  openModal('🕐 Registrar entrada / salida', `
+    <div class="form-grid">
+      <div class="field-group"><label class="field-label">Trabajadora <span style="color:#c62828">*</span></label>
+        <select class="field-select" id="rh-trabajadora">
+          ${trabajadoras.map(p=>`<option value="${p.nombre}" ${p.nombre===trabajadoraPre?'selected':''}>${p.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field-group"><label class="field-label">Tipo <span style="color:#c62828">*</span></label>
+        <select class="field-select" id="rh-tipo">
+          <option value="ENTRADA">🟢 ENTRADA</option>
+          <option value="SALIDA">🔴 SALIDA</option>
+        </select>
+      </div>
+      <div class="field-group"><label class="field-label">Fecha <span style="color:#c62828">*</span></label>
+        <input class="field-input" type="date" id="rh-fecha" value="${hoy}">
+      </div>
+      <div class="field-group"><label class="field-label">Hora <span style="color:#c62828">*</span></label>
+        <input class="field-input" type="time" id="rh-hora" value="${horaAct}">
+      </div>
+      <div class="field-group"><label class="field-label">Actividad</label>
+        <select class="field-select" id="rh-actividad">
+          <option value="">— Sin especificar —</option>
+          ${actividades.map(a=>`<option value="${a}">${a}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field-group"><label class="field-label">Centro</label>
+        <input class="field-input" type="text" id="rh-centro" value="CEIP ESCALERITAS">
+      </div>
+    </div>
+    <div class="field-group" style="margin-top:.5rem"><label class="field-label">Notas (opcional)</label>
+      <input class="field-input" type="text" id="rh-notas" placeholder="Observaciones…">
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="guardarRegistroHorario()">💾 Guardar registro</button>`
+  );
+}
+
+async function guardarRegistroHorario() {
+  const trabajadora = document.getElementById('rh-trabajadora')?.value || '';
+  const tipo        = document.getElementById('rh-tipo')?.value || '';
+  const fecha       = document.getElementById('rh-fecha')?.value || '';
+  const hora        = document.getElementById('rh-hora')?.value || '';
+  const actividad   = document.getElementById('rh-actividad')?.value || '';
+  const centro      = document.getElementById('rh-centro')?.value || 'CEIP ESCALERITAS';
+  const notas       = document.getElementById('rh-notas')?.value || '';
+
+  if (!trabajadora || !tipo || !fecha || !hora) {
+    showToast('Rellena trabajadora, tipo, fecha y hora', 'error');
+    return;
+  }
+  closeModal();
+  showToast('Guardando registro horario…', 'info');
+  const res = await writeToSheet('REGISTRO HORARIO', {
+    'Fecha':          fecha,
+    'Trabajadora':    trabajadora,
+    'Tipo':           tipo,
+    'Hora':           hora,
+    'Actividad':      actividad,
+    'Centro':         centro,
+    'Registrado por': currentUser.name,
+    'Notas':          notas
+  });
+  if (res.ok && !res.demo) {
+    showToast(`✅ Registro guardado: ${trabajadora} · ${tipo} · ${hora}`, 'success');
+    await syncAll();
+    registroHorario();
+  } else if (!res.ok) {
+    showToast('⚠️ Error al guardar — revisa conexión GAS', 'error');
+  }
 }
 
 // Informe tecnificación PDF para familia

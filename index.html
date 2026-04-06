@@ -1365,13 +1365,29 @@ async function syncAll() {
     if (resAll.ok && resAll.data) {
       normalizarDB(resAll.data);
     }
-    // Paso 2: GET_PAGOS garantiza pagos completos y filtrados (sin filas vacías)
+    // Paso 2: GET_PAGOS
     try {
       const resPagos = await gasRequest('GET_PAGOS');
       if (resPagos.ok && Array.isArray(resPagos.pagos)) {
         normalizarDB({ pagos: resPagos.pagos });
       }
-    } catch(ep) { /* pagos fallan silenciosamente — no bloquear flujo */ }
+    } catch(ep) {}
+
+    // Paso 3: GET_SESIONES
+    try {
+      const resSes = await gasRequest('GET_SESIONES');
+      if (resSes.ok && Array.isArray(resSes.sesiones) && resSes.sesiones.length) {
+        normalizarDB({ sesiones: resSes.sesiones });
+      }
+    } catch(es) {}
+
+    // Paso 4: GET_REGISTRO_HORARIO
+    try {
+      const resRH = await gasRequest('GET_REGISTRO_HORARIO');
+      if (resRH.ok && Array.isArray(resRH.registros)) {
+        normalizarDB({ 'registro horario': resRH.registros });
+      }
+    } catch(erh) {}
 
     setSyncState('ok');
     renderCurrentPage();

@@ -1234,22 +1234,35 @@ function normalizarDB(raw) {
   }
 
   // REGISTRO HORARIO — Fecha | Trabajadora | Tipo | Hora | Actividad | Centro | Registrado por | Notas
-  if (raw['registro horario'] && raw['registro horario'].length) {
-    DB.registroHorario = raw['registro horario']
-      .filter(r => r['Fecha'] && r['Trabajadora'])
-      .map((r, idx) => ({
-        id:            'RH_' + idx,
-        fecha:         String(r['Fecha'] || '').split('T')[0],
-        trabajadora:   String(r['Trabajadora'] || '').trim(),
-        tipo:          String(r['Tipo'] || '').toUpperCase().trim(),
-        hora:          String(r['Hora'] || '').trim(),
-        actividad:     String(r['Actividad'] || '').trim(),
-        centro:        String(r['Centro'] || '').trim(),
-        registradoPor: String(r['Registrado por'] || '').trim(),
-        notas:         String(r['Notas'] || '').trim()
-      }));
+  // REGISTRO HORARIO — normalizar desde GET_REGISTRO_HORARIO o GET_ALL
+  const _rhRows = raw['registro horario'] || raw['registros'] || [];
+  if (_rhRows.length) {
+    DB.registroHorario = _rhRows
+      .filter(r => r['Fecha'] && String(r['Fecha']).trim() !== '')
+      .map((r, idx) => {
+        // Fecha: puede llegar como 'yyyy-MM-dd', 'dd/mm/yyyy', o número de serie
+        let fecha = String(r['Fecha'] || '').split('T')[0].trim();
+        // Si es número de serie de Sheets (ej: 46117) → convertir
+        if (/^\d{5}$/.test(fecha)) {
+          const d = new Date((parseInt(fecha) - 25569) * 86400 * 1000);
+          fecha = d.toISOString().split('T')[0];
+        }
+        return {
+          id:            'RH_' + idx,
+          fecha,
+          trabajadora:   String(r['Trabajadora'] || '').trim(),
+          tipo:          String(r['Tipo'] || '').toUpperCase().trim(),
+          hora:          String(r['Hora'] || '').trim(),
+          actividad:     String(r['Actividad'] || '').trim(),
+          centro:        String(r['Centro'] || '').trim(),
+          registradoPor: String(r['Registrado por'] || '').trim(),
+          notas:         String(r['Notas'] || '').trim()
+        };
+      });
+    console.log('[SM] registroHorario cargado:', DB.registroHorario.length, 'registros');
   } else {
     DB.registroHorario = [];
+    console.log('[SM] registroHorario: sin datos en raw');
   }
 
   // ASISTENCIAS_EXTRA — headers reales: Fecha | Centro | Servicio | Alumno | Presente | Guardado por
@@ -1452,6 +1465,26 @@ async function testConexionGAS() {
     }
   } catch (e) {
     showToast('❌ ' + e.message, 'error');
+  }
+}
+
+async function diagnosticoRegistroHorario() {
+  showToast('Consultando REGISTRO HORARIO...', 'info');
+  try {
+    const res = await gasRequest('GET_REGISTRO_HORARIO');
+    const lineas = [
+      'ok: ' + res.ok,
+      'total: ' + (res.total ?? '?'),
+      'hoja: ' + (res.sheet_name || '?'),
+      'error: ' + (res.error || 'ninguno'),
+      'registro[0]: ' + JSON.stringify(res.registros && res.registros[0] || null)
+    ].join('\n');
+    openModal('Diagnostico Registro Horario',
+      '<pre style="font-size:11px;white-space:pre-wrap;word-break:break-all">' + lineas + '</pre>',
+      '<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>');
+  } catch(e) {
+    openModal('Error', e.message,
+      '<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>');
   }
 }
 
@@ -5773,6 +5806,7 @@ function configuracion() {
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="guardarGasUrl()">Guardar URL</button>
             <button class="btn btn-secondary btn-sm" onclick="testConexionGAS()">🔍 Probar conexión</button>
+            <button class="btn btn-secondary btn-sm" onclick="diagnosticoRegistroHorario()">🕐 Diagnóstico Reg.Horario</button>
             <button class="btn btn-secondary btn-sm" onclick="syncAll()">🔄 Sincronizar ahora</button>
           </div>
           <div style="margin-top:1rem;padding:1rem;background:var(--grey-bg);border-radius:8px;font-size:12px;color:var(--grey-3);line-height:1.7">

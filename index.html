@@ -557,9 +557,7 @@ tbody tr:hover { background: #fafafa; }
         <div class="nav-item" onclick="navigate('extraescolares')" data-page="extraescolares">
           <span class="nav-icon">🏫</span><span>Extraescolares</span>
         </div>
-        <div class="nav-item" onclick="navigate('registro-horario')" data-page="registro-horario" id="nav-reg-horario">
-          <span class="nav-icon">🕐</span><span>Mi horario</span>
-        </div>
+
       </div>
 
       <!-- Admin only section 2 -->
@@ -1752,21 +1750,17 @@ function startApp() {
     localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
 
     // Ocultar TODO el sidebar
-    document.querySelectorAll('.nav-section').forEach(s => s.style.display = 'none');
-
-    // Ocultar todas las nav-section excepto Actividades
+    // Ocultar todas las secciones del nav excepto Actividades
     document.querySelectorAll('.nav-section').forEach(s => {
-      const id = s.id || '';
-      if (id !== 'nav-actividades') s.style.display = 'none';
+      s.style.display = (s.id === 'nav-actividades') ? '' : 'none';
     });
-    // Dentro de Actividades, mostrar solo las páginas de su actividad + Mi perfil
+    // Dentro de Actividades, mostrar solo las páginas de su actividad
     document.querySelectorAll('#nav-actividades .nav-item').forEach(item => {
       const pg = item.dataset.page;
       const visible = (esTecnificacion && pg === 'futbol') ||
-                      (esExtraescolar  && pg === 'extraescolares') ||
-                      pg === 'personal' ||         // siempre puede ver su ficha
-                      pg === 'registro-horario';   // siempre puede fichar entrada/salida
-      item.style.display = visible ? '' : 'none';
+                      (esExtraescolar  && pg === 'extraescolares');
+      // registro-horario: lo gestionamos desde botones en la propia página
+      item.style.display = (visible ? '' : 'none');
     });
     // "Mi perfil" se muestra como texto alternativo para MONITOR
     const miPerfil = document.getElementById('nav-mi-perfil');
@@ -1861,7 +1855,6 @@ function navigate(page) {
     const permitidas = [];
     if (currentUser.esTecnificacion) permitidas.push('futbol');
     if (currentUser.esExtraescolar)  permitidas.push('extraescolares');
-    permitidas.push('registro-horario'); // siempre permitido para fichar
     if (!permitidas.length) permitidas.push('extraescolares'); // fallback
     if (!permitidas.includes(page)) {
       page = permitidas[0];
@@ -3759,6 +3752,8 @@ function extraescolares() {
     filtroActividad = actsMonitor.map(a => a.replace(/\s*\(.*?\)/g,'').trim().toUpperCase());
     if (!isMonitor) addTopbarBtn('Informe AMPA', () => generarInformeAMPA(), 'btn-secondary', '📄 ');
     addTopbarBtn('📋 Pase de lista hoy', () => modalPaseListaExtraMonitor(filtroActividad), 'btn-primary', '+ ');
+    addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-secondary');
+    addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
   }
   const inscrExtra = DB.inscripciones.filter(i => {
     const centro  = String(i.centro || i.CENTRO || '').toUpperCase();

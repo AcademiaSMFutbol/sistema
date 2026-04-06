@@ -1939,7 +1939,20 @@ function renderCurrentPage() {
    HELPERS
 ═══════════════════════════════════════════════════════════ */
 const fmtEur = v => new Intl.NumberFormat('es-ES', {style:'currency',currency:'EUR'}).format(v||0);
-const fmtDate = d => { if (!d) return '—'; try { return new Date(d).toLocaleDateString('es-ES'); } catch(e) { return d; } };
+const fmtDate = d => {
+  if (!d) return '—';
+  try {
+    // yyyy-MM-dd → parsear como local para evitar desfase UTC
+    const s = String(d);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y,m,dd] = s.split('-').map(Number);
+      return new Date(y, m-1, dd).toLocaleDateString('es-ES');
+    }
+    const dt = new Date(d);
+    if (isNaN(dt)) return String(d);
+    return dt.toLocaleDateString('es-ES');
+  } catch(e) { return String(d); }
+};
 const fmtMonth = m => ({ enero:'Enero',febrero:'Febrero',marzo:'Marzo',abril:'Abril',mayo:'Mayo',junio:'Junio',julio:'Julio',agosto:'Agosto',septiembre:'Septiembre',octubre:'Octubre',noviembre:'Noviembre',diciembre:'Diciembre' })[String(m||'').toLowerCase()] || m || '—';
 const getInitials = n => n ? String(n).split(' ').filter(Boolean).slice(0,2).map(p=>p[0]).join('').toUpperCase() : '??';
 const daysBetween = (a,b) => Math.ceil((b-a)/(1000*60*60*24));
@@ -5132,7 +5145,7 @@ function registroHorario() {
 
   const hoy = new Date().toISOString().split('T')[0];
   const resumenHTML = trabajadoras.map(nombre => {
-    const regsHoy = registros.filter(r => r.trabajadora === nombre && r.fecha === hoy);
+    const regsHoy = registros.filter(r => r.trabajadora.toUpperCase() === nombre.toUpperCase() && r.fecha === hoy);
     const entrada = regsHoy.filter(r => r.tipo === 'ENTRADA').sort((a,b)=>a.hora.localeCompare(b.hora))[0];
     const salida  = regsHoy.filter(r => r.tipo === 'SALIDA').sort((a,b)=>b.hora.localeCompare(a.hora))[0];
     const estado  = entrada && salida ? '✅ Completo'
@@ -5194,7 +5207,7 @@ function _registroHorarioMonitor() {
   const nombre   = currentUser.name;
   const hoy      = new Date().toISOString().split('T')[0];
   const regsHoy  = (DB.registroHorario || [])
-    .filter(r => r.trabajadora === nombre && r.fecha === hoy)
+    .filter(r => r.trabajadora.toUpperCase() === nombre.toUpperCase() && r.fecha === hoy)
     .sort((a,b) => a.hora.localeCompare(b.hora));
   const entrada  = regsHoy.filter(r => r.tipo === 'ENTRADA')[0];
   const salida   = regsHoy.filter(r => r.tipo === 'SALIDA').slice(-1)[0];

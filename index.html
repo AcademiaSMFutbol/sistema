@@ -4116,19 +4116,23 @@ function modalPaseListaExtraMonitor(filtroActividades) {
 }
 
 async function confirmarPaseListaMonitor(actividad, fecha) {
-  const presentes = [...document.querySelectorAll('.pase-check:checked')].map(c => c.value);
-  const total     = document.querySelectorAll('.pase-check').length;
-  for (const aid of presentes) {
+  const presentes = new Set([...document.querySelectorAll('.pase-check:checked')].map(c => c.value));
+  const todos     = [...document.querySelectorAll('.pase-check')].map(c => c.value);
+  // Guardar TODOS — presentes y ausentes — con el valor correcto de Presente
+  for (const aid of todos) {
     const a = getAlumno(aid);
     await writeToSheet('ASISTENCIAS_EXTRA', {
-      FECHA: fecha, CLAVE_ALUMNO: a.claveAlumno || aid,
-      NOMBRE_ALUMNO: a.nombre || '',
-      ACTIVIDAD: actividad, PRESENTE: true,
-      MONITOR: currentUser.name
+      'Fecha':        fecha,
+      'Centro':       a.centro || currentUser.centro || '',
+      'Servicio':     actividad,
+      'Alumno':       a.nombre || aid,
+      'Presente':     presentes.has(aid),
+      'Guardado por': currentUser.name
     });
   }
   closeModal();
-  showToast(`Pase de lista guardado: ${presentes.length}/${total} presentes ✓`, 'success');
+  await syncAll();
+  showToast(`Pase de lista guardado: ${presentes.size}/${todos.length} presentes ✓`, 'success');
 }
 
 // Modal pase de lista para MONITOR de Tecnificación
@@ -4189,21 +4193,21 @@ async function guardarPaseListaMonitor(fecha, esFutbol) {
   const ausentes  = checks.filter(c=>!c.checked).map(c=>c.value);
   const actividad = esFutbol ? 'TECNIFICACIÓN' : (currentUser.actividades?.[0]||'EXTRAESCOLARES');
 
-  // Guardar en Sheets: una fila por alumno
+  // Guardar en Sheets: una fila por alumno con headers reales
   for (const aid of [...presentes, ...ausentes]) {
     const a = getAlumno(aid);
     const presente = presentes.includes(aid);
     await writeToSheet('ASISTENCIAS_EXTRA', {
-      ID_ASISTENCIA: `PL_${fecha}_${aid}`,
-      FECHA:         fecha,
-      ACTIVIDAD:     actividad,
-      MONITOR:       currentUser.name,
-      CLAVE_ALUMNO:  a.claveAlumno || aid,
-      NOMBRE_ALUMNO: a.nombre || '',
-      PRESENTE:      presente
+      'Fecha':        fecha,
+      'Centro':       a.centro || currentUser.centro || '',
+      'Servicio':     actividad,
+      'Alumno':       a.nombre || aid,
+      'Presente':     presente,
+      'Guardado por': currentUser.name
     });
   }
   closeModal();
+  await syncAll();
   showToast(`Pase de lista guardado: ${presentes.length} presentes, ${ausentes.length} ausentes ✓`, 'success');
 }
 
@@ -4297,12 +4301,17 @@ async function guardarAsistenciaExtra() {
     if (e) { e.asistenciasMes[dia] = c.checked; }
   });
   saveCacheLocal();
-  // Guardar cada asistencia extra como fila individual
+  // Guardar cada asistencia extra con headers reales de la hoja
+  const servicio = document.getElementById('ae-act')?.value || '';
   for (const c of checks) {
+    const al = getAlumno(c.value);
     await writeToSheet('ASISTENCIAS_EXTRA', {
-      ID_ASISTENCIA: 'AE_' + Date.now() + '_' + c.value,
-      FECHA: fecha, ACTIVIDAD: document.getElementById('ae-act')?.value || '',
-      CLAVE_ALUMNO: c.value, PRESENTE: c.checked
+      'Fecha':        fecha,
+      'Centro':       al.centro || '',
+      'Servicio':     servicio,
+      'Alumno':       al.nombre || c.value,
+      'Presente':     c.checked,
+      'Guardado por': currentUser.name
     });
   }
   closeModal();

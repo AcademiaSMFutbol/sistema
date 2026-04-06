@@ -3739,10 +3739,11 @@ function extraescolares() {
   // Obtener su actividad desde currentUser.actividades (cargado en startApp)
   let filtroActividad = null; // null = todas (ADMIN)
   if (isMonitor) {
+    // Si esExtraescolar no se resolvió (ej: actividad no en PERSONAL aún),
+    // mostrar igual la página con todos los alumnos de Escaleritas
     if (!currentUser.esExtraescolar) {
-      document.getElementById('page-content').innerHTML =
-        '<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Acceso restringido</div><div class="empty-desc">Tu actividad es SM Fútbol. Accede desde esa sección.</div></div>';
-      return;
+      // No bloquear — dejar continuar con filtroActividad = null (todo visible)
+      console.warn('[SM] esExtraescolar=false para monitor — mostrando sin filtro');
     }
     // Filtrar por la actividad específica del monitor
     const actsMonitor = (currentUser.actividades || []).filter(a =>
@@ -3752,8 +3753,7 @@ function extraescolares() {
     filtroActividad = actsMonitor.map(a => a.replace(/\s*\(.*?\)/g,'').trim().toUpperCase());
     if (!isMonitor) addTopbarBtn('Informe AMPA', () => generarInformeAMPA(), 'btn-secondary', '📄 ');
     addTopbarBtn('📋 Pase de lista hoy', () => modalPaseListaExtraMonitor(filtroActividad), 'btn-primary', '+ ');
-    addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-secondary');
-    addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
+    addTopbarBtn('⏱ Mi horario', () => { currentPage = 'registro-horario'; _registroHorarioMonitor(); }, 'btn-secondary');
   }
   const inscrExtra = DB.inscripciones.filter(i => {
     const centro  = String(i.centro || i.CENTRO || '').toUpperCase();
@@ -5137,8 +5137,10 @@ function registroHorario() {
 
 // Vista registro horario para MONITOR — solo sus propios fichajes
 function _registroHorarioMonitor() {
-  addTopbarBtn('🟢 Registrar entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
-  addTopbarBtn('🔴 Registrar salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
+  clearTopbarBtns();
+  addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
+  addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
+  addTopbarBtn('← Volver', () => navigate('extraescolares'), 'btn-secondary');
 
   const nombre   = currentUser.name;
   const hoy      = new Date().toISOString().split('T')[0];
@@ -5286,6 +5288,11 @@ async function guardarFichajeMonitor(fecha) {
   if (res.ok && !res.demo) {
     showToast(`✅ ${tipo} registrada a las ${hora}`, 'success');
     await syncAll();
+    // Volver a mostrar el horario actualizado
+    clearTopbarBtns();
+    addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
+    addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
+    addTopbarBtn('← Volver', () => navigate('extraescolares'), 'btn-secondary');
     _registroHorarioMonitor();
   } else if (!res.ok) {
     showToast('⚠️ Error al guardar — revisa conexión', 'error');

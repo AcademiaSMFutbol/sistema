@@ -5056,7 +5056,7 @@ function portalFamilia() {
    PAGE: REGISTRO HORARIO (solo ADMIN)
 ═══════════════════════════════════════════════════════════ */
 function registroHorario() {
-  clearTopbarBtns();
+  document.getElementById('topbar-actions').innerHTML = '';
   const isAdmin   = currentUser.role === 'ADMIN';
   const isMonitor = currentUser.role === 'MONITOR';
 
@@ -5137,7 +5137,7 @@ function registroHorario() {
 
 // Vista registro horario para MONITOR — solo sus propios fichajes
 function _registroHorarioMonitor() {
-  clearTopbarBtns();
+  document.getElementById('topbar-actions').innerHTML = '';
   addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
   addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
   addTopbarBtn('← Volver', () => navigate('extraescolares'), 'btn-secondary');
@@ -5289,7 +5289,7 @@ async function guardarFichajeMonitor(fecha) {
     showToast(`✅ ${tipo} registrada a las ${hora}`, 'success');
     await syncAll();
     // Volver a mostrar el horario actualizado
-    clearTopbarBtns();
+    document.getElementById('topbar-actions').innerHTML = '';
     addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
     addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
     addTopbarBtn('← Volver', () => navigate('extraescolares'), 'btn-secondary');

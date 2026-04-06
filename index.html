@@ -4030,9 +4030,28 @@ function generarInformeAMPA() {
   });
 
   // Asistencias del mes desde ASISTENCIAS_EXTRA
+  // Filtrar por mes usando tanto el campo mes como la fecha directamente
+  const MESES_IDX_AMPA = ['enero','febrero','marzo','abril','mayo','junio',
+                           'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const mesIdx = MESES_IDX_AMPA.indexOf(mesNombre.toLowerCase());
   const asistMes = (DB.asistencias_extra || []).filter(a => {
-    const m = String(a.mes || '').toLowerCase();
-    return m === mesNombre.toLowerCase();
+    // Opción 1: campo mes ya calculado
+    if (a.mes && a.mes.toLowerCase() === mesNombre.toLowerCase()) return true;
+    // Opción 2: calcular desde fecha (robusto ante formatos variables)
+    if (a.fecha) {
+      const fStr = String(a.fecha).trim();
+      // yyyy-MM-dd
+      if (fStr.length >= 7) {
+        const m = parseInt(fStr.substring(5,7)) - 1;
+        if (m === mesIdx) return true;
+      }
+      // dd/mm/yyyy
+      if (fStr.includes('/')) {
+        const parts = fStr.split('/');
+        if (parts.length === 3 && parseInt(parts[1])-1 === mesIdx) return true;
+      }
+    }
+    return false;
   });
 
   // ── Denominador: fechas DISTINTAS en que se impartió cada actividad ──

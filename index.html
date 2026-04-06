@@ -2005,10 +2005,20 @@ function fotoUrl(nombre, tipo) {
 }
 
 // Avatar con foto (si existe) o iniciales
-function avatarHtml(nombre, tipo, size) {
-  const sz = size || 40;
+function avatarHtml(nombre, tipo, sizeOrStyle) {
   const url = fotoUrl(nombre, tipo);
-  return `<div class="avatar" style="width:${sz}px;height:${sz}px;overflow:hidden;border-radius:50%;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-size:${Math.round(sz*0.4)}px;font-weight:600;color:var(--green-dim)">
+  // Acepta: número (px), string numérico, o string CSS completo (legacy)
+  let style;
+  if (!sizeOrStyle) {
+    style = 'width:40px;height:40px;font-size:16px';
+  } else if (typeof sizeOrStyle === 'number' || /^\d+$/.test(String(sizeOrStyle))) {
+    const sz = parseInt(sizeOrStyle) || 40;
+    style = `width:${sz}px;height:${sz}px;font-size:${Math.round(sz*0.4)}px`;
+  } else {
+    // string CSS completo (llamadas legacy: 'width:32px;height:32px;font-size:11px;...')
+    style = sizeOrStyle;
+  }
+  return `<div class="avatar" style="${style};overflow:hidden;border-radius:50%;background:var(--green-bg);display:flex;align-items:center;justify-content:center;font-weight:600;color:var(--green-dim)">
     <img src="${url}" alt="${nombre}" style="width:100%;height:100%;object-fit:cover"
          onerror="this.style.display='none';this.parentElement.style.display='flex'">${getInitials(nombre)}
   </div>`;

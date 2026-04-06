@@ -833,7 +833,8 @@ const LOGO_URL = 'https://academiasmfutbol.github.io/sistema/img/logo.png';
 // Fotos de jugadores y monitores — carpeta img en GitHub Pages
 // Formato: https://academiasmfutbol.github.io/img/jugadores/NOMBRE.jpg
 //          https://academiasmfutbol.github.io/img/monitores/NOMBRE.jpg
-const IMG_BASE = 'https://academiasmfutbol.github.io/img';
+const IMG_BASE   = 'https://academiasmfutbol.github.io/img';
+const GITHUB_IMG = IMG_BASE + '/';
 function getFotoJugador(nombre) {
   if (!nombre) return null;
   const n = nombre.split(' ')[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -920,47 +921,25 @@ function normalizarDB(raw) {
       });
     }
 
-    // ── Camino SM: aplicar SOLO a alumnos de tecnificación ──────
-    // Estrategia de match (en orden de prioridad):
-    // 1. Clave de dos palabras exacta al inicio del nombre (ej: "DIEGO LÓPEZ")
-    // 2. Cualquier token del nombre completo que coincida con una clave del mapa
-    //    → esto resuelve casos como ANTONIO EZEQUIEL (clave "EZEQUIEL")
-    //    → y evita que "DIEGO" matchee un apellido "DIEGO" de otro alumno
+    // ── Camino SM: calcular desde asistencias registradas ──────────
+    // 10 pts por sesión asistida, 20 pts si fue mejor alumno
+    // Solo para alumnos de tecnificación
     if (DB._pendingCaminoSM) {
       delete DB._pendingCaminoSM;
       DB.alumnos.forEach(al => {
-        // Solo tecnificación — extraescolares quedan en 0
         if (al.actividad !== 'TECNIFICACIÓN') { al.camino = 0; return; }
-
-        const nombre = (al.nombre || '').toUpperCase();
-        let pts = null;
-
-        // 1. Claves compuestas (dos palabras) — se comprueban primero para evitar
-        //    que "DIEGO" matchee tanto a DIEGO como a DIEGO LÓPEZ
-        const clavesCompuestas = Object.keys(CAMINO_SM_INICIAL)
-          .filter(k => k.includes(' '))
-          .sort((a,b) => b.length - a.length);  // más largas primero
-        for (const clave of clavesCompuestas) {
-          if (nombre.startsWith(clave) || nombre.includes(' ' + clave + ' ') || nombre.includes(' ' + clave)) {
-            pts = CAMINO_SM_INICIAL[clave];
-            break;
-          }
-        }
-
-        // 2. Buscar por cualquier token del nombre completo
-        //    Ejemplo: "ANTONIO EZEQUIEL MARTÍN PÉREZ" → tokens ["ANTONIO","EZEQUIEL","MARTÍN","PÉREZ"]
-        //    → "EZEQUIEL" existe en el mapa → 310 pts
-        if (pts === null) {
-          const tokens = nombre.split(' ').filter(Boolean);
-          for (const token of tokens) {
-            if (CAMINO_SM_INICIAL.hasOwnProperty(token)) {
-              pts = CAMINO_SM_INICIAL[token];
-              break;
-            }
-          }
-        }
-
-        al.camino = pts !== null ? pts : 0;
+        const alNombre = (al.nombre || '').toUpperCase();
+        const alTokens = alNombre.split(' ');
+        const asisAlumno = DB.asistencias.filter(a => {
+          if (String(a.alumnoId) === String(al.id)) return true;
+          const clave = String(a.claveAlumno || '').toUpperCase().trim();
+          if (!clave) return false;
+          if (clave === alNombre) return true;
+          const cTokens = clave.split(' ').filter(t => t.length >= 3);
+          return cTokens.length > 0 && cTokens.every(t => alTokens.includes(t));
+        });
+        const pts = asisAlumno.reduce((s, a) => s + (a.esMejor ? 20 : 10), 0);
+        al.camino = pts;
       });
     }
     // ─────────────────────────────────────────────────────────────

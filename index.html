@@ -923,49 +923,58 @@ function normalizarDB(raw) {
     // Puntos históricos acumulados hasta el inicio del sistema
     // + puntos calculados dinámicamente desde DB.asistencias (10 pts/sesión, 20 si mejor alumno)
     const CAMINO_HISTORICO = {
-      // Formato: 'TOKEN_DEL_NOMBRE': puntos_historicos
-      // El token puede ser nombre, apellido, o nombre+apellido parcial
-      'EZEQUIEL':  300,  // ANTONIO EZEQUIEL MARTÍN PÉREZ
-      'ANTOINE':   30,   // ANTOINE RODRÍGUEZ
-      'RICKY':     30,   // RICKY MARTÍN MARTÍNEZ
-      'NAHUEL':    20,   // NAHUEL SALGADO HERNÁNDEZ
-      'TOMAS':     20,   // TOMAS CAPLOVA
-      'DIEGO LÓPEZ': 10, // DIEGO LÓPEZ MENDOZA
-      'RODRIGO':   10,   // RODRIGO ANGUITA ARGUDO
-      'HIMAR':     10,   // HIMAR PABLO SANTANA MARTÍN
+      'ABEL': 40, 'AIMAR': 10, 'AITOR': 0, 'ALBERTO': 190,
+      'ANTOINE': 230, 'ANTONY': 20, 'ARAI': 40, 'ARAN': 10,
+      'BRYAN': 40, 'DAVID': 40, 'DAYAN': 30,
+      'DIEGO PADRÓN': 40, 'DYLAN': 0, 'EIRIAN': 160,
+      'ELIAN': 10, 'ELOY': 0, 'EZEQUIEL': 310,
+      'HÉCTOR': 60, 'HECTOR': 60,
+      'IMAR': 10, 'JORGE GARCÍA': 100, 'KEVIN': 20,
+      'LEO SUÁREZ': 10, 'LEO': 40,
+      'LUCAS': 0, 'LUKA': 100, 'MATEO': 10,
+      'NADIR': 0, 'NAHUEL': 220, 'NAIM': 10,
+      'NEIZAN': 0, 'PABLO': 50, 'RICKY': 40,
+      'ROBERTO': 30, 'TOMAS': 160, 'UMAR': 0,
+      'YAEL': 20, 'ERIK': 0, 'OCLAM': 10,
+      'DIEGO LÓPEZ': 10, 'CALEB': 10, 'YERAY': 30,
     };
+    // Ordenar claves: compuestas primero (más largas → más específicas), simples después
+    const _caminoClaves = Object.keys(CAMINO_HISTORICO).sort((a,b) => b.split(' ').length - a.split(' ').length || b.length - a.length);
+
     if (DB._pendingCaminoSM) {
       delete DB._pendingCaminoSM;
       DB.alumnos.forEach(al => {
         if (al.actividad !== 'TECNIFICACIÓN') { al.camino = 0; return; }
-        const alNombre = (al.nombre || '').toUpperCase();
-        const alTokens = alNombre.split(' ');
+        const alNombre = (al.nombre || '').toUpperCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g,''); // sin tildes para match
+        const alTokens = alNombre.split(' ').filter(Boolean);
 
-        // 1. Puntos históricos desde tabla estática
-        let ptsHistorico = 0;
-        // Buscar claves compuestas primero (más específicas)
-        for (const clave of Object.keys(CAMINO_HISTORICO).filter(k => k.includes(' ')).sort((a,b) => b.length - a.length)) {
-          if (alNombre.includes(clave)) { ptsHistorico = CAMINO_HISTORICO[clave]; break; }
+        // ── Match histórico ──────────────────────────────────────────
+        // Regla: para cada clave del histórico (compuestas primero),
+        // comprobar si TODOS los tokens de la clave están en el nombre del alumno.
+        // La primera coincidencia gana. null = sin match.
+        let ptsHistorico = null;
+        for (const clave of _caminoClaves) {
+          const claveNorm = clave.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+          const claveTokens = claveNorm.split(' ').filter(Boolean);
+          const coincide = claveTokens.every(ct => alTokens.includes(ct));
+          if (coincide) { ptsHistorico = CAMINO_HISTORICO[clave]; break; }
         }
-        // Luego tokens simples
-        if (!ptsHistorico) {
-          for (const token of alTokens) {
-            if (CAMINO_HISTORICO.hasOwnProperty(token)) { ptsHistorico = CAMINO_HISTORICO[token]; break; }
-          }
-        }
+        const ptsBase = ptsHistorico !== null ? ptsHistorico : 0;
 
-        // 2. Puntos dinámicos desde asistencias registradas en Sheets
+        // ── Puntos dinámicos desde asistencias en Sheets ─────────────
         const asisAlumno = DB.asistencias.filter(a => {
           if (String(a.alumnoId) === String(al.id)) return true;
-          const clave = String(a.claveAlumno || '').toUpperCase().trim();
-          if (!clave) return false;
-          if (clave === alNombre) return true;
-          const cTokens = clave.split(' ').filter(t => t.length >= 3);
+          const claveA = String(a.claveAlumno || '').toUpperCase()
+            .normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+          if (!claveA) return false;
+          if (claveA === alNombre) return true;
+          const cTokens = claveA.split(' ').filter(t => t.length >= 3);
           return cTokens.length > 0 && cTokens.every(t => alTokens.includes(t));
         });
         const ptsDinamico = asisAlumno.reduce((s, a) => s + (a.esMejor ? 20 : 10), 0);
 
-        al.camino = ptsHistorico + ptsDinamico;
+        al.camino = ptsBase + ptsDinamico;
       });
     }
     // ─────────────────────────────────────────────────────────────
@@ -1385,8 +1394,11 @@ async function syncAll() {
       const resRH = await gasRequest('GET_REGISTRO_HORARIO');
       if (resRH.ok && Array.isArray(resRH.registros)) {
         normalizarDB({ 'registro horario': resRH.registros });
+        console.log('[SM] Registro horario: ' + resRH.registros.length + ' filas del GAS');
+      } else {
+        console.warn('[SM] GET_REGISTRO_HORARIO ko:', JSON.stringify(resRH).substring(0,200));
       }
-    } catch(erh) {}
+    } catch(erh) { console.error('[SM] GET_REGISTRO_HORARIO excepción:', erh.message); }
 
     // GET_ASISTENCIAS_EXTRA — garantiza datos AMPA completos
     try {
@@ -5173,6 +5185,17 @@ function registroHorario() {
   }
   addTopbarBtn('+ Registrar entrada/salida', () => modalRegistroHorario(), 'btn-primary', '🕐 ');
   addTopbarBtn('📄 Informe mensual', () => modalInformeHorario(), 'btn-secondary');
+  addTopbarBtn('🔄 Recargar', async () => {
+    showToast('Recargando registros…','info');
+    try {
+      const resRH = await gasRequest('GET_REGISTRO_HORARIO');
+      if (resRH.ok && Array.isArray(resRH.registros)) {
+        normalizarDB({ 'registro horario': resRH.registros });
+        showToast(resRH.registros.length + ' registros cargados','success');
+        registroHorario();
+      } else { showToast('Sin datos del GAS','error'); }
+    } catch(e) { showToast('Error: ' + e.message,'error'); }
+  }, 'btn-secondary');
 
   const registros = (DB.registroHorario || [])
     .slice().sort((a,b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora));
@@ -5231,8 +5254,8 @@ function registroHorario() {
     );
   }).join('');
 
-  // Tabla histórico completo
-  const filas = registros.slice(0, 100).map(r =>
+  // Tabla histórico completo — sin límite de filas
+  const filas = registros.map(r =>
     '<tr>' +
       '<td>' + fmtDate(r.fecha) + '</td>' +
       '<td>' + r.trabajadora + '</td>' +
@@ -5253,7 +5276,7 @@ function registroHorario() {
       (resumenHTML || '<div style="color:var(--grey-2);font-size:13px">Sin personal activo registrado</div>') +
     '</div>' +
     '<div class="card">' +
-      '<div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Histórico de registros</div>' +
+      '<div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Histórico de registros · ' + registros.length + ' entradas</div>' +
       '<div style="overflow-x:auto">' +
         '<table class="data-table"><thead><tr>' +
           '<th>Fecha</th><th>Trabajadora</th><th>Tipo</th><th>Hora</th>' +

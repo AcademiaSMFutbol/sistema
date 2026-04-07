@@ -1279,7 +1279,7 @@ function normalizarDB(raw) {
       const nom   = String(a.Alumno || a.ALUMNO || '').trim().toUpperCase();
       if (!fecha && !nom) continue;
       const key = fecha + '|' + act + '|' + nom;
-      const presente = a.Presente === true || String(a.Presente || a.PRESENTE || '').toUpperCase() === 'TRUE';
+      const presente = a.Presente === true || ['TRUE','VERDADERO','SÍ','SI','1'].includes(String(a.Presente || a.PRESENTE || '').toUpperCase().trim());
       // Si ya existe el key, solo sobreescribir si el nuevo tiene presente=TRUE
       if (!dedupMap[key] || presente) {
         dedupMap[key] = a;
@@ -4044,9 +4044,33 @@ function calcDiasLectivos(mesNombre, anyo, grupoDia) {
   return count;
 }
 
-function generarInformeAMPA() {
-  const mesNombre = getMesActual();           // ej: 'marzo'
-  const anyo      = new Date().getFullYear();
+function generarInformeAMPA(mesParam, anyoParam) {
+  // Si no se pasan parámetros, mostrar modal selector de mes
+  if (!mesParam) {
+    const MESES = ['enero','febrero','marzo','abril','mayo','junio',
+                   'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const hoy = new Date();
+    const mesActualIdx = hoy.getMonth();
+    const anyoActual = hoy.getFullYear();
+    const opts = MESES.map((m,i) =>
+      `<option value="${m}" ${i===mesActualIdx?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)} ${anyoActual}</option>`
+    ).join('');
+    openModal('Informe AMPA — Seleccionar mes',
+      `<div class="field-group">
+        <label class="field-label">Mes del informe</label>
+        <select id="ampa-mes-sel" class="field-input">${opts}</select>
+      </div>
+      <div style="margin-top:.5rem;font-size:12px;color:var(--grey-2)">
+        Asistencias cargadas: <strong>${(DB.asistencias_extra||[]).length}</strong> registros ·
+        Inscritos ESCALERITAS: <strong>${DB.inscripciones.filter(i=>String(i.centro||'').toUpperCase().includes('ESCALERITAS')&&i.estado==='ACTIVA').length}</strong> alumnos
+      </div>`,
+      `<button class="btn btn-primary" onclick="closeModal();generarInformeAMPA(document.getElementById('ampa-mes-sel').value,${anyoActual})">📄 Generar PDF</button>`
+    );
+    return;
+  }
+
+  const mesNombre = mesParam;
+  const anyo      = anyoParam || new Date().getFullYear();
   const mesLabel  = fmtMonth(mesNombre);      // ej: 'Marzo'
   const EXCLUIR   = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
 
@@ -4080,8 +4104,15 @@ function generarInformeAMPA() {
     }
     return false;
   });
-  console.log('[AMPA] mes:', mesNombre, 'idx:', mesIdx, 'total asistencias:', (DB.asistencias_extra||[]).length, 'del mes:', asistMes.length);
-  if (asistMes.length > 0) console.log('[AMPA] ejemplo:', JSON.stringify(asistMes[0]));
+  console.log('[AMPA] mes:', mesNombre, 'idx:', mesIdx,
+    '| asistencias_extra total:', (DB.asistencias_extra||[]).length,
+    '| del mes:', asistMes.length,
+    '| inscripciones ESCALERITAS activas:', inscrExtra.length);
+  if (asistMes.length > 0) console.log('[AMPA] ejemplo asistencia:', JSON.stringify(asistMes[0]));
+  if (inscrExtra.length === 0) {
+    showToast('No hay alumnos inscritos activos en ESCALERITAS. Comprueba que la sync cargó inscripciones.','error');
+    return;
+  }
 
   // ── Denominador: fechas DISTINTAS en que se impartió cada actividad ──
   // Si hay registros en ASISTENCIAS_EXTRA → contamos fechas reales con ≥1 alumno

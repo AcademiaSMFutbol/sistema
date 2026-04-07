@@ -85,6 +85,35 @@ a { text-decoration: none; color: inherit; }
    LAYOUT
 ═══════════════════════════════════════════════════════════ */
 #app { display: none; height: 100vh; overflow: hidden; }
+
+/* ── Pantalla de carga post-login ─────────────────────── */
+#loading-screen {
+  display: none; position: fixed; inset: 0; z-index: 9999;
+  background: #0a0a0a; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+#loading-screen.visible { display: flex; }
+.ls-logo { width: 72px; height: 72px; border-radius: 16px; overflow: hidden;
+  background: #000; margin-bottom: 1.5rem; box-shadow: 0 0 0 1px rgba(255,255,255,.08); }
+.ls-logo img { width: 100%; height: 100%; object-fit: contain; }
+.ls-title { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: .02em; margin-bottom: .25rem; }
+.ls-sub   { font-size: 12px; color: #555; margin-bottom: 2rem; }
+.ls-bar-wrap { width: 220px; height: 3px; background: #1a1a1a; border-radius: 99px; overflow: hidden; margin-bottom: 1.25rem; }
+.ls-bar { height: 100%; width: 0%; background: #2e7d32; border-radius: 99px; transition: width .4s ease; }
+.ls-steps { display: flex; flex-direction: column; gap: .45rem; min-width: 220px; }
+.ls-step  { display: flex; align-items: center; gap: .6rem; font-size: 12px; color: #444; transition: color .3s; }
+.ls-step.done   { color: #4caf50; }
+.ls-step.active { color: #ddd; }
+.ls-step-icon { width: 16px; text-align: center; font-size: 11px; }
+@keyframes ls-spin { to { transform: rotate(360deg); } }
+.ls-spinner { width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid #333; border-top-color: #2e7d32;
+  animation: ls-spin .7s linear infinite; flex-shrink: 0; }
+.ls-error-msg { font-size: 11px; color: #ef5350; margin-top: 1rem;
+  text-align: center; max-width: 220px; display: none; }
+.ls-retry { margin-top: .75rem; padding: .4rem 1.2rem; background: #2e7d32;
+  color: #fff; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; display: none; }
+
 #app.visible { display: flex; }
 
 .sidebar {
@@ -468,6 +497,10 @@ tbody tr:hover { background: #fafafa; }
     <div id="login-loading" style="text-align:center;padding:.75rem;font-size:12px;color:#888;display:none">
       <span id="login-loading-txt">⏳ Cargando datos del sistema…</span>
     </div>
+    <!-- Estado de conexión visible siempre — crítico para que el monitor sepa si puede entrar -->
+    <div id="login-status" style="text-align:center;padding:.5rem;font-size:11px;color:#555;margin-top:.25rem">
+      Conectando con Google Sheets…
+    </div>
     <button class="btn-login" id="btn-login" onclick="doLogin()">Entrar al sistema</button>
     <!-- Botón primer acceso: solo visible si no hay contraseña admin configurada -->
     <button id="btn-primer-acceso" onclick="modalPrimerAcceso()"
@@ -487,6 +520,27 @@ tbody tr:hover { background: #fafafa; }
 </div>
 
 <!-- ═══════════════ MAIN APP ═══════════════ -->
+
+<!-- ═══════════════ LOADING SCREEN (post-login) ═══════════════ -->
+<div id="loading-screen">
+  <div class="ls-logo">
+    <img src="https://academiasmfutbol.github.io/sistema/img/logo.png" alt="SM"
+         onerror="this.style.display='none'">
+  </div>
+  <div class="ls-title">SM Academia</div>
+  <div class="ls-sub">Cargando datos…</div>
+  <div class="ls-bar-wrap"><div class="ls-bar" id="ls-bar"></div></div>
+  <div class="ls-steps" id="ls-steps">
+    <div class="ls-step" id="ls-s1"><div class="ls-step-icon">○</div>Datos generales</div>
+    <div class="ls-step" id="ls-s2"><div class="ls-step-icon">○</div>Pagos y facturación</div>
+    <div class="ls-step" id="ls-s3"><div class="ls-step-icon">○</div>Sesiones SM Fútbol</div>
+    <div class="ls-step" id="ls-s4"><div class="ls-step-icon">○</div>Registro horario</div>
+    <div class="ls-step" id="ls-s5"><div class="ls-step-icon">○</div>Asistencias extraescolares</div>
+  </div>
+  <div class="ls-error-msg" id="ls-error"></div>
+  <button class="ls-retry" id="ls-retry" onclick="lsRetry()">Reintentar</button>
+</div>
+
 <div id="app">
 
   <!-- SIDEBAR -->
@@ -1589,7 +1643,7 @@ document.getElementById('login-pass').addEventListener('keydown', e => { if (e.k
 
 // poblarSelectMonitores: obsoleta — login usa input de texto con USERNAME
 
-function doLogin() {
+async function doLogin() {
   const role = document.getElementById('login-role').value;
   const pass = document.getElementById('login-pass').value;
   const err = document.getElementById('login-error');
@@ -1613,11 +1667,33 @@ function doLogin() {
     name = CREDENTIALS.ADMIN.name;
 
   } else if (role === 'MONITOR') {
-    // Monitor: USERNAME (columna USERNAME en PERSONAL) + PASSWORD
+    // Monitor: USERNAME + PASSWORD desde hoja PERSONAL en Sheets
     const usernameInput = (document.getElementById('login-monitor-name').value || '').trim().toLowerCase();
     if (!usernameInput) { err.style.display='block'; err.textContent='Introduce tu usuario.'; return; }
-    const mon = DB.personal.find(p => p.username === usernameInput || p.nombre.toLowerCase().startsWith(usernameInput));
-    if (!mon) { err.style.display='block'; err.textContent='Usuario no encontrado. Verifica tu nombre de usuario.'; return; }
+
+    // Si DB.personal está vacío (primer acceso o sync fallida), intentar sync ahora
+    if (!DB.personal.length) {
+      err.style.display='block';
+      err.textContent='⏳ Cargando datos del sistema… espera un momento.';
+      const btnL = document.getElementById('btn-login');
+      if (btnL) btnL.disabled = true;
+      try {
+        await syncAll();
+      } catch(e) { /* ignorar — vamos a comprobar si llegaron datos */ }
+      if (btnL) btnL.disabled = false;
+      err.style.display = 'none';
+      if (!DB.personal.length) {
+        err.style.display='block';
+        err.textContent='Sin conexión al sistema. Verifica tu conexión a internet e inténtalo de nuevo.';
+        return;
+      }
+    }
+
+    const mon = DB.personal.find(p =>
+      (p.username && p.username.toLowerCase() === usernameInput) ||
+      p.nombre.toLowerCase().startsWith(usernameInput)
+    );
+    if (!mon) { err.style.display='block'; err.textContent='Usuario no encontrado. Verifica tu usuario o contacta con Samy.'; return; }
     if (!mon.password) { err.style.display='block'; err.textContent='Sin contraseña asignada. Contacta con el administrador.'; return; }
     if (pass !== mon.password) { err.style.display='block'; err.textContent='Contraseña incorrecta.'; return; }
     name = mon.nombre;
@@ -1660,7 +1736,13 @@ function doLogin() {
   }
   currentUser = { role, name, initials: name.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase(), ts: Date.now() };
   localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
-  startApp();
+  // Mostrar pantalla de carga y sincronizar antes de entrar
+  lsShow();
+  syncAllWithProgress().catch(e => {
+    console.warn('[SM] sync post-login falló:', e.message);
+    lsError('Sin conexión — entrando con datos anteriores.');
+    setTimeout(() => { lsHide(); startApp(); }, 1500);
+  }).then(() => { lsHide(); startApp(); });
 }
 
 // Primer acceso: configurar contraseña sin estar logueado
@@ -2077,6 +2159,118 @@ function updateBadges() {
   const badgeInc = document.getElementById('badge-incidencias');
   if (badgeI) { badgeI.textContent = impagados; badgeI.style.display = impagados ? '' : 'none'; }
   if (badgeInc) { badgeInc.textContent = incAbiertas; badgeInc.style.display = incAbiertas ? '' : 'none'; }
+}
+
+
+// ── Pantalla de carga post-login ──────────────────────────────
+function lsShow() {
+  document.getElementById('loading-screen').classList.add('visible');
+  document.getElementById('login-screen').style.display = 'none';
+}
+function lsHide() {
+  document.getElementById('loading-screen').classList.remove('visible');
+}
+function lsStep(n, state) {
+  // state: 'active' | 'done' | 'error'
+  const el = document.getElementById('ls-s' + n);
+  if (!el) return;
+  el.className = 'ls-step ' + state;
+  const icon = el.querySelector('.ls-step-icon');
+  if (state === 'active') {
+    icon.innerHTML = '<div class="ls-spinner"></div>';
+  } else if (state === 'done') {
+    icon.innerHTML = '✓';
+  } else if (state === 'error') {
+    icon.innerHTML = '✕';
+  }
+}
+function lsProgress(pct) {
+  const bar = document.getElementById('ls-bar');
+  if (bar) bar.style.width = pct + '%';
+}
+function lsError(msg) {
+  const el = document.getElementById('ls-error');
+  const btn = document.getElementById('ls-retry');
+  if (el) { el.textContent = msg; el.style.display = 'block'; }
+  if (btn) btn.style.display = 'inline-block';
+}
+async function lsRetry() {
+  // Limpiar estado de error y reintentar sync
+  document.getElementById('ls-error').style.display = 'none';
+  document.getElementById('ls-retry').style.display = 'none';
+  ['ls-s1','ls-s2','ls-s3','ls-s4','ls-s5'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.className = 'ls-step'; el.querySelector('.ls-step-icon').innerHTML = '○'; }
+  });
+  lsProgress(0);
+  await syncAllWithProgress();
+  lsHide();
+  startApp();
+}
+
+async function syncAllWithProgress() {
+  setSyncState('syncing');
+  lsProgress(5);
+
+  // Paso 1: GET_ALL
+  lsStep(1, 'active');
+  try {
+    const resAll = await gasRequest('GET_ALL');
+    if (resAll.ok) { normalizarDB(resAll); lsStep(1, 'done'); }
+    else lsStep(1, 'error');
+  } catch(e) { lsStep(1, 'error'); }
+  lsProgress(22);
+
+  // Paso 2: GET_PAGOS
+  lsStep(2, 'active');
+  try {
+    const resPagos = await gasRequest('GET_PAGOS');
+    if (resPagos.ok && resPagos.pagos) { normalizarDB({ pagos: resPagos.pagos }); lsStep(2, 'done'); }
+    else lsStep(2, 'error');
+  } catch(e) { lsStep(2, 'error'); }
+  lsProgress(42);
+
+  // Paso 3: GET_SESIONES
+  lsStep(3, 'active');
+  try {
+    const resSes = await gasRequest('GET_SESIONES');
+    if (resSes.ok) { normalizarDB({ sesiones: resSes.sesiones || [] }); lsStep(3, 'done'); }
+    else lsStep(3, 'error');
+  } catch(e) { lsStep(3, 'error'); }
+  lsProgress(62);
+
+  // Paso 4: GET_REGISTRO_HORARIO
+  lsStep(4, 'active');
+  try {
+    const resRH = await gasRequest('GET_REGISTRO_HORARIO');
+    if (resRH.ok && Array.isArray(resRH.registros)) {
+      normalizarDB({ 'registro horario': resRH.registros });
+      console.log('[SM] Registro horario: ' + resRH.registros.length + ' filas del GAS');
+      lsStep(4, 'done');
+    } else {
+      console.warn('[SM] GET_REGISTRO_HORARIO ko:', JSON.stringify(resRH).substring(0,200));
+      lsStep(4, 'error');
+    }
+  } catch(erh) { console.error('[SM] GET_REGISTRO_HORARIO excepción:', erh.message); lsStep(4, 'error'); }
+  lsProgress(82);
+
+  // Paso 5: GET_ASISTENCIAS_EXTRA
+  lsStep(5, 'active');
+  try {
+    const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA');
+    if (resAE.ok && Array.isArray(resAE.asistencias)) {
+      normalizarDB({ asistencias_extra: resAE.asistencias });
+      lsStep(5, 'done');
+    } else {
+      lsStep(5, 'error');
+    }
+  } catch(eae) { lsStep(5, 'error'); }
+  lsProgress(100);
+
+  saveCacheLocal();
+  setSyncState('ok');
+  lastSync = new Date();
+  renderCurrentPage();
 }
 
 function setSyncState(state) {
@@ -6186,47 +6380,57 @@ async function initApp() {
       if (parsed && parsed.role && CREDENTIALS[parsed.role] && age < SESSION_TTL) {
         currentUser = parsed;
         loadCacheLocal();
-        if (GAS_URL) await syncAll();
+        if (GAS_URL) {
+          // Mostrar pantalla de carga mientras sincroniza
+          lsShow();
+          try {
+            await syncAllWithProgress();
+          } catch(e) {
+            console.warn('[SM] syncAll falló en init:', e.message);
+            lsError('Error de conexión. Puedes continuar con datos cargados anteriormente.');
+          }
+          lsHide();
+        }
         startApp();
         return;
       } else {
-        // Sesión expirada o inválida — limpiar
         localStorage.removeItem(SESSION_KEY);
         if (age >= SESSION_TTL) showToast && showToast('Sesión expirada. Vuelve a entrar.', 'info');
       }
     } catch(e) { localStorage.removeItem(SESSION_KEY); }
   }
 
-  // 2. Sin sesión — mostrar login y cargar datos en paralelo
-  // Mostrar spinner mientras cargan los datos
+  // 2. Sin sesión — mostrar login y precargar datos en segundo plano
   const loadingEl = document.getElementById('login-loading');
   const btnLogin  = document.getElementById('btn-login');
   if (loadingEl) loadingEl.style.display = 'block';
   if (btnLogin)  btnLogin.disabled = true;
 
-  // Intentar cargar desde caché primero (instantáneo)
   const hasCaché = loadCacheLocal();
 
-  // Siempre sincronizar con Sheets para tener datos frescos
   if (GAS_URL) {
-    try {
-      await syncAll();
-    } catch(e) {
-      console.warn('[SM] syncAll falló en init:', e.message);
-    }
+    try { await syncAll(); } catch(e) { console.warn('[SM] syncAll falló en init:', e.message); }
   }
 
-  // Mostrar botón primer acceso si no hay contraseña configurada
   const btnPA = document.getElementById('btn-primer-acceso');
   if (btnPA && !getAdminPass()) btnPA.style.display = 'inline-flex';
 
-  // Datos listos — habilitar login
+  const nPersonal = DB.personal.length;
+  const nClientes = DB.clientes.length;
+  const statusEl  = document.getElementById('login-status');
+
   if (loadingEl) {
-    const nPersonal = DB.personal.length;
-    const nClientes = DB.clientes.length;
     loadingEl.innerHTML = nPersonal > 0 || nClientes > 0
       ? '<span style="color:#66bb6a">✓ Datos listos · ' + nPersonal + ' monitores · ' + nClientes + ' familias</span>'
       : '<span style="color:#ffa726">⚠️ Sin datos cargados — verifica la conexión GAS</span>';
+  }
+  // Indicador de estado siempre visible — clave para que el monitor sepa si puede entrar
+  if (statusEl) {
+    if (nPersonal > 0) {
+      statusEl.innerHTML = '<span style="color:#4caf50">● Sistema listo · ' + nPersonal + ' usuarios cargados</span>';
+    } else {
+      statusEl.innerHTML = '<span style="color:#ef5350">● Sin datos — comprueba tu conexión a internet</span>';
+    }
   }
   if (btnLogin) btnLogin.disabled = false;
 }

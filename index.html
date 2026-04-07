@@ -808,11 +808,9 @@ function gasRequest(action, data = {}) {
     if (data.sheet) params.append('sheet', data.sheet);
     if (data.id)    params.append('id', String(data.id));
     if (data.row) {
-      // Codificar en base64 para evitar corrupción de tildes y caracteres especiales en URL
-      const rowJson = JSON.stringify(data.row);
-      const rowB64  = btoa(unescape(encodeURIComponent(rowJson)));
-      params.append('row', rowB64);
-      params.append('enc', 'b64');
+      // URLSearchParams codifica automáticamente UTF-8 incluyendo tildes
+      // El GAS recibe e.parameter.row ya decodificado correctamente
+      params.append('row', JSON.stringify(data.row));
     }
 
     // Crear tag <script> — esto nunca falla por CORS
@@ -921,15 +919,42 @@ function normalizarDB(raw) {
       });
     }
 
-    // ── Camino SM: calcular desde asistencias registradas ──────────
-    // 10 pts por sesión asistida, 20 pts si fue mejor alumno
-    // Solo para alumnos de tecnificación
+    // ── Camino SM ──────────────────────────────────────────────────
+    // Puntos históricos acumulados hasta el inicio del sistema
+    // + puntos calculados dinámicamente desde DB.asistencias (10 pts/sesión, 20 si mejor alumno)
+    const CAMINO_HISTORICO = {
+      // Formato: 'TOKEN_DEL_NOMBRE': puntos_historicos
+      // El token puede ser nombre, apellido, o nombre+apellido parcial
+      'EZEQUIEL':  300,  // ANTONIO EZEQUIEL MARTÍN PÉREZ
+      'ANTOINE':   30,   // ANTOINE RODRÍGUEZ
+      'RICKY':     30,   // RICKY MARTÍN MARTÍNEZ
+      'NAHUEL':    20,   // NAHUEL SALGADO HERNÁNDEZ
+      'TOMAS':     20,   // TOMAS CAPLOVA
+      'DIEGO LÓPEZ': 10, // DIEGO LÓPEZ MENDOZA
+      'RODRIGO':   10,   // RODRIGO ANGUITA ARGUDO
+      'HIMAR':     10,   // HIMAR PABLO SANTANA MARTÍN
+    };
     if (DB._pendingCaminoSM) {
       delete DB._pendingCaminoSM;
       DB.alumnos.forEach(al => {
         if (al.actividad !== 'TECNIFICACIÓN') { al.camino = 0; return; }
         const alNombre = (al.nombre || '').toUpperCase();
         const alTokens = alNombre.split(' ');
+
+        // 1. Puntos históricos desde tabla estática
+        let ptsHistorico = 0;
+        // Buscar claves compuestas primero (más específicas)
+        for (const clave of Object.keys(CAMINO_HISTORICO).filter(k => k.includes(' ')).sort((a,b) => b.length - a.length)) {
+          if (alNombre.includes(clave)) { ptsHistorico = CAMINO_HISTORICO[clave]; break; }
+        }
+        // Luego tokens simples
+        if (!ptsHistorico) {
+          for (const token of alTokens) {
+            if (CAMINO_HISTORICO.hasOwnProperty(token)) { ptsHistorico = CAMINO_HISTORICO[token]; break; }
+          }
+        }
+
+        // 2. Puntos dinámicos desde asistencias registradas en Sheets
         const asisAlumno = DB.asistencias.filter(a => {
           if (String(a.alumnoId) === String(al.id)) return true;
           const clave = String(a.claveAlumno || '').toUpperCase().trim();
@@ -938,8 +963,9 @@ function normalizarDB(raw) {
           const cTokens = clave.split(' ').filter(t => t.length >= 3);
           return cTokens.length > 0 && cTokens.every(t => alTokens.includes(t));
         });
-        const pts = asisAlumno.reduce((s, a) => s + (a.esMejor ? 20 : 10), 0);
-        al.camino = pts;
+        const ptsDinamico = asisAlumno.reduce((s, a) => s + (a.esMejor ? 20 : 10), 0);
+
+        al.camino = ptsHistorico + ptsDinamico;
       });
     }
     // ─────────────────────────────────────────────────────────────

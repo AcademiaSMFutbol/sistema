@@ -775,12 +775,12 @@ function gasRequest(action, data = {}) {
     // Nombre de callback único para esta petición
     const cbName = '__smcb_' + Date.now() + '_' + Math.floor(Math.random() * 9999);
 
-    // Timeout de 15 segundos
+    // Timeout de 25 segundos (el GAS en móvil puede tardar más)
     const timeout = setTimeout(() => {
       cleanup();
       setSyncState('error');
-      reject(new Error('Timeout: el GAS no respondió en 15 segundos. ¿Está publicado como Web App?'));
-    }, 15000);
+      reject(new Error('Timeout: el GAS no respondió en 25 segundos. ¿Está publicado como Web App?'));
+    }, 25000);
 
     // Limpiar después de recibir respuesta
     function cleanup() {
@@ -5326,9 +5326,13 @@ function _registroHorarioMonitor() {
   addTopbarBtn('← Volver', () => navigate('extraescolares'), 'btn-secondary');
 
   const nombre   = currentUser.name;
+  const normN    = nombre.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   const hoy      = new Date().toISOString().split('T')[0];
   const regsHoy  = (DB.registroHorario || [])
-    .filter(r => r.trabajadora.toUpperCase() === nombre.toUpperCase() && r.fecha === hoy)
+    .filter(r => {
+      const rn = (r.trabajadora||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      return rn === normN && r.fecha === hoy;
+    })
     .sort((a,b) => a.hora.localeCompare(b.hora));
   const entrada  = regsHoy.filter(r => r.tipo === 'ENTRADA')[0];
   const salida   = regsHoy.filter(r => r.tipo === 'SALIDA').slice(-1)[0];
@@ -5342,11 +5346,15 @@ function _registroHorarioMonitor() {
     if (mins > 0) horasTrab = `${Math.floor(mins/60)}h ${mins%60}min`;
   }
 
-  // Últimos 10 registros de esta trabajadora
+  // Últimos 30 registros de esta trabajadora — match insensible a mayúsculas y tildes
+  const normNombre = nombre.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   const historial = (DB.registroHorario || [])
-    .filter(r => r.trabajadora === nombre)
+    .filter(r => {
+      const rNorm = (r.trabajadora||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      return rNorm === normNombre;
+    })
     .sort((a,b) => (b.fecha+b.hora).localeCompare(a.fecha+a.hora))
-    .slice(0, 10);
+    .slice(0, 30);
 
   const filasHist = historial.map(r => `
     <tr>

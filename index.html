@@ -2224,7 +2224,7 @@ async function syncAllWithProgress() {
   lsStep(1, 'active');
   try {
     const resAll = await gasRequest('GET_ALL', {}, T);
-    if (resAll.ok) { normalizarDB(resAll); lsStep(1, 'done'); }
+    if (resAll.ok && resAll.data) { normalizarDB(resAll.data); lsStep(1, 'done'); }
     else { lsStep(1, 'error'); }
   } catch(e) { lsStep(1, 'error'); }
   lsProgress(22);

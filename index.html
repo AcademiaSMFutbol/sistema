@@ -533,9 +533,9 @@ tbody tr:hover { background: #fafafa; }
   <div class="ls-steps" id="ls-steps">
     <div class="ls-step" id="ls-s1"><div class="ls-step-icon">○</div>Datos generales</div>
     <div class="ls-step" id="ls-s2"><div class="ls-step-icon">○</div>Pagos y facturación</div>
-    <div class="ls-step" id="ls-s3"><div class="ls-step-icon">○</div>Sesiones SM Fútbol</div>
-    <div class="ls-step" id="ls-s4"><div class="ls-step-icon">○</div>Registro horario</div>
-    <div class="ls-step" id="ls-s5"><div class="ls-step-icon">○</div>Asistencias extraescolares</div>
+    <div class="ls-step" id="ls-s3"><div class="ls-step-icon">○</div>Sesiones SM Fútbol <span style="font-size:10px;color:#444;margin-left:4px">(opcional)</span></div>
+    <div class="ls-step" id="ls-s4"><div class="ls-step-icon">○</div>Registro horario <span style="font-size:10px;color:#444;margin-left:4px">(opcional)</span></div>
+    <div class="ls-step" id="ls-s5"><div class="ls-step-icon">○</div>Asistencias <span style="font-size:10px;color:#444;margin-left:4px">(opcional)</span></div>
   </div>
   <div class="ls-error-msg" id="ls-error"></div>
   <button class="ls-retry" id="ls-retry" onclick="lsRetry()">Reintentar</button>
@@ -816,7 +816,7 @@ function loadDemoData() {
    No hay CORS. No hay preflight. Siempre funciona.
 ═══════════════════════════════════════════════════════════ */
 
-function gasRequest(action, data = {}) {
+function gasRequest(action, data = {}, timeoutMs = 25000) {
   return new Promise((resolve, reject) => {
     if (!GAS_URL) {
       loadDemoData();
@@ -829,12 +829,12 @@ function gasRequest(action, data = {}) {
     // Nombre de callback único para esta petición
     const cbName = '__smcb_' + Date.now() + '_' + Math.floor(Math.random() * 9999);
 
-    // Timeout de 25 segundos (el GAS en móvil puede tardar más)
+    // Timeout configurable — 25s por defecto, 12s en carga inicial
     const timeout = setTimeout(() => {
       cleanup();
       setSyncState('error');
-      reject(new Error('Timeout: el GAS no respondió en 25 segundos. ¿Está publicado como Web App?'));
-    }, 25000);
+      reject(new Error('Timeout (' + Math.round(timeoutMs/1000) + 's): el GAS no respondió.'));
+    }, timeoutMs);
 
     // Limpiar después de recibir respuesta
     function cleanup() {
@@ -2188,6 +2188,15 @@ function lsError(msg) {
   if (el) { el.textContent = msg; el.style.display = 'block'; }
   if (btn) btn.style.display = 'inline-block';
 }
+function lsErrorOptional() {
+  // Pasos opcionales fallaron — no es bloqueante, se recargan en segundo plano
+  const el = document.getElementById('ls-error');
+  if (el) {
+    el.style.color = '#888';
+    el.textContent = 'Algunos datos se cargarán en segundo plano una vez dentro.';
+    el.style.display = 'block';
+  }
+}
 async function lsRetry() {
   // Limpiar estado de error y reintentar sync
   document.getElementById('ls-error').style.display = 'none';
@@ -2206,65 +2215,83 @@ async function syncAllWithProgress() {
   setSyncState('syncing');
   lsProgress(5);
 
-  // Paso 1: GET_ALL
+  // Timeout corto en carga inicial — 12s por petición
+  // Pasos 1-2: CRÍTICOS (datos base + pagos). Sin ellos no hay acceso útil.
+  // Pasos 3-5: OPCIONALES — el error no bloquea. Se recargan en segundo plano tras entrar.
+  const T = 12000;
+
+  // ── Paso 1: GET_ALL (crítico) ──────────────────────────────
   lsStep(1, 'active');
   try {
-    const resAll = await gasRequest('GET_ALL');
+    const resAll = await gasRequest('GET_ALL', {}, T);
     if (resAll.ok) { normalizarDB(resAll); lsStep(1, 'done'); }
-    else lsStep(1, 'error');
+    else { lsStep(1, 'error'); }
   } catch(e) { lsStep(1, 'error'); }
   lsProgress(22);
 
-  // Paso 2: GET_PAGOS
+  // ── Paso 2: GET_PAGOS (crítico) ───────────────────────────
   lsStep(2, 'active');
   try {
-    const resPagos = await gasRequest('GET_PAGOS');
+    const resPagos = await gasRequest('GET_PAGOS', {}, T);
     if (resPagos.ok && resPagos.pagos) { normalizarDB({ pagos: resPagos.pagos }); lsStep(2, 'done'); }
-    else lsStep(2, 'error');
+    else { lsStep(2, 'error'); }
   } catch(e) { lsStep(2, 'error'); }
   lsProgress(42);
 
-  // Paso 3: GET_SESIONES
+  // ── Paso 3: GET_SESIONES (opcional) ───────────────────────
   lsStep(3, 'active');
   try {
-    const resSes = await gasRequest('GET_SESIONES');
+    const resSes = await gasRequest('GET_SESIONES', {}, T);
     if (resSes.ok) { normalizarDB({ sesiones: resSes.sesiones || [] }); lsStep(3, 'done'); }
-    else lsStep(3, 'error');
+    else { lsStep(3, 'error'); }
   } catch(e) { lsStep(3, 'error'); }
   lsProgress(62);
 
-  // Paso 4: GET_REGISTRO_HORARIO
+  // ── Paso 4: GET_REGISTRO_HORARIO (opcional) ────────────────
   lsStep(4, 'active');
   try {
-    const resRH = await gasRequest('GET_REGISTRO_HORARIO');
+    const resRH = await gasRequest('GET_REGISTRO_HORARIO', {}, T);
     if (resRH.ok && Array.isArray(resRH.registros)) {
       normalizarDB({ 'registro horario': resRH.registros });
-      console.log('[SM] Registro horario: ' + resRH.registros.length + ' filas del GAS');
       lsStep(4, 'done');
-    } else {
-      console.warn('[SM] GET_REGISTRO_HORARIO ko:', JSON.stringify(resRH).substring(0,200));
-      lsStep(4, 'error');
-    }
-  } catch(erh) { console.error('[SM] GET_REGISTRO_HORARIO excepción:', erh.message); lsStep(4, 'error'); }
+    } else { lsStep(4, 'error'); }
+  } catch(e) { lsStep(4, 'error'); }
   lsProgress(82);
 
-  // Paso 5: GET_ASISTENCIAS_EXTRA
+  // ── Paso 5: GET_ASISTENCIAS_EXTRA (opcional) ──────────────
   lsStep(5, 'active');
   try {
-    const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA');
+    const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA', {}, T);
     if (resAE.ok && Array.isArray(resAE.asistencias)) {
       normalizarDB({ asistencias_extra: resAE.asistencias });
       lsStep(5, 'done');
-    } else {
-      lsStep(5, 'error');
-    }
-  } catch(eae) { lsStep(5, 'error'); }
+    } else { lsStep(5, 'error'); }
+  } catch(e) { lsStep(5, 'error'); }
   lsProgress(100);
 
   saveCacheLocal();
   setSyncState('ok');
   lastSync = new Date();
   renderCurrentPage();
+
+  // Reintentar pasos opcionales fallidos en segundo plano (sin bloquear UI)
+  _syncOpcionales();
+}
+
+// Recarga silenciosa de pasos opcionales tras entrar a la app
+async function _syncOpcionales() {
+  const pasos = [
+    { action: 'GET_SESIONES',          key: 'sesiones',           extract: r => ({ sesiones: r.sesiones || [] }), check: r => r.ok },
+    { action: 'GET_REGISTRO_HORARIO',  key: 'registro horario',   extract: r => ({ 'registro horario': r.registros }), check: r => r.ok && Array.isArray(r.registros) },
+    { action: 'GET_ASISTENCIAS_EXTRA', key: 'asistencias_extra',  extract: r => ({ asistencias_extra: r.asistencias }), check: r => r.ok && Array.isArray(r.asistencias) },
+  ];
+  for (const paso of pasos) {
+    try {
+      const res = await gasRequest(paso.action, {}, 20000);
+      if (paso.check(res)) normalizarDB(paso.extract(res));
+    } catch(e) { /* silencioso */ }
+  }
+  saveCacheLocal();
 }
 
 function setSyncState(state) {
@@ -6405,12 +6432,21 @@ async function initApp() {
         currentUser = parsed;
         loadCacheLocal();
         if (GAS_URL) {
-          // Mostrar pantalla de carga mientras sincroniza
           lsShow();
           try {
             await syncAllWithProgress();
+            // Comprobar si fallaron solo opcionales (pasos 3,4,5)
+            const s1ok = document.getElementById('ls-s1')?.classList.contains('done');
+            const s2ok = document.getElementById('ls-s2')?.classList.contains('done');
+            if (!s1ok && !s2ok) {
+              lsError('Error de conexión. Puedes continuar con datos cargados anteriormente.');
+            } else {
+              const s3ok = document.getElementById('ls-s3')?.classList.contains('done');
+              const s4ok = document.getElementById('ls-s4')?.classList.contains('done');
+              const s5ok = document.getElementById('ls-s5')?.classList.contains('done');
+              if (!s3ok || !s4ok || !s5ok) lsErrorOptional();
+            }
           } catch(e) {
-            console.warn('[SM] syncAll falló en init:', e.message);
             lsError('Error de conexión. Puedes continuar con datos cargados anteriormente.');
           }
           lsHide();

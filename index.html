@@ -1502,22 +1502,16 @@ async function syncPagos() {
 // La app ya no envía arrays — el GAS mapea por nombre de columna
 async function writeToSheet(sheet, rowData) {
   if (!GAS_URL) {
-    showToast('Sin conexión GAS — datos solo en memoria', 'warning');
     return { ok: true, demo: true };
   }
-  // Hojas read-only — nunca escribir desde la app
   const READONLY = ['CLIENTES','ALUMNOS','INSCRIPCIONES','PAGOS'];
   if (READONLY.includes(sheet)) {
-    showToast(`${sheet} es de solo lectura — edita directamente en Google Sheets`, 'warning');
     return { ok: true, readonly: true };
   }
   try {
     const res = await gasRequest('APPEND', { sheet, row: rowData });
-    if (res.ok) showToast('Guardado en Google Sheets ✓', 'success');
-    else showToast('Error al guardar: ' + (res.error || '?'), 'error');
     return res;
   } catch (e) {
-    showToast('Error: ' + e.message, 'error');
     return { ok: false, error: e.message };
   }
 }
@@ -5653,34 +5647,59 @@ function modalFicharMonitor(tipoDefault) {
 }
 
 async function guardarFichajeMonitor(fecha) {
+  // Leer campos ANTES de cerrar modal
   const tipo      = document.getElementById('fm-tipo')?.value || '';
   const hora      = document.getElementById('fm-hora')?.value || '';
   const actividad = document.getElementById('fm-actividad')?.value || '';
   const notas     = document.getElementById('fm-notas')?.value || '';
-  if (!tipo || !hora) { showToast('Selecciona tipo y hora', 'error'); return; }
+
+  if (!tipo || !hora) {
+    showToast('Selecciona tipo y hora', 'error');
+    return;
+  }
+
+  // Feedback inmediato en el botón — sin cerrar modal aún
+  const btnConfirmar = document.querySelector('#modal-footer .btn-primary');
+  if (btnConfirmar) { btnConfirmar.disabled = true; btnConfirmar.textContent = '⏳ Guardando…'; }
+
+  let res;
+  try {
+    res = await writeToSheet('REGISTRO HORARIO', {
+      'Fecha':          fecha,
+      'Trabajadora':    currentUser.name,
+      'Tipo':           tipo,
+      'Hora':           hora,
+      'Actividad':      actividad,
+      'Centro':         'CEIP ESCALERITAS',
+      'Registrado por': currentUser.name,
+      'Notas':          notas
+    });
+  } catch(e) {
+    res = { ok: false, error: e.message };
+  }
+
   closeModal();
-  showToast('Guardando fichaje…', 'info');
-  const res = await writeToSheet('REGISTRO HORARIO', {
-    'Fecha':          fecha,
-    'Trabajadora':    currentUser.name,
-    'Tipo':           tipo,
-    'Hora':           hora,
-    'Actividad':      actividad,
-    'Centro':         'CEIP ESCALERITAS',
-    'Registrado por': currentUser.name,
-    'Notas':          notas
-  });
-  if (res.ok && !res.demo) {
-    showToast(`✅ ${tipo} registrada a las ${hora}`, 'success');
-    await syncAll();
-    // Volver a mostrar el horario actualizado
+
+  if (res && res.ok && !res.demo) {
+    showToast(`✅ ${tipo} guardada a las ${hora}`, 'success', 4000);
+    // Recargar solo registro horario — más rápido que syncAll completo
+    try {
+      const resRH = await gasRequest('GET_REGISTRO_HORARIO');
+      if (resRH.ok && Array.isArray(resRH.registros)) {
+        normalizarDB({ 'registro horario': resRH.registros });
+      }
+    } catch(e) { /* no crítico — el registro ya se guardó */ }
+    // Restaurar botones y actualizar vista
     document.getElementById('topbar-actions').innerHTML = '';
     addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
     addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
     addTopbarBtn('← Volver', () => navigate('extraescolares'), 'btn-secondary');
     _registroHorarioMonitor();
-  } else if (!res.ok) {
-    showToast('⚠️ Error al guardar — revisa conexión', 'error');
+  } else if (res && res.demo) {
+    showToast('⚠️ Sin conexión GAS — fichaje NO guardado en Sheets', 'warning', 5000);
+  } else {
+    const errMsg = (res && res.error) || 'Error desconocido';
+    showToast('❌ Error al guardar: ' + errMsg, 'error', 6000);
   }
 }
 
@@ -5895,12 +5914,17 @@ async function guardarRegistroHorario() {
     'Registrado por': currentUser.name,
     'Notas':          notas
   });
-  if (res.ok && !res.demo) {
+  if (res && res.ok && !res.demo) {
     showToast(`✅ Registro guardado: ${trabajadora} · ${tipo} · ${hora}`, 'success');
-    await syncAll();
+    try {
+      const resRH = await gasRequest('GET_REGISTRO_HORARIO');
+      if (resRH.ok && Array.isArray(resRH.registros)) normalizarDB({ 'registro horario': resRH.registros });
+    } catch(e) {}
     registroHorario();
-  } else if (!res.ok) {
-    showToast('⚠️ Error al guardar — revisa conexión GAS', 'error');
+  } else if (res && res.demo) {
+    showToast('⚠️ Sin conexión GAS — fichaje NO guardado en Sheets', 'warning', 5000);
+  } else {
+    showToast('❌ Error al guardar: ' + ((res && res.error) || 'revisa conexión'), 'error', 6000);
   }
 }
 

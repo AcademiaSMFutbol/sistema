@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SM Academia — Sistema 360°</title>
+<!-- Google Identity Services — login con Google para monitoras -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 
@@ -478,18 +480,31 @@ tbody tr:hover { background: #fafafa; }
         <option value="FAMILIA">Familia</option>
       </select>
     </div>
+    <!-- Monitor: login con Google (se muestra al seleccionar Monitor) -->
+    <div id="login-monitor-google" style="display:none">
+      <div style="text-align:center;padding:.5rem 0 1.25rem">
+        <div style="font-size:12px;color:#888;margin-bottom:1rem">
+          Usa tu cuenta Google de trabajo para acceder
+        </div>
+        <!-- Botón Google Sign-In oficial -->
+        <div id="google-signin-btn" style="display:flex;justify-content:center"></div>
+        <div id="login-google-error" style="font-size:12px;color:#ef5350;margin-top:.75rem;display:none"></div>
+      </div>
+    </div>
+
+    <!-- Monitor: fallback usuario+contraseña (si no hay Client ID configurado) -->
     <div class="login-field" id="login-monitor-wrap" style="display:none">
       <label>Usuario</label>
       <input type="text" id="login-monitor-name" class="login-field-input"
              placeholder="Tu usuario (columna USERNAME en PERSONAL)"
              style="width:100%;padding:.75rem 1rem;background:#1a1a1a;border:1px solid #333;border-radius:8px;color:#fff;font-size:14px;box-sizing:border-box">
-      <div style="font-size:11px;color:#888;margin-top:4px">Si no ves tu nombre, contacta con el administrador.</div>
     </div>
+
     <div class="login-field" id="login-familia-wrap" style="display:none">
       <label>Email de la familia</label>
       <input type="email" id="login-email" placeholder="email@ejemplo.com">
     </div>
-    <div class="login-field">
+    <div class="login-field" id="login-pass-wrap">
       <label>Clave de acceso</label>
       <input type="password" id="login-pass" placeholder="••••••••">
     </div>
@@ -497,7 +512,6 @@ tbody tr:hover { background: #fafafa; }
     <div id="login-loading" style="text-align:center;padding:.75rem;font-size:12px;color:#888;display:none">
       <span id="login-loading-txt">⏳ Cargando datos del sistema…</span>
     </div>
-    <!-- Estado de conexión visible siempre — crítico para que el monitor sepa si puede entrar -->
     <div id="login-status" style="text-align:center;padding:.5rem;font-size:11px;color:#555;margin-top:.25rem">
       Conectando con Google Sheets…
     </div>
@@ -713,6 +727,10 @@ tbody tr:hover { background: #fafafa; }
    CONFIGURATION & STATE
 ═══════════════════════════════════════════════════════════ */
 const SHEET_ID = '1nx1wbPyUKDvjsvGUSKaDjClF526S46WDGfyZXkLc4Hc';
+// Google Client ID para login con Google (monitoras)
+// Obtener en: console.cloud.google.com → APIs → Credenciales → ID de cliente OAuth 2.0
+// Tipo: Aplicación web. Orígenes: https://academiasmfutbol.github.io
+const GOOGLE_CLIENT_ID = localStorage.getItem('sm_google_client_id') || '155722667257-kqk52gkmjpesohk7ir8khrc6egut0vop.apps.googleusercontent.com';
 const CONFIG_KEY = 'sm_gas_url';
 const DATA_KEY = 'sm_data_cache';
 const SESSION_KEY = 'sm_session';
@@ -1647,13 +1665,144 @@ function loadCacheLocal() {
 /* ═══════════════════════════════════════════════════════════
    AUTH
 ═══════════════════════════════════════════════════════════ */
+
+// ── Cambio de rol en el selector ─────────────────────────
 document.getElementById('login-role').addEventListener('change', function() {
-  document.getElementById('login-monitor-wrap').style.display = this.value === 'MONITOR' ? '' : 'none';
-  document.getElementById('login-familia-wrap').style.display = this.value === 'FAMILIA' ? '' : 'none';
+  const isMonitor = this.value === 'MONITOR';
+  const isFamilia = this.value === 'FAMILIA';
+
+  // Google Sign-In para monitor (si hay Client ID configurado)
+  const tieneGoogleClientId = !!GOOGLE_CLIENT_ID;
+  document.getElementById('login-monitor-google').style.display = isMonitor && tieneGoogleClientId ? '' : 'none';
+  // Fallback usuario+contraseña: monitor sin Google ID, o admin/familia
+  document.getElementById('login-monitor-wrap').style.display   = isMonitor && !tieneGoogleClientId ? '' : 'none';
+  document.getElementById('login-familia-wrap').style.display   = isFamilia ? '' : 'none';
+  // Campo contraseña: oculto para monitor con Google
+  document.getElementById('login-pass-wrap').style.display      = (isMonitor && tieneGoogleClientId) ? 'none' : '';
+  document.getElementById('btn-login').style.display            = (isMonitor && tieneGoogleClientId) ? 'none' : '';
+
+  // Renderizar botón de Google si aplica
+  if (isMonitor && tieneGoogleClientId) {
+    _renderGoogleBtn();
+  }
 });
 document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
-// poblarSelectMonitores: obsoleta — login usa input de texto con USERNAME
+// ── Google Sign-In ────────────────────────────────────────
+function _renderGoogleBtn() {
+  if (!window.google || !GOOGLE_CLIENT_ID) return;
+  const container = document.getElementById('google-signin-btn');
+  if (!container) return;
+  container.innerHTML = '';
+  google.accounts.id.initialize({
+    client_id:         GOOGLE_CLIENT_ID,
+    callback:          _onGoogleCredential,
+    auto_select:       false,
+    cancel_on_tap_outside: true,
+  });
+  google.accounts.id.renderButton(container, {
+    theme: 'filled_black',
+    size:  'large',
+    text:  'signin_with',
+    shape: 'rectangular',
+    width: 280,
+    locale: 'es',
+  });
+}
+
+// Callback cuando Google devuelve el token JWT
+async function _onGoogleCredential(response) {
+  const errEl = document.getElementById('login-google-error');
+  errEl.style.display = 'none';
+
+  try {
+    // Decodificar el JWT (sin verificar firma — solo para leer el email)
+    // La verificación real la haría el servidor; aquí confiamos en Google
+    const payload = JSON.parse(atob(response.credential.split('.')[1]));
+    const email   = (payload.email || '').toLowerCase().trim();
+    const name    = payload.name || payload.given_name || email;
+
+    if (!email) {
+      errEl.textContent = 'No se pudo obtener el email de Google.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // Esperar a que DB.personal esté cargado
+    if (!DB.personal.length) {
+      errEl.textContent = '⏳ Cargando datos… espera un momento.';
+      errEl.style.display = 'block';
+      try { await syncAll(); } catch(e) {}
+      errEl.style.display = 'none';
+    }
+
+    if (!DB.personal.length) {
+      errEl.textContent = 'Sin conexión al sistema. Verifica tu internet e inténtalo de nuevo.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // Buscar la monitora por email en PERSONAL
+    const mon = DB.personal.find(p =>
+      p.email && p.email.toLowerCase().trim() === email
+    );
+
+    if (!mon) {
+      errEl.textContent = `Email ${email} no encontrado en el sistema. Contacta con Samy.`;
+      errEl.style.display = 'block';
+      return;
+    }
+
+    if (!mon.activo) {
+      errEl.textContent = 'Tu cuenta está inactiva. Contacta con el administrador.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    // ✅ Login correcto — crear sesión
+    currentUser = {
+      role:     'MONITOR',
+      name:     mon.nombre,
+      email,
+      initials: mon.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase(),
+      ts:       Date.now()
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+
+    if (mon.certVence) {
+      const dias = daysBetween(new Date(), new Date(mon.certVence));
+      if (dias < 30) showToast(`⚠️ Certificado de delitos vence en ${dias} días`, 'warning');
+    }
+
+    // Mostrar pantalla de carga y sincronizar
+    lsShow();
+    syncAllWithProgress().catch(() => {
+      lsError('Error de conexión — entrando con datos anteriores.');
+      setTimeout(() => { lsHide(); startApp(); }, 1500);
+    }).then(() => { lsHide(); startApp(); });
+
+  } catch(e) {
+    const errEl = document.getElementById('login-google-error');
+    errEl.textContent = 'Error al procesar login de Google: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+// Inicializar Google Identity cuando el script cargue
+// (puede tardar unos ms — el script es async)
+function _initGoogleSignIn() {
+  if (!GOOGLE_CLIENT_ID || !window.google) return;
+  google.accounts.id.initialize({
+    client_id:  GOOGLE_CLIENT_ID,
+    callback:   _onGoogleCredential,
+    auto_select: false,
+  });
+}
+// Intentar inicializar ahora y también cuando el script de Google cargue
+if (window.google) _initGoogleSignIn();
+window.onGoogleLibraryLoad = _initGoogleSignIn;
+
+// poblarSelectMonitores: obsoleta — login usa Google Sign-In
 
 async function doLogin() {
   const role = document.getElementById('login-role').value;
@@ -6375,9 +6524,27 @@ function configuracion() {
         <div class="card-header"><span>🔐</span><div class="card-title">Claves de acceso</div></div>
         <div class="card-body" style="font-size:13px;line-height:2">
           <div><strong>Admin:</strong> <code style="background:#f5f5f5;padding:2px 6px;border-radius:4px">Configurable desde esta sección</code></div>
-          <div><strong>Monitor:</strong> <code style="background:#f5f5f5;padding:2px 6px;border-radius:4px">Columna PASSWORD en hoja PERSONAL</code></div>
+          <div><strong>Monitor:</strong> <code style="background:#f5f5f5;padding:2px 6px;border-radius:4px">Login con Google (email de PERSONAL)</code></div>
           <div><strong>Familia:</strong> <code style="background:#f5f5f5;padding:2px 6px;border-radius:4px">Configurable desde esta sección</code></div>
-          <p style="font-size:11px;color:var(--grey-2);margin-top:.75rem">En producción: reemplazar por Firebase Auth con magic links y 2FA.</p>
+          <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid #f0f0f0">
+            <div style="font-size:12px;font-weight:600;margin-bottom:.5rem">Google Client ID (login monitoras)</div>
+            <div style="display:flex;gap:.5rem;align-items:center">
+              <input type="text" id="cfg-google-client-id"
+                style="flex:1;padding:.5rem .75rem;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:monospace"
+                placeholder="XXXXXXXX.apps.googleusercontent.com">
+              <button class="btn btn-primary" style="white-space:nowrap;font-size:12px;padding:.5rem .9rem"
+                onclick="
+                  const v = document.getElementById('cfg-google-client-id').value.trim();
+                  if (v) { localStorage.setItem('sm_google_client_id', v); showToast('Google Client ID guardado ✓ — recarga la página para activar', 'success', 5000); }
+                  else   { localStorage.removeItem('sm_google_client_id'); showToast('Client ID eliminado — monitoras usarán usuario+contraseña', 'info'); }
+                ">Guardar</button>
+            </div>
+            <div style="font-size:11px;color:var(--grey-2);margin-top:.4rem">
+              Obtén el Client ID en <a href="https://console.cloud.google.com" target="_blank" style="color:var(--green)">console.cloud.google.com</a>
+              → APIs → Credenciales → Crear ID de cliente OAuth 2.0 (tipo: Aplicación web)<br>
+              Origen autorizado: <code style="background:#f5f5f5;padding:1px 4px;border-radius:3px">https://academiasmfutbol.github.io</code>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -6424,6 +6591,10 @@ function configuracion() {
         </div>
       </div>
     </div>`;
+  // Rellenar el input de Google Client ID con el valor guardado
+  const gcidInput = document.getElementById('cfg-google-client-id');
+  if (gcidInput) gcidInput.value = localStorage.getItem('sm_google_client_id') || '';
+
   window.guardarGasUrl = () => {
     const url = document.getElementById('cfg-gas-url')?.value.trim();
     if (!url) return;

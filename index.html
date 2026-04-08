@@ -5604,9 +5604,20 @@ function registroHorario() {
   const registros = (DB.registroHorario || [])
     .slice().sort((a,b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora));
 
-  // Trabajadoras desde PERSONAL activo
-  const trabajadoras = DB.personal.filter(p => p.activo && p.nombre)
-    .map(p => p.nombre).sort();
+  // Trabajadoras desde PERSONAL activo — deduplicadas por nombre
+  // (una persona puede tener varias filas en PERSONAL si tiene varias actividades)
+  const norm = s => String(s||'').toUpperCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const trabajadorasSeen = new Set();
+  const trabajadoras = DB.personal
+    .filter(p => p.activo && p.nombre)
+    .filter(p => {
+      const key = norm(p.nombre);
+      if (trabajadorasSeen.has(key)) return false;
+      trabajadorasSeen.add(key);
+      return true;
+    })
+    .map(p => p.nombre)
+    .sort();
 
   const hoy = new Date().toISOString().split('T')[0];
 

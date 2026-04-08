@@ -873,22 +873,24 @@ function gasRequest(action, data = {}, timeoutMs = 25000) {
     };
 
     // Construir URL con todos los parámetros
+    // IMPORTANTE: usar encodeURIComponent para sheet en lugar de URLSearchParams
+    // URLSearchParams codifica espacios como + pero el GAS los recibe literales
+    // encodeURIComponent codifica como %20 que e.parameter decodifica correctamente
     const params = new URLSearchParams({
       action,
       callback: cbName
     });
-    if (data.sheet) params.append('sheet', data.sheet);
-    if (data.id)    params.append('id', String(data.id));
-    if (data.row) {
-      // URLSearchParams codifica automáticamente UTF-8 incluyendo tildes
-      // El GAS recibe e.parameter.row ya decodificado correctamente
-      params.append('row', JSON.stringify(data.row));
-    }
+    if (data.id)  params.append('id', String(data.id));
+    if (data.row) params.append('row', JSON.stringify(data.row));
+
+    // Construir src manualmente para que sheet use %20 (no +)
+    let src = GAS_URL + '?' + params.toString();
+    if (data.sheet) src += '&sheet=' + encodeURIComponent(data.sheet);
 
     // Crear tag <script> — esto nunca falla por CORS
     const script = document.createElement('script');
     script.id = cbName;
-    script.src = GAS_URL + '?' + params.toString();
+    script.src = src;
     script.onerror = function() {
       cleanup();
       setSyncState('error');
@@ -1519,23 +1521,12 @@ async function syncPagos() {
 // writeToSheet — rowData debe ser OBJETO {header: valor, ...}
 // La app ya no envía arrays — el GAS mapea por nombre de columna
 
-// ── gasPost — escritura directa via fetch POST (no JSONP) ────
-// Más fiable que JSONP en móvil: sin timeout de 25s, respuesta inmediata
-// El GAS ejecuta con permisos del propietario (Samy) → escribe en Sheets
+// ── gasPost — escritura via JSONP (igual que lectura, sin CORS ni redirects) ─
+// fetch POST al GAS falla por redirects 302 de Google. JSONP funciona siempre.
 async function gasPost(action, data = {}) {
   if (!GAS_URL) return { ok: false, error: 'Sin URL GAS' };
-  try {
-    const body = JSON.stringify({ action, ...data });
-    const res  = await fetch(GAS_URL, {
-      method:  'POST',
-      headers: { 'Content-Type': 'text/plain' }, // GAS requiere text/plain para doPost
-      body
-    });
-    if (!res.ok) return { ok: false, error: 'HTTP ' + res.status };
-    return await res.json();
-  } catch(e) {
-    return { ok: false, error: e.message };
-  }
+  // Usar gasRequest directamente — JSONP maneja CORS y redirects correctamente
+  return await gasRequest(action, data);
 }
 
 // ── writeToSheet — usa gasPost (fetch) en lugar de gasRequest (JSONP) ──
@@ -1545,7 +1536,7 @@ async function writeToSheet(sheet, rowData) {
   const READONLY = ['CLIENTES','ALUMNOS','INSCRIPCIONES','PAGOS'];
   if (READONLY.includes(sheet)) return { ok: true, readonly: true };
   try {
-    // gasPost usa fetch POST — más fiable que JSONP en móvil, sin timeout largo
+    // Usar gasPost (JSONP) — evita CORS y redirects de Google
     return await gasPost('APPEND', { sheet, row: rowData });
   } catch(e) {
     return { ok: false, error: e.message };

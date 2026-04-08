@@ -1500,18 +1500,36 @@ async function syncPagos() {
 
 // writeToSheet — rowData debe ser OBJETO {header: valor, ...}
 // La app ya no envía arrays — el GAS mapea por nombre de columna
-async function writeToSheet(sheet, rowData) {
-  if (!GAS_URL) {
-    return { ok: true, demo: true };
-  }
-  const READONLY = ['CLIENTES','ALUMNOS','INSCRIPCIONES','PAGOS'];
-  if (READONLY.includes(sheet)) {
-    return { ok: true, readonly: true };
-  }
+
+// ── gasPost — escritura directa via fetch POST (no JSONP) ────
+// Más fiable que JSONP en móvil: sin timeout de 25s, respuesta inmediata
+// El GAS ejecuta con permisos del propietario (Samy) → escribe en Sheets
+async function gasPost(action, data = {}) {
+  if (!GAS_URL) return { ok: false, error: 'Sin URL GAS' };
   try {
-    const res = await gasRequest('APPEND', { sheet, row: rowData });
-    return res;
-  } catch (e) {
+    const body = JSON.stringify({ action, ...data });
+    const res  = await fetch(GAS_URL, {
+      method:  'POST',
+      headers: { 'Content-Type': 'text/plain' }, // GAS requiere text/plain para doPost
+      body
+    });
+    if (!res.ok) return { ok: false, error: 'HTTP ' + res.status };
+    return await res.json();
+  } catch(e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ── writeToSheet — usa gasPost (fetch) en lugar de gasRequest (JSONP) ──
+// Más rápido y fiable en móvil. Sin timeout de 25s.
+async function writeToSheet(sheet, rowData) {
+  if (!GAS_URL) return { ok: true, demo: true };
+  const READONLY = ['CLIENTES','ALUMNOS','INSCRIPCIONES','PAGOS'];
+  if (READONLY.includes(sheet)) return { ok: true, readonly: true };
+  try {
+    // gasPost usa fetch POST — más fiable que JSONP en móvil, sin timeout largo
+    return await gasPost('APPEND', { sheet, row: rowData });
+  } catch(e) {
     return { ok: false, error: e.message };
   }
 }

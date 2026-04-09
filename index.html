@@ -625,6 +625,9 @@ tbody tr:hover { background: #fafafa; }
         <div class="nav-item" onclick="navigate('extraescolares')" data-page="extraescolares">
           <span class="nav-icon">🏫</span><span>Extraescolares</span>
         </div>
+        <div class="nav-item" id="nav-pitusa" onclick="navigate('pitusa')" data-page="pitusa" style="display:none">
+          <span class="nav-icon">🎉</span><span>Pitusa Eventos</span>
+        </div>
 
       </div>
 
@@ -1146,6 +1149,35 @@ function normalizarDB(raw) {
           _raw: g
         };
       });
+  }
+
+  // EVENTOS PITUSA — hoja exclusiva de Patricia Leonor Pérez Armas
+  const _epRaw = raw['eventos pitusa'] || raw['EVENTOS PITUSA'] || [];
+  if (_epRaw.length) {
+    const _fmtEur = v => parseFloat(String(v||'0').replace(/[€\s]/g,'').replace(',','.')) || 0;
+    DB.eventosPitusa = _epRaw
+      .filter(e => e['Id evento'] || e['Cliente (Nombre y apellidos)'] || e['CLIENTE'])
+      .map((e, i) => ({
+        id:                  String(e['Id evento'] || i+1),
+        fechaSolicitud:      String(e['Fecha solicitud'] || '').split('T')[0],
+        cliente:             String(e['Cliente (Nombre y apellidos)'] || e['CLIENTE'] || '').trim(),
+        telefono:            String(e['Teléfono'] || e['TELEFONO'] || '').trim(),
+        fechaEvento:         String(e['Fecha evento'] || e['FECHA EVENTO'] || '').split('T')[0],
+        lugar:               String(e['Lugar'] || '').trim(),
+        paxNinos:            parseInt(e['Pax Niños'] || e['Pax Ninos'] || 0) || 0,
+        paxAdultos:          parseInt(e['Pax Adultos'] || 0) || 0,
+        intereses:           String(e['Intereses'] || '').trim(),
+        proveedores:         String(e['Proveedores'] || '').trim(),
+        costeNeto:           _fmtEur(e['Coste Neto Total (€)']),
+        margen:              _fmtEur(e['Margen gestión']),
+        pvp:                 _fmtEur(e['PVP Final Cliente']),
+        estado:              String(e['Estado'] || 'PENDIENTE').trim(),
+        checkPagoCliente:    String(e['Check Pago Cliente']   || '').toUpperCase() === 'TRUE',
+        checkPagoProveedor:  String(e['Check Pago Proveedor'] || '').toUpperCase() === 'TRUE',
+        _raw: e
+      }));
+  } else {
+    DB.eventosPitusa = DB.eventosPitusa || [];
   }
 
   // PERSONAL — desde hoja PERSONAL
@@ -2027,6 +2059,14 @@ function startApp() {
   document.getElementById('nav-admin').style.display   = isAdmin ? '' : 'none';
   document.getElementById('nav-admin-2').style.display = isAdmin ? '' : 'none';
 
+  // Nav Pitusa Eventos — visible para Admin y para Patricia
+  const PATRICIA_NOMBRE = 'PATRICIA LEONOR PÉREZ ARMAS';
+  const esPitusa = currentUser.role === 'ADMIN' ||
+    (currentUser.name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+      .includes('PATRICIA');
+  const navPitusa = document.getElementById('nav-pitusa');
+  if (navPitusa) navPitusa.style.display = esPitusa ? '' : 'none';
+
   if (isMonitor) {
     // Buscar la monitora por nombre (primer nombre basta para identificarla)
     const monData = DB.personal.find(p =>
@@ -2149,6 +2189,7 @@ const PAGE_META = {
   configuracion:  { title: 'Configuración', sub: 'Sistema y conexión Google Sheets' },
   familia:        { title: 'Mi portal', sub: 'Seguimiento de tus alumnos' },
   'registro-horario': { title: 'Registro Horario', sub: 'Control de entradas y salidas del personal' },
+  pitusa:             { title: 'Pitusa Eventos', sub: 'Gestión de eventos · Patricia Leonor Pérez Armas' },
 };
 
 function navigate(page) {
@@ -2183,7 +2224,8 @@ function renderCurrentPage() {
   const pages = {
     dashboard, clientes, alumnos, inscripciones, pagos, facturas,
     futbol, extraescolares, personal, incidencias, informes, configuracion,
-    'registro-horario': registroHorario
+    'registro-horario': registroHorario,
+    pitusa: pitusaEventos
   };
   if (pages[currentPage]) pages[currentPage]();
 }
@@ -2510,6 +2552,13 @@ function dashboard() {
   const pagosMes = DB.pagos.filter(p => (p.mes||'').toLowerCase() === mesActual.toLowerCase());
   const totalCobrado  = pagosMes.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+(parseFloat(p.totalRecibido)||0),0);
   const totalEsperado = pagosMes.reduce((s,p)=>s+(parseFloat(p.totalEsperado)||0),0);
+
+  // Diagnóstico en consola — abre F12 para ver
+  console.log('[PAGOS] Mes:', mesActual, '| Total pagos DB:', DB.pagos.length, '| Del mes:', pagosMes.length);
+  const estadosUnicos = [...new Set(pagosMes.map(p=>p.estado))];
+  console.log('[PAGOS] Estados únicos en mes:', estadosUnicos);
+  console.log('[PAGOS] Cobrado:', totalCobrado, '| Esperado:', totalEsperado);
+  if (pagosMes.length > 0) console.log('[PAGOS] Ejemplo pago:', JSON.stringify(pagosMes[0]));
   const impagados     = DB.pagos.filter(p=>(p.estado||'').toUpperCase()==='IMPAGADO').length;
   const alumnosActivos= DB.alumnos.filter(a=>a.activo===true||a.activo==='SÍ'||a.activo==='SI').length;
   const inscrActivas  = DB.inscripciones.filter(i=>i.estado==='ACTIVA'||String(i.ACTIVA||'').toUpperCase()==='SÍ'||String(i.ACTIVA||'').toUpperCase()==='SI').length;
@@ -5019,7 +5068,15 @@ function personal() {
   }
   addTopbarBtn('+ Añadir personal', () => modalNuevoPersonal(), 'btn-primary');
   const hoy = new Date();
-  const lista = DB.personal || [];
+  // Deduplicar por nombre — PERSONAL puede tener una fila por actividad
+  const normN = s => String(s||'').toUpperCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  const seenP = new Set();
+  const lista = (DB.personal || []).filter(p => {
+    const key = normN(p.nombre);
+    if (!key || seenP.has(key)) return false;
+    seenP.add(key);
+    return true;
+  });
   const rows = lista.map(p => {
     let certClass = 'badge-grey';
     let certLabel = 'Sin certificado';
@@ -5708,6 +5765,39 @@ function _registroHorarioMonitor() {
   addTopbarBtn('🟢 Entrada', () => modalFicharMonitor('ENTRADA'), 'btn-primary');
   addTopbarBtn('🔴 Salida',  () => modalFicharMonitor('SALIDA'),  'btn-secondary');
   addTopbarBtn('← Volver', () => navigate('extraescolares'), 'btn-secondary');
+  addTopbarBtn('🔧 Test', async () => {
+    showToast('Probando conexión con Sheets…', 'info', 3000);
+    // 1. PING
+    try {
+      const ping = await gasRequest('PING');
+      if (!ping.ok) { showToast('❌ GAS no responde: ' + (ping.error||'?'), 'error', 10000); return; }
+    } catch(e) { showToast('❌ Sin conexión al GAS: ' + e.message, 'error', 10000); return; }
+    // 2. Escritura de prueba
+    const hoyTest = new Date().toISOString().split('T')[0];
+    const res = await writeToSheet('REGISTRO HORARIO', {
+      'Fecha': hoyTest, 'Trabajadora': currentUser.name + ' [TEST]',
+      'Tipo': 'ENTRADA', 'Hora': '00:00', 'Actividad': 'TEST',
+      'Centro': 'TEST', 'Registrado por': 'TEST', 'Notas': 'BORRAR'
+    });
+    if (res && res.ok && !res.demo) {
+      showToast('✅ Escritura OK — la conexión funciona correctamente', 'success', 8000);
+    } else {
+      const err = (res && res.error) || 'Error desconocido';
+      // Mostrar error completo en modal para que Samy pueda verlo
+      openModal('Error de conexión — diagnóstico',
+        `<div style="font-family:monospace;font-size:12px;background:#fff5f5;padding:1rem;border-radius:8px;word-break:break-all">
+          <div style="color:#c62828;font-weight:600;margin-bottom:.5rem">❌ Error al escribir en Sheets</div>
+          <div>${err}</div>
+          <div style="margin-top:1rem;font-size:11px;color:#888">
+            GAS URL: ${GAS_URL ? GAS_URL.substring(0,60)+'…' : 'No configurada'}<br>
+            Usuario: ${currentUser.name}<br>
+            Hora: ${new Date().toLocaleTimeString('es-ES')}
+          </div>
+        </div>`,
+        `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`
+      );
+    }
+  }, 'btn-secondary');
 
   const nombre   = currentUser.name;
   const normN    = nombre.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -6684,6 +6774,151 @@ async function initApp() {
     }
   }
   if (btnLogin) btnLogin.disabled = false;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE: PITUSA EVENTOS
+═══════════════════════════════════════════════════════════ */
+function pitusaEventos() {
+  document.getElementById('topbar-actions').innerHTML = '';
+
+  const eventos = DB.eventosPitusa || [];
+
+  // ── KPIs ──────────────────────────────────────────────────
+  const total        = eventos.length;
+  const confirmados  = eventos.filter(e => e.estado.toUpperCase().includes('CONFIRM') || e.estado.toUpperCase().includes('ACTIV'));
+  const pendientes   = eventos.filter(e => e.estado.toUpperCase().includes('PEND') || e.estado.toUpperCase().includes('PRESUPU'));
+  const realizados   = eventos.filter(e => e.estado.toUpperCase().includes('REALIZ') || e.estado.toUpperCase().includes('COMPLET'));
+  const cancelados   = eventos.filter(e => e.estado.toUpperCase().includes('CANCEL'));
+
+  const ingresosTotales  = eventos.reduce((s,e) => s + e.pvp, 0);
+  const margenTotal      = eventos.reduce((s,e) => s + e.margen, 0);
+  const costeTotal       = eventos.reduce((s,e) => s + e.costeNeto, 0);
+  const pendienteCobro   = eventos.filter(e => !e.checkPagoCliente && e.pvp > 0);
+  const pendientePago    = eventos.filter(e => !e.checkPagoProveedor && e.costeNeto > 0);
+  const totalPaxNinos    = eventos.reduce((s,e) => s + e.paxNinos, 0);
+  const totalPaxAdultos  = eventos.reduce((s,e) => s + e.paxAdultos, 0);
+
+  // ── Próximos eventos (fechaEvento >= hoy, ordenados) ──────
+  const hoy = new Date().toISOString().split('T')[0];
+  const proximos = eventos
+    .filter(e => e.fechaEvento && e.fechaEvento >= hoy)
+    .sort((a,b) => a.fechaEvento.localeCompare(b.fechaEvento))
+    .slice(0, 5);
+
+  // ── Tabla completa ─────────────────────────────────────────
+  const estadoBadge = estado => {
+    const e = estado.toUpperCase();
+    if (e.includes('CONFIRM') || e.includes('ACTIV')) return `<span class="badge badge-green">${estado}</span>`;
+    if (e.includes('REALIZ') || e.includes('COMPLET'))return `<span class="badge badge-blue">${estado}</span>`;
+    if (e.includes('CANCEL'))                          return `<span class="badge badge-red">${estado}</span>`;
+    return `<span class="badge badge-orange">${estado}</span>`;
+  };
+
+  const filas = eventos
+    .slice().sort((a,b) => (b.fechaEvento||'').localeCompare(a.fechaEvento||''))
+    .map(e => `<tr>
+      <td style="font-size:11px;color:var(--grey-2)">${fmtDate(e.fechaEvento)||'—'}</td>
+      <td><div style="font-weight:500;font-size:13px">${e.cliente||'—'}</div>
+          <div style="font-size:11px;color:var(--grey-2)">${e.telefono||''}</div></td>
+      <td style="font-size:12px">${e.lugar||'—'}</td>
+      <td style="text-align:center;font-size:12px">${e.paxNinos?'👶 '+e.paxNinos:'—'} ${e.paxAdultos?'🧑 '+e.paxAdultos:''}</td>
+      <td style="text-align:right;font-weight:600;color:var(--green)">${e.pvp?fmtEur(e.pvp):'—'}</td>
+      <td style="text-align:right;font-size:12px;color:var(--grey-2)">${e.margen?fmtEur(e.margen):'—'}</td>
+      <td>${estadoBadge(e.estado)}</td>
+      <td style="text-align:center">${e.checkPagoCliente?'✅':'⏳'}</td>
+      <td style="text-align:center">${e.checkPagoProveedor?'✅':'⏳'}</td>
+    </tr>`).join('');
+
+  const proximosHTML = proximos.length ? proximos.map(e => `
+    <div style="display:flex;align-items:center;gap:12px;padding:.6rem 0;border-bottom:1px solid #f5f5f5">
+      <div style="min-width:48px;text-align:center;background:var(--green-bg);border-radius:8px;padding:4px 6px">
+        <div style="font-size:16px;font-weight:700;color:var(--green)">${fmtDate(e.fechaEvento).split(' ')[0]||'—'}</div>
+        <div style="font-size:10px;color:var(--grey-2)">${fmtDate(e.fechaEvento).split(' ').slice(1).join(' ')||''}</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:600">${e.cliente}</div>
+        <div style="font-size:11px;color:var(--grey-2)">${e.lugar||'—'} · ${e.paxNinos||0} niños · ${e.paxAdultos||0} adultos</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:13px;font-weight:600;color:var(--green)">${e.pvp?fmtEur(e.pvp):'—'}</div>
+        <div>${estadoBadge(e.estado)}</div>
+      </div>
+    </div>`).join('')
+    : '<div style="font-size:13px;color:var(--grey-2);padding:.5rem 0">Sin próximos eventos</div>';
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1rem">
+      <div class="kpi-card">
+        <div class="kpi-label">Total eventos</div>
+        <div class="kpi-value">${total}</div>
+        <div class="kpi-delta">${confirmados.length} confirmados · ${pendientes.length} pendientes</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Ingresos totales (PVP)</div>
+        <div class="kpi-value green">${fmtEur(ingresosTotales)}</div>
+        <div class="kpi-delta">Margen: ${fmtEur(margenTotal)}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Coste neto</div>
+        <div class="kpi-value">${fmtEur(costeTotal)}</div>
+        <div class="kpi-delta">Rentabilidad: ${ingresosTotales>0?Math.round(margenTotal/ingresosTotales*100)+'%':'—'}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Pax totales</div>
+        <div class="kpi-value">${totalPaxNinos + totalPaxAdultos}</div>
+        <div class="kpi-delta">👶 ${totalPaxNinos} niños · 🧑 ${totalPaxAdultos} adultos</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Cobros pendientes</div>
+        <div class="kpi-value ${pendienteCobro.length?'red':''}">${pendienteCobro.length}</div>
+        <div class="kpi-delta ${pendienteCobro.length?'down':''}">${fmtEur(pendienteCobro.reduce((s,e)=>s+e.pvp,0))}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Pagos a proveedores</div>
+        <div class="kpi-value ${pendientePago.length?'red':''}">${pendientePago.length}</div>
+        <div class="kpi-delta ${pendientePago.length?'down':''}">${fmtEur(pendientePago.reduce((s,e)=>s+e.costeNeto,0))}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;margin-bottom:1rem">
+      <div class="card">
+        <div class="card-header"><span>📅</span><div class="card-title">Próximos eventos</div></div>
+        <div class="card-body">${proximosHTML}</div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span>📊</span><div class="card-title">Resumen por estado</div></div>
+        <div class="card-body">
+          ${[...new Set(eventos.map(e=>e.estado))].filter(Boolean).map(estado => {
+            const evs = eventos.filter(e=>e.estado===estado);
+            const pvpEst = evs.reduce((s,e)=>s+e.pvp,0);
+            return `<div style="display:flex;align-items:center;gap:10px;padding:.5rem 0;border-bottom:1px solid #f5f5f5">
+              ${estadoBadge(estado)}
+              <div style="flex:1;font-size:13px">${evs.length} evento${evs.length!==1?'s':''}</div>
+              <div style="font-size:13px;font-weight:600;color:var(--green)">${fmtEur(pvpEst)}</div>
+            </div>`;
+          }).join('') || '<div style="color:var(--grey-2);font-size:13px">Sin datos</div>'}
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span>🎉</span>
+        <div class="card-title">Todos los eventos</div>
+        <span style="margin-left:auto;font-size:12px;color:var(--grey-2)">${total} registros</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>Fecha</th><th>Cliente</th><th>Lugar</th><th>Pax</th>
+            <th style="text-align:right">PVP</th><th style="text-align:right">Margen</th>
+            <th>Estado</th><th style="text-align:center">Cobrado</th><th style="text-align:center">Pagado</th>
+          </tr></thead>
+          <tbody>${filas || '<tr><td colspan="9" style="text-align:center;color:var(--grey-2);padding:2rem">Sin eventos registrados</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 initApp();

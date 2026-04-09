@@ -2440,7 +2440,7 @@ async function syncAllWithProgress() {
   lsStep(1, 'active');
   try {
     const resAll = await gasRequest('GET_ALL', {}, T);
-    if (resAll.ok && resAll.data) { normalizarDB(resAll.data); lsStep(1, 'done'); }
+    if (resAll.ok) { normalizarDB(resAll.data || {}); lsStep(1, 'done'); }
     else { lsStep(1, 'error'); }
   } catch(e) { lsStep(1, 'error'); }
   lsProgress(22);
@@ -7098,7 +7098,9 @@ async function initApp() {
    PAGE: PITUSA EVENTOS
 ═══════════════════════════════════════════════════════════ */
 function pitusaEventos() {
-  document.getElementById('topbar-actions').innerHTML = '';
+  // Botón recargar en topbar
+  document.getElementById('topbar-actions').innerHTML =
+    '<button class="btn btn-secondary" onclick="recargarPitusa()" style="font-size:12px">🔄 Recargar</button>';
 
   const eventos = DB.eventosPitusa || [];
 
@@ -7237,6 +7239,28 @@ function pitusaEventos() {
         </table>
       </div>
     </div>`;
+}
+
+function recargarPitusa() {
+  const btn = document.querySelector('#topbar-actions .btn');
+  if (btn) { btn.textContent = '⏳ Cargando...'; btn.disabled = true; }
+  if (!GAS_URL) { showToast('Sin URL de GAS configurada', 'warning'); return; }
+  gasRequest('GET_SHEET', { sheet: 'EVENTOS PITUSA' }, 15000)
+    .then(res => {
+      if (res.ok && Array.isArray(res.rows)) {
+        normalizarDB({ 'eventos pitusa': res.rows });
+        saveCacheLocal();
+        showToast('Eventos Pitusa actualizados ✅', 'success');
+        pitusaEventos();
+      } else {
+        showToast('Error al cargar eventos: ' + (res.error || 'sin datos'), 'error');
+        if (btn) { btn.textContent = '🔄 Recargar'; btn.disabled = false; }
+      }
+    })
+    .catch(e => {
+      showToast('Error de conexión: ' + e.message, 'error');
+      if (btn) { btn.textContent = '🔄 Recargar'; btn.disabled = false; }
+    });
 }
 
 initApp();

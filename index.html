@@ -659,6 +659,11 @@ tbody tr:hover { background: #fafafa; }
         <span class="sync-text" id="sync-text">Conectado</span>
         <span class="sync-time" id="sync-time"></span>
       </div>
+      <!-- Botones sesión monitor — siempre visibles en móvil para monitores -->
+      <div id="monitor-session-btns" style="display:none;flex-direction:column;gap:.4rem;margin-top:.6rem">
+        <button onclick="logout()" style="width:100%;padding:.6rem;background:#fff;border:1px solid #e0e0e0;border-radius:8px;font-size:12px;color:#c62828;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">🚪 Cerrar sesión</button>
+        <button onclick="modalCambiarPassword()" style="width:100%;padding:.6rem;background:#fff;border:1px solid #e0e0e0;border-radius:8px;font-size:12px;color:#555;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">🔑 Cambiar contraseña</button>
+      </div>
     </div>
   </nav>
 
@@ -2097,16 +2102,23 @@ function startApp() {
       s.style.display = (s.id === 'nav-actividades') ? '' : 'none';
     });
     // Dentro de Actividades, mostrar solo las páginas de su actividad
+    // Patricia (eventos Pitusa) detectada por nombre
+    const esPatricia = (currentUser.name||'').toUpperCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').includes('PATRICIA');
     document.querySelectorAll('#nav-actividades .nav-item').forEach(item => {
       const pg = item.dataset.page;
       const visible = (esTecnificacion && pg === 'futbol') ||
-                      (esExtraescolar  && pg === 'extraescolares');
-      // registro-horario: lo gestionamos desde botones en la propia página
-      item.style.display = (visible ? '' : 'none');
+                      (esExtraescolar  && pg === 'extraescolares') ||
+                      (esPatricia      && pg === 'pitusa');
+      item.style.display = visible ? '' : 'none';
     });
     // "Mi perfil" se muestra como texto alternativo para MONITOR
     const miPerfil = document.getElementById('nav-mi-perfil');
     if (miPerfil) miPerfil.style.display = '';
+
+    // Botones cerrar sesión + cambiar contraseña — visibles en sidebar para monitores
+    const monBtns = document.getElementById('monitor-session-btns');
+    if (monBtns) monBtns.style.display = 'flex';
 
     const startPage = esTecnificacion ? 'futbol' : 'extraescolares';
     if (!loadCacheLocal()) loadDemoData();
@@ -5662,8 +5674,14 @@ function registroHorario() {
     } catch(e) { showToast('Error: ' + e.message,'error'); }
   }, 'btn-secondary');
 
+  // Ordenar: fecha desc, hora asc numérica (convertir "HH:MM" a minutos)
+  const horaAMins = h => { const [hh,mm] = String(h||'0:0').split(':').map(Number); return hh*60+(mm||0); };
   const registros = (DB.registroHorario || [])
-    .slice().sort((a,b) => (b.fecha + b.hora).localeCompare(a.fecha + a.hora));
+    .slice().sort((a,b) => {
+      const fd = b.fecha.localeCompare(a.fecha); // fecha desc
+      if (fd !== 0) return fd;
+      return horaAMins(a.hora) - horaAMins(b.hora); // hora asc numérica
+    });
 
   // Trabajadoras desde PERSONAL activo — deduplicadas por nombre
   // (una persona puede tener varias filas en PERSONAL si tiene varias actividades)
@@ -5730,19 +5748,51 @@ function registroHorario() {
     );
   }).join('');
 
-  // Tabla histórico completo — sin límite de filas
-  const filas = registros.map(r =>
-    '<tr>' +
-      '<td>' + fmtDate(r.fecha) + '</td>' +
-      '<td>' + r.trabajadora + '</td>' +
-      '<td><span class="badge ' + (r.tipo==='ENTRADA'?'badge-green':'badge-red') + '">' + r.tipo + '</span></td>' +
-      '<td style="font-weight:600">' + r.hora + '</td>' +
-      '<td>' + (r.actividad||'—') + '</td>' +
-      '<td>' + (r.centro||'—') + '</td>' +
-      '<td style="font-size:11px;color:var(--grey-2)">' + (r.registradoPor||'—') + '</td>' +
-      '<td style="font-size:11px;color:var(--grey-2)">' + (r.notas||'') + '</td>' +
-    '</tr>'
-  ).join('');
+  // Histórico agrupado por fecha → trabajadora → pares entrada/salida
+  // Agrupar: { "2026-04-09": { "ESTHER...": [r1,r2,...] } }
+  const grupos = {};
+  registros.forEach(r => {
+    const dia = r.fecha || '—';
+    const trab = r.trabajadora || '—';
+    if (!grupos[dia]) grupos[dia] = {};
+    if (!grupos[dia][trab]) grupos[dia][trab] = [];
+    grupos[dia][trab].push(r);
+  });
+
+  // Renderizar agrupado
+  const filasAgrupadas = Object.keys(grupos)
+    .sort((a,b) => b.localeCompare(a)) // fechas desc
+    .map(dia => {
+      const trabsDelDia = grupos[dia];
+      return Object.keys(trabsDelDia).sort().map((trab, ti) => {
+        const regs = trabsDelDia[trab].sort((a,b) => horaAMins(a.hora)-horaAMins(b.hora));
+        const entradas = regs.filter(r=>r.tipo==='ENTRADA');
+        const salidas  = regs.filter(r=>r.tipo==='SALIDA');
+        const maxPares = Math.max(entradas.length, salidas.length, 1);
+
+        return Array.from({length: maxPares}, (_,i) => {
+          const e = entradas[i];
+          const s = salidas[i];
+          let horasTxt = '';
+          if (e && s) {
+            const mins = horaAMins(s.hora) - horaAMins(e.hora);
+            if (mins > 0) horasTxt = Math.floor(mins/60) + 'h ' + (mins%60) + 'min';
+          }
+          return '<tr>' +
+            // Fecha — solo en la primera fila del grupo
+            (ti===0 && i===0
+              ? `<td rowspan="${Object.values(trabsDelDia).reduce((s,rs)=>s+Math.max(rs.filter(r=>r.tipo==='ENTRADA').length,rs.filter(r=>r.tipo==='SALIDA').length,1),0)}" style="font-weight:600;vertical-align:top;border-right:1px solid #eee">${fmtDate(dia)}</td>`
+              : i===0 ? `<td rowspan="${maxPares}" style="vertical-align:top;border-right:1px solid #eee"></td>` : '') +
+            // Trabajadora — solo en la primera fila de cada trabajadora
+            (i===0 ? `<td rowspan="${maxPares}" style="vertical-align:top;font-size:12px;color:var(--grey-2)">${trab.split(' ')[0]}</td>` : '') +
+            `<td><span class="badge badge-green" style="font-size:11px">⬆ ${e ? e.hora : '—'}</span></td>` +
+            `<td><span class="badge badge-red" style="font-size:11px">⬇ ${s ? s.hora : '—'}</span></td>` +
+            `<td style="font-size:11px;color:var(--green);font-weight:600">${horasTxt}</td>` +
+            `<td style="font-size:11px;color:var(--grey-2)">${(e||s||{}).actividad||'—'}</td>` +
+          '</tr>';
+        }).join('');
+      }).join('');
+    }).join('');
 
   document.getElementById('page-content').innerHTML =
     '<div class="card" style="margin-bottom:1rem">' +
@@ -5755,10 +5805,9 @@ function registroHorario() {
       '<div style="font-size:12px;font-weight:600;color:var(--grey-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:.75rem">Histórico de registros · ' + registros.length + ' entradas</div>' +
       '<div style="overflow-x:auto">' +
         '<table class="data-table"><thead><tr>' +
-          '<th>Fecha</th><th>Trabajadora</th><th>Tipo</th><th>Hora</th>' +
-          '<th>Actividad</th><th>Centro</th><th>Registrado por</th><th>Notas</th>' +
+          '<th>Fecha</th><th>Trabajadora</th><th>Entrada</th><th>Salida</th><th>Tiempo</th><th>Actividad</th>' +
         '</tr></thead>' +
-        '<tbody>' + (filas || '<tr><td colspan="8" style="text-align:center;color:var(--grey-2);padding:2rem">Sin registros aún</td></tr>') + '</tbody>' +
+        '<tbody>' + (filasAgrupadas || '<tr><td colspan="6" style="text-align:center;color:var(--grey-2);padding:2rem">Sin registros aún</td></tr>') + '</tbody>' +
       '</table></div>' +
     '</div>';
 }

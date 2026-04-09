@@ -2199,6 +2199,10 @@ function navigate(page) {
     if (currentUser.esTecnificacion) permitidas.push('futbol');
     if (currentUser.esExtraescolar)  permitidas.push('extraescolares');
     if (permitidas.length === 1) permitidas.push('extraescolares'); // fallback si sin actividad
+    // Patricia tiene acceso a su sección de eventos
+    const esPat = (currentUser.name||'').toUpperCase().normalize('NFD')
+      .replace(/[\u0300-\u036f]/g,'').includes('PATRICIA');
+    if (esPat) permitidas.push('pitusa');
     if (!permitidas.includes(page)) {
       page = permitidas[1] || 'extraescolares';
     }

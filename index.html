@@ -6428,14 +6428,279 @@ function informes() {
         </div>`).join('')}
     </div>`;
   window.modalInformeAlumno = () => {
-    openModal('Informe individual', `
-      <div class="field-group"><label class="field-label">Selecciona alumno</label>
-        <select class="field-select" id="inf-alumno">
-          ${DB.alumnos.filter(a=>a.activo).map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('')}
+    const MESES = ['enero','febrero','marzo','abril','mayo','junio',
+                   'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const mesActual = new Date().getMonth();
+    const anyoActual = new Date().getFullYear();
+    // Solo alumnos de tecnificación activos
+    const alumnosTecni = DB.alumnos
+      .filter(a => a.activo && (
+        String(a.actividad||'').toUpperCase().includes('TECNIF') ||
+        DB.inscripciones.some(i =>
+          String(i.alumnoId) === String(a.id) && i.estado === 'ACTIVA' &&
+          String(i.servicio||'').toUpperCase().includes('TECNIF')
+        )
+      ))
+      .sort((a,b) => (a.nombre||'').localeCompare(b.nombre||''));
+
+    openModal('Informe mensual · Alumno', `
+      <div class="field-group">
+        <label class="field-label">Alumno</label>
+        <select class="field-select" id="inf-al-id">
+          ${alumnosTecni.map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('')}
+        </select>
+        <div style="font-size:11px;color:var(--grey-2);margin-top:4px">${alumnosTecni.length} alumnos en tecnificación</div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Mes del informe</label>
+        <select class="field-select" id="inf-al-mes">
+          ${MESES.map((m,i)=>`<option value="${m}" ${i===mesActual?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)} ${anyoActual}</option>`).join('')}
         </select>
       </div>`,
       `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-       <button class="btn btn-primary" onclick="closeModal();verAlumno(document.getElementById('inf-alumno').value)">Ver ficha</button>`);
+       <button class="btn btn-primary" onclick="
+         const aid=document.getElementById('inf-al-id').value;
+         const mes=document.getElementById('inf-al-mes').value;
+         closeModal();
+         generarInformeRendimientoAlumno(aid, mes, ${anyoActual});
+       ">📄 Generar PDF</button>`
+    );
+  };
+
+  window.generarInformeRendimientoAlumno = (alumnoId, mes, anyo) => {
+    const al = DB.alumnos.find(a => String(a.id) === String(alumnoId));
+    if (!al) { showToast('Alumno no encontrado', 'error'); return; }
+
+    const mesLabel = mes.charAt(0).toUpperCase() + mes.slice(1);
+    const MESES_IDX = ['enero','febrero','marzo','abril','mayo','junio',
+                       'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    const mesIdx = MESES_IDX.indexOf(mes.toLowerCase());
+
+    // Asistencias del alumno — todas (para medias globales) y del mes
+    const alNom = (al.nombre||'').toUpperCase();
+    const alToks = alNom.split(' ');
+    const todasAsist = DB.asistencias.filter(a => {
+      if (String(a.alumnoId) === String(al.id)) return true;
+      const clave = String(a.claveAlumno||'').toUpperCase().trim();
+      if (clave === alNom) return true;
+      const cToks = clave.split(' ').filter(t=>t.length>=3);
+      return cToks.length>0 && cToks.every(t=>alToks.includes(t));
+    });
+    const asistMes = todasAsist.filter(a => {
+      if (!a.fecha) return false;
+      const d = new Date(a.fecha + 'T12:00:00');
+      return d.getMonth() === mesIdx && d.getFullYear() === anyo;
+    });
+
+    // Sesiones del mes
+    const sesionesMes = DB.sesiones.filter(s => {
+      if (!s.fecha) return false;
+      const d = new Date(s.fecha + 'T12:00:00');
+      if (d.getMonth() !== mesIdx || d.getFullYear() !== anyo) return false;
+      return s.alumnos && s.alumnos.some(n =>
+        n.toUpperCase() === alNom ||
+        alToks.some(t => t.length>2 && n.toUpperCase().includes(t))
+      );
+    }).sort((a,b) => a.fecha.localeCompare(b.fecha));
+
+    // Medias del mes
+    const conEvalMes = asistMes.filter(a=>a.evaluacion);
+    const avg = field => {
+      const vals = conEvalMes.map(a=>a.evaluacion[field]||0).filter(v=>v>0);
+      return vals.length ? (vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(1) : '—';
+    };
+    const tecnica        = avg('tecnica');
+    const decision       = avg('decision');
+    const competitividad = avg('competitividad');
+    const actitud        = avg('actitud');
+    const media          = avg('mediaDiaria');
+    const presentes      = asistMes.filter(a=>a.presente).length;
+    const totalSes       = asistMes.length;
+    const pctAsist       = totalSes ? Math.round(presentes/totalSes*100) : 0;
+    const vecesMejor     = asistMes.filter(a=>a.esMejor).length;
+
+    // Observaciones del mes con texto
+    const obs = asistMes
+      .filter(a=>a.observaciones && a.observaciones.length>2)
+      .sort((a,b)=>a.fecha.localeCompare(b.fecha));
+
+    // Objetivos únicos trabajados en el mes
+    const objetivosMes = [...new Set(sesionesMes.map(s=>s.objetivo).filter(Boolean))];
+
+    // Última propuesta del entrenador (mes actual)
+    const ultimaPropuesta = asistMes
+      .filter(a=>a.propuesta&&a.propuesta.length>2).slice(-1)[0];
+
+    // Foto del alumno
+    const fotoUrl = `https://academiasmfutbol.github.io/img/alumnos/${
+      (al.nombre||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')
+    }.jpg`;
+
+    const valorBar = (v,label) => {
+      const n = parseFloat(v)||0;
+      const pct = n>0 ? Math.round(n/10*100) : 0;
+      const col = n>=8?'#2e7d32':n>=6?'#f57f17':'#c62828';
+      return `<div style="margin-bottom:.6rem">
+        <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">
+          <span style="color:#555;text-transform:uppercase;letter-spacing:.04em">${label}</span>
+          <span style="font-weight:700;color:${col}">${v}</span>
+        </div>
+        <div style="height:7px;background:#f0f0f0;border-radius:4px">
+          <div style="height:7px;width:${pct}%;background:${col};border-radius:4px;transition:width .3s"></div>
+        </div>
+      </div>`;
+    };
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <title>Informe ${mesLabel} ${anyo} · ${al.nombre}</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; color: #111; font-size: 12px; background: #fff; }
+      .page { max-width: 800px; margin: 0 auto; padding: 2cm; }
+      .header { display: flex; align-items: center; gap: 20px; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 2px solid #2e7d32; }
+      .header-logo { height: 48px; object-fit: contain; }
+      .header-title { flex: 1; }
+      .header-title h1 { font-size: 18px; color: #2e7d32; }
+      .header-title p { font-size: 11px; color: #888; margin-top: 2px; }
+      .alumno-card { display: flex; align-items: center; gap: 20px; background: #f9f9f9; border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; border: 1px solid #eee; }
+      .alumno-foto { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 3px solid #2e7d32; background: #e8f5e9; flex-shrink: 0; }
+      .alumno-info h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+      .alumno-info p { font-size: 11px; color: #666; line-height: 1.6; }
+      .camino { text-align: right; margin-left: auto; }
+      .camino-pts { font-size: 28px; font-weight: 800; color: #2e7d32; }
+      .camino-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .05em; }
+      .section { margin-bottom: 1.5rem; }
+      .section-title { font-size: 13px; font-weight: 700; color: #2e7d32; text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid #e8f5e9; padding-bottom: 4px; margin-bottom: .75rem; }
+      .kpi-row { display: flex; gap: .75rem; margin-bottom: 1rem; }
+      .kbox { flex: 1; background: #f9f9f9; border: 1px solid #eee; border-radius: 8px; padding: .75rem; text-align: center; }
+      .klabel { font-size: 9px; color: #888; text-transform: uppercase; letter-spacing: .05em; }
+      .kval { font-size: 20px; font-weight: 800; color: #2e7d32; margin-top: 2px; }
+      .kval.warn { color: #f57f17; }
+      .kval.bad  { color: #c62828; }
+      .eval-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: .5rem; }
+      th { background: #e8f5e9; padding: 6px 8px; text-align: left; border-bottom: 2px solid #2e7d32; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+      td { padding: 6px 8px; border-bottom: 1px solid #f5f5f5; }
+      .obs-item { background: #f9f9f9; border-left: 3px solid #2e7d32; border-radius: 0 6px 6px 0; padding: .5rem .75rem; margin-bottom: .5rem; }
+      .obs-date { font-size: 10px; color: #888; }
+      .obs-text { font-size: 12px; margin-top: 2px; }
+      .propuesta { background: #e8f5e9; border-radius: 8px; border: 1px solid #a5d6a7; padding: .75rem 1rem; margin-top: .75rem; }
+      .propuesta-label { font-size: 10px; font-weight: 700; color: #2e7d32; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+      .mejor { display: inline-block; background: #fff9c4; color: #f57f17; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; margin-top: 4px; }
+      .footer { margin-top: 2rem; font-size: 10px; color: #aaa; border-top: 1px solid #eee; padding-top: .5rem; text-align: center; }
+      @media print { .page { padding: 1cm; } }
+    </style></head><body><div class="page">
+
+    <div class="header">
+      <img src="https://academiasmfutbol.github.io/sistema/img/logo.png" class="header-logo" onerror="this.style.display='none'">
+      <div class="header-title">
+        <h1>Informe mensual · Tecnificación SM</h1>
+        <p>${mesLabel} ${anyo} · Metodología MEC · academiasmfutbol.com</p>
+      </div>
+    </div>
+
+    <div class="alumno-card">
+      <img src="${fotoUrl}" class="alumno-foto" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'"
+           style="display:block">
+      <div style="width:72px;height:72px;border-radius:50%;background:#e8f5e9;display:none;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#2e7d32;flex-shrink:0">
+        ${(al.nombre||'').split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase()}
+      </div>
+      <div class="alumno-info">
+        <h2>${al.nombre}</h2>
+        <p>
+          ${al.curso ? `Curso: ${al.curso}` : ''}
+          ${al.grupo ? ` · Grupo: ${al.grupo}` : ''}
+          ${al.modalidad ? ` · ${al.modalidad}` : ''}
+        </p>
+        ${vecesMejor>0?`<span class="mejor">🏅 Mejor alumno × ${vecesMejor} ${vecesMejor===1?'vez':'veces'} este mes</span>`:''}
+      </div>
+      <div class="camino">
+        <div class="camino-pts">⭐ ${al.camino||0}</div>
+        <div class="camino-label">Camino SM</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Resumen del mes</div>
+      <div class="kpi-row">
+        <div class="kbox">
+          <div class="klabel">Sesiones</div>
+          <div class="kval">${totalSes}</div>
+        </div>
+        <div class="kbox">
+          <div class="klabel">Asistencia</div>
+          <div class="kval ${pctAsist<60?'bad':pctAsist<80?'warn':''}">${pctAsist}%</div>
+        </div>
+        <div class="kbox">
+          <div class="klabel">Media global</div>
+          <div class="kval ${parseFloat(media)<6?'bad':parseFloat(media)<8?'warn':''}">${media}</div>
+        </div>
+        <div class="kbox">
+          <div class="klabel">Objetivos</div>
+          <div class="kval">${objetivosMes.length}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Evaluación de competencias</div>
+      <div class="eval-grid">
+        <div>
+          ${valorBar(tecnica,'Técnica')}
+          ${valorBar(decision,'Decisión')}
+        </div>
+        <div>
+          ${valorBar(competitividad,'Competitividad')}
+          ${valorBar(actitud,'Actitud')}
+        </div>
+      </div>
+    </div>
+
+    ${objetivosMes.length ? `
+    <div class="section">
+      <div class="section-title">Objetivos trabajados</div>
+      <table>
+        <thead><tr><th>#</th><th>Sesión</th><th>Objetivo</th><th>Asistencia</th></tr></thead>
+        <tbody>
+          ${sesionesMes.map((s,i) => {
+            const asi = todasAsist.find(a=>a.sesionId===s.id);
+            return `<tr>
+              <td style="color:#888">${i+1}</td>
+              <td>${fmtDate(s.fecha)}</td>
+              <td>${s.objetivo||'—'}</td>
+              <td style="text-align:center">${asi?(asi.presente?'✅':'❌'):'—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>` : ''}
+
+    ${obs.length ? `
+    <div class="section">
+      <div class="section-title">Observaciones del entrenador</div>
+      ${obs.map(a=>`
+        <div class="obs-item">
+          <div class="obs-date">${fmtDate(a.fecha)} · Sesión #${a.numero||''}</div>
+          <div class="obs-text">${a.observaciones}</div>
+        </div>`).join('')}
+    </div>` : ''}
+
+    ${ultimaPropuesta ? `
+    <div class="propuesta">
+      <div class="propuesta-label">🎯 Propuesta para la próxima sesión</div>
+      <div style="font-size:13px">${ultimaPropuesta.propuesta}</div>
+    </div>` : ''}
+
+    <div class="footer">
+      Informe generado por SM Academia · ${new Date().toLocaleDateString('es-ES')} · academiasmfutbol.com
+    </div>
+    </div></body></html>`;
+
+    const w = window.open('','_blank');
+    if (!w) { showToast('Permite las ventanas emergentes para generar el PDF', 'warning', 5000); return; }
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 500);
   };
   window.modalInformeTrimestral = () => {
     const anyo = new Date().getFullYear();

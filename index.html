@@ -881,19 +881,16 @@ function gasRequest(action, data = {}, timeoutMs = 25000) {
     };
 
     // Construir URL con todos los parámetros
-    // IMPORTANTE: usar encodeURIComponent para sheet en lugar de URLSearchParams
+    // IMPORTANTE: usar encodeURIComponent para sheet y row en lugar de URLSearchParams
     // URLSearchParams codifica espacios como + pero el GAS los recibe literales
     // encodeURIComponent codifica como %20 que e.parameter decodifica correctamente
-    const params = new URLSearchParams({
-      action,
-      callback: cbName
-    });
-    if (data.id)  params.append('id', String(data.id));
-    if (data.row) params.append('row', JSON.stringify(data.row));
+    const params = new URLSearchParams({ action, callback: cbName });
+    if (data.id) params.append('id', String(data.id));
 
-    // Construir src manualmente para que sheet use %20 (no +)
+    // Construir src manualmente para que sheet y row usen %20 (no +)
     let src = GAS_URL + '?' + params.toString();
     if (data.sheet) src += '&sheet=' + encodeURIComponent(data.sheet);
+    if (data.row)   src += '&row='   + encodeURIComponent(JSON.stringify(data.row));
 
     // Crear tag <script> — esto nunca falla por CORS
     const script = document.createElement('script');
@@ -2431,10 +2428,10 @@ async function syncAllWithProgress() {
   setSyncState('syncing');
   lsProgress(5);
 
-  // Timeout corto en carga inicial — 12s por petición
-  // Pasos 1-2: CRÍTICOS (datos base + pagos). Sin ellos no hay acceso útil.
-  // Pasos 3-5: OPCIONALES — el error no bloquea. Se recargan en segundo plano tras entrar.
-  const T = 12000;
+  // Timeout: pasos críticos 20s, opcionales 12s
+  // En móvil el GAS en frío puede tardar 15-18s
+  const T  = 20000; // críticos
+  const TO = 12000; // opcionales
 
   // ── Paso 1: GET_ALL (crítico) ──────────────────────────────
   lsStep(1, 'active');
@@ -2457,7 +2454,7 @@ async function syncAllWithProgress() {
   // ── Paso 3: GET_SESIONES (opcional) ───────────────────────
   lsStep(3, 'active');
   try {
-    const resSes = await gasRequest('GET_SESIONES', {}, T);
+    const resSes = await gasRequest('GET_SESIONES', {}, TO);
     if (resSes.ok) { normalizarDB({ sesiones: resSes.sesiones || [] }); lsStep(3, 'done'); }
     else { lsStep(3, 'error'); }
   } catch(e) { lsStep(3, 'error'); }
@@ -2466,7 +2463,7 @@ async function syncAllWithProgress() {
   // ── Paso 4: GET_REGISTRO_HORARIO (opcional) ────────────────
   lsStep(4, 'active');
   try {
-    const resRH = await gasRequest('GET_REGISTRO_HORARIO', {}, T);
+    const resRH = await gasRequest('GET_REGISTRO_HORARIO', {}, TO);
     if (resRH.ok && Array.isArray(resRH.registros)) {
       normalizarDB({ 'registro horario': resRH.registros });
       lsStep(4, 'done');
@@ -2477,7 +2474,7 @@ async function syncAllWithProgress() {
   // ── Paso 5: GET_ASISTENCIAS_EXTRA (opcional) ──────────────
   lsStep(5, 'active');
   try {
-    const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA', {}, T);
+    const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA', {}, TO);
     if (resAE.ok && Array.isArray(resAE.asistencias)) {
       normalizarDB({ asistencias_extra: resAE.asistencias });
       lsStep(5, 'done');

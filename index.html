@@ -4818,6 +4818,7 @@ async function guardarPaseListaMonitor(fecha, esFutbol) {
   if (!checks.length) { showToast('Sin alumnos en el listado', 'warning'); return; }
   const presentes = checks.filter(c=>c.checked).map(c=>c.value);
   const ausentes  = checks.filter(c=>!c.checked).map(c=>c.value);
+
   // Servicio: para tecnificación usar nombre exacto de la inscripción
   let actividad = 'TECNIFICACIÓN';
   if (!esFutbol) {
@@ -4828,24 +4829,41 @@ async function guardarPaseListaMonitor(fecha, esFutbol) {
     });
     actividad = insc ? insc.servicio : (actsMonitor[0]||'EXTRAESCOLARES');
   }
+
   closeModal();
-  showToast('Guardando asistencia…', 'info');
+  showToast('Guardando asistencia… 0/' + (presentes.length + ausentes.length), 'info');
+
+  // CRÍTICO: secuencial — JSONP usa callbacks globales únicos, no soporta paralelo
   let errores = 0;
+  let guardados = 0;
   for (const aid of [...presentes, ...ausentes]) {
     const a = getAlumno(aid);
-    const res = await writeToSheet('ASISTENCIAS_EXTRA', {
-      'Fecha':        fecha,
-      'Centro':       'CEIP ESCALERITAS',
-      'Servicio':     actividad,
-      'Alumno':       a.nombre || aid,
-      'Presente':     presentes.includes(aid),
-      'Guardado por': currentUser.name
-    });
-    if (!res.ok && !res.demo) errores++;
+    try {
+      const res = await writeToSheet('ASISTENCIAS_EXTRA', {
+        'Fecha':        fecha,
+        'Centro':       'CEIP ESCALERITAS',
+        'Servicio':     actividad,
+        'Alumno':       a.nombre || aid,
+        'Presente':     presentes.includes(aid) ? 'TRUE' : 'FALSE',
+        'Guardado por': currentUser.name
+      });
+      if (res && res.ok && !res.demo) guardados++;
+      else if (!res || !res.demo) errores++;
+    } catch(e) { errores++; }
   }
-  if (errores > 0) showToast(`⚠️ ${errores} registros no guardados`, 'error');
-  else showToast(`✅ Pase guardado: ${presentes.length} presentes, ${ausentes.length} ausentes`, 'success');
-  await syncAll();
+
+  if (errores > 0) {
+    showToast(`⚠️ ${errores} registros no guardados — revisa conexión`, 'error', 6000);
+  } else {
+    showToast(`✅ Pase guardado: ${presentes.length} presentes · ${ausentes.length} ausentes`, 'success', 5000);
+  }
+  // Recargar asistencias en segundo plano
+  try {
+    const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA');
+    if (resAE.ok && Array.isArray(resAE.asistencias)) {
+      normalizarDB({ asistencias_extra: resAE.asistencias });
+    }
+  } catch(e) { /* no crítico */ }
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -5745,51 +5763,50 @@ function registroHorario() {
     );
   }).join('');
 
-  // Histórico agrupado por fecha → trabajadora → pares entrada/salida
-  // Agrupar: { "2026-04-09": { "ESTHER...": [r1,r2,...] } }
+  // Histórico: filas planas — una fila por par entrada/salida, sin rowspan
   const grupos = {};
+  const claveOrden = [];
   registros.forEach(r => {
-    const dia = r.fecha || '—';
+    const dia  = r.fecha || '—';
     const trab = r.trabajadora || '—';
-    if (!grupos[dia]) grupos[dia] = {};
-    if (!grupos[dia][trab]) grupos[dia][trab] = [];
-    grupos[dia][trab].push(r);
+    const key  = dia + '||' + trab;
+    if (!grupos[key]) { grupos[key] = { dia, trab, entradas: [], salidas: [] }; claveOrden.push(key); }
+    if (r.tipo === 'ENTRADA') grupos[key].entradas.push(r);
+    else                      grupos[key].salidas.push(r);
   });
 
-  // Renderizar agrupado
-  const filasAgrupadas = Object.keys(grupos)
-    .sort((a,b) => b.localeCompare(a)) // fechas desc
-    .map(dia => {
-      const trabsDelDia = grupos[dia];
-      return Object.keys(trabsDelDia).sort().map((trab, ti) => {
-        const regs = trabsDelDia[trab].sort((a,b) => horaAMins(a.hora)-horaAMins(b.hora));
-        const entradas = regs.filter(r=>r.tipo==='ENTRADA');
-        const salidas  = regs.filter(r=>r.tipo==='SALIDA');
-        const maxPares = Math.max(entradas.length, salidas.length, 1);
-
-        return Array.from({length: maxPares}, (_,i) => {
-          const e = entradas[i];
-          const s = salidas[i];
-          let horasTxt = '';
-          if (e && s) {
-            const mins = horaAMins(s.hora) - horaAMins(e.hora);
-            if (mins > 0) horasTxt = Math.floor(mins/60) + 'h ' + (mins%60) + 'min';
-          }
-          return '<tr>' +
-            // Fecha — solo en la primera fila del grupo
-            (ti===0 && i===0
-              ? `<td rowspan="${Object.values(trabsDelDia).reduce((s,rs)=>s+Math.max(rs.filter(r=>r.tipo==='ENTRADA').length,rs.filter(r=>r.tipo==='SALIDA').length,1),0)}" style="font-weight:600;vertical-align:top;border-right:1px solid #eee">${fmtDate(dia)}</td>`
-              : i===0 ? `<td rowspan="${maxPares}" style="vertical-align:top;border-right:1px solid #eee"></td>` : '') +
-            // Trabajadora — solo en la primera fila de cada trabajadora
-            (i===0 ? `<td rowspan="${maxPares}" style="vertical-align:top;font-size:12px;color:var(--grey-2)">${trab.split(' ')[0]}</td>` : '') +
-            `<td><span class="badge badge-green" style="font-size:11px">⬆ ${e ? e.hora : '—'}</span></td>` +
-            `<td><span class="badge badge-red" style="font-size:11px">⬇ ${s ? s.hora : '—'}</span></td>` +
-            `<td style="font-size:11px;color:var(--green);font-weight:600">${horasTxt}</td>` +
-            `<td style="font-size:11px;color:var(--grey-2)">${(e||s||{}).actividad||'—'}</td>` +
-          '</tr>';
-        }).join('');
-      }).join('');
-    }).join('');
+  let filasAgrupadas = '';
+  let diaAnterior = '';
+  for (const key of claveOrden) {
+    const { dia, trab, entradas, salidas } = grupos[key];
+    const maxPares = Math.max(entradas.length, salidas.length, 1);
+    const esDiaNuevo = dia !== diaAnterior;
+    diaAnterior = dia;
+    for (let i = 0; i < maxPares; i++) {
+      const e = entradas[i];
+      const s = salidas[i];
+      let horasTxt = '';
+      if (e && s) {
+        const mins = horaAMins(s.hora) - horaAMins(e.hora);
+        if (mins > 0) horasTxt = Math.floor(mins/60) + 'h ' + (mins%60) + 'min';
+      }
+      const fechaTd = (esDiaNuevo && i === 0)
+        ? '<td style="font-weight:600;white-space:nowrap">' + fmtDate(dia) + '</td>'
+        : '<td style="color:#e0e0e0;font-size:11px">' + (i===0 ? fmtDate(dia) : '') + '</td>';
+      const trabTd = i === 0
+        ? '<td style="font-size:12px;font-weight:500">' + trab.split(' ')[0] + '</td>'
+        : '<td></td>';
+      filasAgrupadas +=
+        '<tr>' +
+          fechaTd +
+          trabTd +
+          '<td>' + (e ? '<span class="badge badge-green" style="font-size:11px">\u2B06 ' + e.hora + '</span>' : '<span style="color:#bbb">\u2014</span>') + '</td>' +
+          '<td>' + (s ? '<span class="badge badge-red"   style="font-size:11px">\u2B07 ' + s.hora + '</span>' : '<span style="color:#bbb">\u2014</span>') + '</td>' +
+          '<td style="font-size:11px;color:var(--green);font-weight:600">' + horasTxt + '</td>' +
+          '<td style="font-size:11px;color:var(--grey-2)">' + ((e||s||{}).actividad||'\u2014') + '</td>' +
+        '</tr>';
+    }
+  }
 
   document.getElementById('page-content').innerHTML =
     '<div class="card" style="margin-bottom:1rem">' +

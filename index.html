@@ -4474,6 +4474,7 @@ function extraescolares_listado(filtroActividad, alumnosExtra, inscrExtra, resum
         }).join('') :
         '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">🏫</div><div class="empty-title">Sin alumnos en CEIP Escaleritas</div></div></td></tr>') +
         '</tbody></table></div></div>';
+}
 
 function verExtraAlumno(alumnoId) {
   const a = getAlumno(alumnoId);
@@ -7371,7 +7372,6 @@ function pitusaEventos() {
     </div>`;
 }
 
-}
 function recargarPitusa() {
   const btn = document.querySelector('#topbar-actions .btn');
   if (btn) { btn.textContent = '⏳ Cargando...'; btn.disabled = true; }

@@ -2070,21 +2070,29 @@ function startApp() {
   if (navPitusa) navPitusa.style.display = esPitusa ? '' : 'none';
 
   if (isMonitor) {
-    // Buscar la monitora por nombre (primer nombre basta para identificarla)
+    // Buscar la monitora: primero por email (más fiable), luego por nombre normalizado
+    const normNombre = s => String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
     const monData = DB.personal.find(p =>
-      p.nombre && (p.nombre === currentUser.name ||
-                   p.nombre.includes((currentUser.name||'').split(' ')[0].toUpperCase()) ||
-                   (currentUser.name||'').toUpperCase().includes(p.nombre.split(' ')[0]))
+      // 1. Match exacto por email
+      (currentUser.email && p.email && p.email.toLowerCase().trim() === currentUser.email.toLowerCase().trim()) ||
+      // 2. Match exacto por nombre
+      normNombre(p.nombre) === normNombre(currentUser.name) ||
+      // 3. Match por primer token del nombre (≥4 chars para evitar falsos)
+      (normNombre(p.nombre).split(' ')[0].length >= 4 &&
+       normNombre(currentUser.name).includes(normNombre(p.nombre).split(' ')[0]))
     );
     const actividadesMonitor = monData ? (monData.actividades || []) : [];
     const esTecnificacion = actividadesMonitor.some(a =>
       a.toUpperCase().includes('TECNIF') || a.toUpperCase().includes('FÚTBOL') || a.toUpperCase().includes('FUTBOL')
     );
-    const esExtraescolar = actividadesMonitor.some(a =>
-      a.toUpperCase().includes('RECOGIDA') || a.toUpperCase().includes('MULTIDEPORTE') ||
-      a.toUpperCase().includes('INGLÉS') || a.toUpperCase().includes('BAILE') ||
-      a.toUpperCase().includes('INGLES') || a.toUpperCase().includes('EXTRAESCOLAR')
-    );
+    // Si no encontramos actividades pero es monitor de extraescolares por defecto → true
+    const esExtraescolar = actividadesMonitor.length === 0
+      ? true  // fallback: cualquier monitor sin actividades detectadas se trata como extraescolares
+      : actividadesMonitor.some(a =>
+          a.toUpperCase().includes('RECOGIDA') || a.toUpperCase().includes('MULTIDEPORTE') ||
+          a.toUpperCase().includes('INGLÉS') || a.toUpperCase().includes('BAILE') ||
+          a.toUpperCase().includes('INGLES') || a.toUpperCase().includes('EXTRAESCOLAR')
+        );
 
     // Guardar perfil completo en sesión
     currentUser.actividades   = actividadesMonitor;
@@ -2652,7 +2660,7 @@ function dashboard() {
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Personal activo</div>
-        <div class="kpi-value">${DB.personal.filter(p=>p.activo).length}</div>
+        <div class="kpi-value">${[...new Set(DB.personal.filter(p=>p.activo).map(p=>(p.nombre||'').trim().toUpperCase()))].filter(Boolean).length}</div>
         <div class="kpi-delta ${certAlert.length>0?'down':''}">${certAlert.length>0?`${certAlert.length} cert. por renovar`:'Certificados al día'}</div>
       </div>
     </div>
@@ -4314,50 +4322,154 @@ function extraescolares() {
   }
 
   const mesActual = getMesActual();
-  document.getElementById('page-content').innerHTML = `
-    <div class="kpi-grid">
-      ${resumen.map(r=>`
-        <div class="kpi-card">
-          <div class="kpi-label">${r.act}</div>
-          <div class="kpi-value">${r.alumnos} alumnos</div>
-          <div class="kpi-delta">CEIP Escaleritas</div>
-        </div>`).join('')}
-      <div class="kpi-card">
-        <div class="kpi-label">Alumnos únicos</div>
-        <div class="kpi-value green">${alumnosExtra.length}</div>
-        <div class="kpi-delta">${inscrExtra.length} inscripciones activas</div>
-      </div>
-    </div>
+  const hoy = new Date().toISOString().split('T')[0];
 
-    <div class="card">
-      <div class="card-header">
-        <span>📋</span>
-        <div class="card-title">Alumnos CEIP Escaleritas · ${fmtMonth(mesActual)}</div>
-        <span style="margin-left:auto;font-size:12px;color:var(--grey-2)">${alumnosExtra.length} alumnos · ${inscrExtra.length} inscripciones</span>
-      </div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Alumno</th><th>Actividades</th><th>Curso</th><th>Familia</th></tr></thead>
-        <tbody>
-          ${alumnosExtra.length ? alumnosExtra.map(({ alumnoId, inscripciones }) => {
-            const a = getAlumno(alumnoId);
-            const c = getCliente(inscripciones[0]?.clienteId || '');
-            const nombreAlumno = a.nombre || String(inscripciones[0]?.claveAlumno||'').split('|').slice(1).join('|') || '—';
-            const nombreCliente = c.nombre || String(inscripciones[0]?.claveCliente||'').split('|').slice(1).join('|') || '—';
-            const badges = inscripciones.map(i => actividadBadge(i.servicio || i.SERVICIO || '—')).join(' ');
-            return `<tr onclick="verExtraAlumno('${alumnoId}')" style="cursor:pointer">
-              <td><div style="display:flex;align-items:center;gap:8px">
-                <div class="avatar avatar-sm">${getInitials(nombreAlumno)}</div>
-                <div style="font-weight:500">${nombreAlumno}</div>
-              </div></td>
-              <td style="line-height:2">${badges}</td>
-              <td style="font-size:12px;color:var(--grey-2)">${a.curso||'—'}</td>
-              <td style="font-size:12px;color:var(--grey-2)">${nombreCliente}</td>
-            </tr>`;
-          }).join('') : '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">🏫</div><div class="empty-title">Sin alumnos en CEIP Escaleritas</div></div></td></tr>'}
-        </tbody>
-      </table></div>
-    </div>`;
+  // ── Asistencia de hoy ──────────────────────────────────
+  const asistHoy = (DB.asistencias_extra || []).filter(a => {
+    if (a.fecha !== hoy) return false;
+    if (!filtroActividad || filtroActividad.length === 0) return true;
+    return filtroActividad.some(f => a.actividad.includes(f));
+  });
+
+  if (asistHoy.length > 0) {
+    const actsHoy   = [...new Set(asistHoy.map(a => a.actividad))].sort();
+    const presentes = asistHoy.filter(a => a.presente).length;
+    const ausentes  = asistHoy.length - presentes;
+
+    const tablaAsistencia = actsHoy.map(act => {
+      const regs = asistHoy.filter(a => a.actividad === act)
+        .sort((a,b) => a.nombreAlumno.localeCompare(b.nombreAlumno));
+      return '<div style="margin-bottom:1rem">' +
+        '<div style="font-size:11px;font-weight:700;color:var(--grey-2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:.5rem">' +
+          actividadBadge(act) +
+          ' <span style="margin-left:6px">' + regs.filter(r=>r.presente).length + '/' + regs.length + '</span>' +
+        '</div>' +
+        '<table class="data-table" style="font-size:12px"><thead><tr>' +
+          '<th>Alumno</th><th style="text-align:center">Asistencia</th><th style="font-size:11px">Guardado por</th>' +
+        '</tr></thead><tbody>' +
+        regs.map(r =>
+          '<tr>' +
+            '<td><div style="display:flex;align-items:center;gap:8px">' +
+              '<div class="avatar avatar-sm" style="font-size:10px">' + getInitials(r.nombreAlumno) + '</div>' +
+              r.nombreAlumno +
+            '</div></td>' +
+            '<td style="text-align:center">' +
+              (r.presente
+                ? '<span class="badge badge-green">✅ Presente</span>'
+                : '<span class="badge badge-red">❌ Ausente</span>') +
+            '</td>' +
+            '<td style="font-size:11px;color:var(--grey-2)">' + (r.guardadoPor||'—') + '</td>' +
+          '</tr>'
+        ).join('') +
+        '</tbody></table></div>';
+    }).join('');
+
+    document.getElementById('page-content').innerHTML =
+      '<div style="display:flex;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">' +
+        '<div class="kpi-card" style="flex:1;min-width:100px;margin:0">' +
+          '<div class="kpi-label">Registros hoy</div>' +
+          '<div class="kpi-value">' + asistHoy.length + '</div>' +
+          '<div class="kpi-delta">' + new Date().toLocaleDateString('es-ES',{weekday:'short',day:'numeric',month:'short'}) + '</div>' +
+        '</div>' +
+        '<div class="kpi-card" style="flex:1;min-width:100px;margin:0">' +
+          '<div class="kpi-label">Presentes</div>' +
+          '<div class="kpi-value green">' + presentes + '</div>' +
+          '<div class="kpi-delta">' + Math.round(presentes/asistHoy.length*100) + '% asistencia</div>' +
+        '</div>' +
+        '<div class="kpi-card" style="flex:1;min-width:100px;margin:0">' +
+          '<div class="kpi-label">Ausentes</div>' +
+          '<div class="kpi-value ' + (ausentes>0?'red':'') + '">' + ausentes + '</div>' +
+          '<div class="kpi-delta">' + actsHoy.length + ' actividad' + (actsHoy.length!==1?'es':'') + '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="card-header"><span>📋</span>' +
+          '<div class="card-title">Asistencia registrada hoy</div>' +
+          '<span style="margin-left:auto;font-size:12px;color:var(--grey-2)">' + hoy.split('-').reverse().join('/') + '</span>' +
+        '</div>' +
+        '<div class="card-body">' + tablaAsistencia + '</div>' +
+      '</div>' +
+      '<div style="margin-top:.75rem;text-align:center">' +
+        '<button class="btn btn-secondary" style="font-size:12px" onclick="extraescolares_listado()">📚 Ver listado de alumnos</button>' +
+      '</div>';
+    return;
+  }
+
+  // ── Sin datos de hoy → listado de alumnos ──────────────
+  extraescolares_listado(filtroActividad, alumnosExtra, inscrExtra, resumen, mesActual);
 }
+
+function extraescolares_listado(filtroActividad, alumnosExtra, inscrExtra, resumen, mesActual) {
+  // Si se llama desde el botón sin argumentos, recalcular
+  if (!alumnosExtra) {
+    const role = currentUser.role;
+    const isMonitor = role === 'MONITOR';
+    const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+    let filtroActividad = null;
+    if (isMonitor) {
+      const actsMonitor = (currentUser.actividades || []).filter(a =>
+        !a.toUpperCase().includes('TECNIF') && !a.toUpperCase().includes('FÚTBOL') && !a.toUpperCase().includes('FUTBOL')
+      );
+      filtroActividad = actsMonitor.map(a => a.replace(/\s*\(.*?\)/g,'').trim().toUpperCase());
+    }
+    const inscrExtra = DB.inscripciones.filter(i => {
+      const centro = String(i.centro||'').toUpperCase();
+      const serv   = String(i.servicio||'').toUpperCase();
+      return centro.includes('ESCALERITAS') && i.estado === 'ACTIVA' &&
+             !EXCLUIR.some(x=>serv===x) && String(i.alumnoId||'') !== '68';
+    });
+    const alumnosMap = {};
+    inscrExtra.forEach(i => {
+      const aid = String(i.alumnoId||'');
+      if (!alumnosMap[aid]) alumnosMap[aid] = { alumnoId: aid, inscripciones: [] };
+      alumnosMap[aid].inscripciones.push(i);
+    });
+    alumnosExtra = Object.values(alumnosMap);
+    const actividades = [...new Set(inscrExtra.map(i => i.servicio||''))].filter(Boolean);
+    resumen = actividades.map(act => ({ act, alumnos: inscrExtra.filter(i=>(i.servicio||'')===act).length }));
+    mesActual = getMesActual();
+  }
+
+  document.getElementById('page-content').innerHTML =
+    '<div class="kpi-grid">' +
+    resumen.map(r =>
+      '<div class="kpi-card">' +
+        '<div class="kpi-label">' + r.act + '</div>' +
+        '<div class="kpi-value">' + r.alumnos + ' alumnos</div>' +
+        '<div class="kpi-delta">CEIP Escaleritas</div>' +
+      '</div>'
+    ).join('') +
+    '<div class="kpi-card">' +
+      '<div class="kpi-label">Alumnos únicos</div>' +
+      '<div class="kpi-value green">' + alumnosExtra.length + '</div>' +
+      '<div class="kpi-delta">' + (inscrExtra ? inscrExtra.length : '?') + ' inscripciones activas</div>' +
+    '</div></div>' +
+    '<div class="card">' +
+      '<div class="card-header"><span>📋</span>' +
+        '<div class="card-title">Alumnos CEIP Escaleritas · ' + fmtMonth(mesActual) + '</div>' +
+        '<span style="margin-left:auto;font-size:12px;color:var(--grey-2)">' + alumnosExtra.length + ' alumnos</span>' +
+      '</div>' +
+      '<div class="table-wrap"><table>' +
+        '<thead><tr><th>Alumno</th><th>Actividades</th><th>Curso</th><th>Familia</th></tr></thead>' +
+        '<tbody>' +
+        (alumnosExtra.length ? alumnosExtra.map(({ alumnoId, inscripciones }) => {
+          const a = getAlumno(alumnoId);
+          const cl = getCliente(inscripciones[0]?.clienteId || '');
+          const nombreAlumno  = a.nombre || String(inscripciones[0]?.claveAlumno||'').split('|').slice(1).join('|') || '—';
+          const nombreCliente = cl.nombre || String(inscripciones[0]?.claveCliente||'').split('|').slice(1).join('|') || '—';
+          const badges = inscripciones.map(i => actividadBadge(i.servicio||'—')).join(' ');
+          return '<tr onclick="verExtraAlumno(\'' + alumnoId + '\')" style="cursor:pointer">' +
+            '<td><div style="display:flex;align-items:center;gap:8px">' +
+              '<div class="avatar avatar-sm">' + getInitials(nombreAlumno) + '</div>' +
+              '<div style="font-weight:500">' + nombreAlumno + '</div>' +
+            '</div></td>' +
+            '<td style="line-height:2">' + badges + '</td>' +
+            '<td style="font-size:12px;color:var(--grey-2)">' + (a.curso||'—') + '</td>' +
+            '<td style="font-size:12px;color:var(--grey-2)">' + nombreCliente + '</td>' +
+          '</tr>';
+        }).join('') :
+        '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">🏫</div><div class="empty-title">Sin alumnos en CEIP Escaleritas</div></div></td></tr>') +
+        '</tbody></table></div></div>';
 
 function verExtraAlumno(alumnoId) {
   const a = getAlumno(alumnoId);
@@ -7255,6 +7367,7 @@ function pitusaEventos() {
     </div>`;
 }
 
+}
 function recargarPitusa() {
   const btn = document.querySelector('#topbar-actions .btn');
   if (btn) { btn.textContent = '⏳ Cargando...'; btn.disabled = true; }

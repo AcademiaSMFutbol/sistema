@@ -1517,14 +1517,18 @@ async function syncAll() {
     } catch(eae) {}
 
     setSyncState('ok');
-    renderCurrentPage();
-    const np = DB.pagos.length;
-    showToast(`Sincronizado ✓ · ${np} pago${np!==1?'s':''}`, 'success');
     saveCacheLocal();
     updateBadges();
+    const np = DB.pagos.length;
+    showToast(`Sincronizado ✓ · ${np} pago${np!==1?'s':''}`, 'success');
   } catch (e) {
     setSyncState('error');
     showToast('Error de conexión: ' + e.message, 'error');
+  }
+  // Renderizar fuera del try de red — errores de UI no deben parecer errores de conexión
+  try { renderCurrentPage(); } catch(er) {
+    console.error('[SM] renderCurrentPage error:', er.message, er.stack);
+    showToast('Error al renderizar: ' + er.message, 'error', 8000);
   }
 }
 

@@ -4405,14 +4405,14 @@ function extraescolares_listado(filtroActividad, alumnosExtra, inscrExtra, resum
     const role = currentUser.role;
     const isMonitor = role === 'MONITOR';
     const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
-    let filtroActividad = null;
+    filtroActividad = null;  // usar el parámetro, no redeclarar
     if (isMonitor) {
       const actsMonitor = (currentUser.actividades || []).filter(a =>
         !a.toUpperCase().includes('TECNIF') && !a.toUpperCase().includes('FÚTBOL') && !a.toUpperCase().includes('FUTBOL')
       );
       filtroActividad = actsMonitor.map(a => a.replace(/\s*\(.*?\)/g,'').trim().toUpperCase());
     }
-    const inscrExtra = DB.inscripciones.filter(i => {
+    inscrExtra = DB.inscripciones.filter(i => {
       const centro = String(i.centro||'').toUpperCase();
       const serv   = String(i.servicio||'').toUpperCase();
       return centro.includes('ESCALERITAS') && i.estado === 'ACTIVA' &&

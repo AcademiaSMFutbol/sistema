@@ -5768,19 +5768,57 @@ function portalFamilia() {
   // ── Render final ──
   document.getElementById('page-title').textContent = 'Mi portal';
   document.getElementById('page-sub').textContent   = 'Seguimiento de ' + (misAlumnos.length > 1 ? 'tus alumnos' : misAlumnos[0].nombre||'tu alumno');
-  pc.innerHTML = `
-    <div style="margin-bottom:1rem;padding:.75rem 1rem;background:var(--green-bg);border-radius:8px;display:flex;align-items:center;gap:10px">
+
+  // KPIs de resumen — clicables para ir a cada sección
+  const totalEsperado = misPagos.reduce((s,p)=>s+p.totalEsperado,0);
+  const totalPagado   = misPagos.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+p.totalRecibido,0);
+  const pendientePago = totalEsperado - totalPagado;
+  const totalSesiones = misAlumnos.reduce((s,al) => {
+    const alNombre = (al.nombre||'').toUpperCase();
+    return s + DB.asistencias.filter(a =>
+      String(a.alumnoId)===String(al.id) || String(a.claveAlumno||'').toUpperCase()===alNombre
+    ).filter(a=>a.presente).length;
+  }, 0);
+  const puntosTotal = misAlumnos.reduce((s,al)=>s+(al.camino||0),0);
+
+  const kpisDashboard = `
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-bottom:1rem">
+      <div class="kpi-card" onclick="document.getElementById('fam-alumnos').scrollIntoView({behavior:'smooth'})" style="cursor:pointer;border:2px solid var(--green-bg)">
+        <div class="kpi-label">Mis alumnos</div>
+        <div class="kpi-value">${misAlumnos.length}</div>
+        <div class="kpi-delta">Ver fichas ↓</div>
+      </div>
+      <div class="kpi-card" onclick="document.getElementById('fam-pagos').scrollIntoView({behavior:'smooth'})" style="cursor:pointer;border:2px solid ${pendientePago>0?'#ffebee':'var(--green-bg)'}">
+        <div class="kpi-label">Pendiente de pago</div>
+        <div class="kpi-value ${pendientePago>0?'red':''}">${fmtEur(pendientePago)}</div>
+        <div class="kpi-delta">Ver pagos ↓</div>
+      </div>
+      <div class="kpi-card" onclick="document.getElementById('fam-alumnos').scrollIntoView({behavior:'smooth'})" style="cursor:pointer">
+        <div class="kpi-label">Sesiones asistidas</div>
+        <div class="kpi-value green">${totalSesiones}</div>
+        <div class="kpi-delta">Total acumulado</div>
+      </div>
+      <div class="kpi-card" onclick="document.getElementById('fam-alumnos').scrollIntoView({behavior:'smooth'})" style="cursor:pointer">
+        <div class="kpi-label">Camino SM</div>
+        <div class="kpi-value">⭐ ${puntosTotal}</div>
+        <div class="kpi-delta">Puntos acumulados</div>
+      </div>
+    </div>`;
+
+  pc.innerHTML =
+    `<div style="margin-bottom:1rem;padding:.75rem 1rem;background:var(--green-bg);border-radius:8px;display:flex;align-items:center;gap:10px">
       <span style="font-size:20px">👋</span>
       <div>
         <div style="font-weight:600">Hola, ${(cliente.nombre||currentUser.name).split(' ')[0]}</div>
-        <div style="font-size:12px;color:var(--grey-2)">${misAlumnos.length} alumno${misAlumnos.length!==1?'s':''} registrado${misAlumnos.length!==1?'s':''}</div>
+        <div style="font-size:12px;color:var(--grey-2)">${misAlumnos.length} alumno${misAlumnos.length!==1?'s':''} · ${new Date().toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</div>
       </div>
       <button onclick="logout()" class="btn btn-secondary btn-sm" style="margin-left:auto">⏏ Salir</button>
-    </div>
-    ${tarjetasAlumnos}
-    ${informesBlock}
-    ${pagosBlock}
-    ${facturasBlock}`;
+    </div>` +
+    kpisDashboard +
+    `<div id="fam-alumnos">${tarjetasAlumnos}</div>` +
+    informesBlock +
+    `<div id="fam-pagos">${pagosBlock}</div>` +
+    facturasBlock;
 
   // Ocultar topbar-actions heredadas
   document.getElementById('topbar-actions').innerHTML = '';
@@ -6066,52 +6104,54 @@ function _registroHorarioMonitor() {
 
 // Modal fichar para MONITOR — sin selector de trabajadora (es ella misma)
 function modalFicharMonitor(tipoDefault) {
-  const ahora = new Date();
+  const ahora   = new Date();
   const horaAct = ahora.toTimeString().slice(0,5);
   const hoy     = ahora.toISOString().split('T')[0];
+  const fechaLegible = ahora.toLocaleDateString('es-ES', {weekday:'long', day:'numeric', month:'long'});
 
-  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
-  // Actividad: pre-seleccionar la actividad del monitor si tiene una sola
+  // Actividades propias del monitor (sin tecnificación)
   const actsMonitor = (currentUser.actividades || [])
-    .filter(a => !a.toUpperCase().includes('TECNIF'));
-  const actPre = actsMonitor.length === 1
-    ? DB.inscripciones.find(i => {
-        const s = String(i.servicio||'').toUpperCase();
-        return actsMonitor.some(am => s.includes(am.toUpperCase().replace(/\s*\(.*\)/,'').trim()));
-      })?.servicio || actsMonitor[0]
-    : '';
+    .filter(a => !a.toUpperCase().includes('TECNIF') &&
+                 !a.toUpperCase().includes('FÚTBOL') &&
+                 !a.toUpperCase().includes('FUTBOL'));
 
-  const actividades = [...new Set(
-    DB.inscripciones
-      .filter(i => String(i.centro||'').toUpperCase().includes('ESCALERITAS')
-               && i.estado === 'ACTIVA'
-               && !EXCLUIR.some(x => String(i.servicio||'').toUpperCase() === x))
-      .map(i => i.servicio)
-  )].filter(Boolean).sort();
+  // Resolver nombre exacto de servicio desde inscripciones
+  const EXCLUIR = ['COORD. ACT. EXTRAESCOLARES','COORD ACT EXTRAESCOLARES'];
+  const serviciosMonitor = actsMonitor.map(am => {
+    const insc = DB.inscripciones.find(i =>
+      String(i.centro||'').toUpperCase().includes('ESCALERITAS') &&
+      i.estado === 'ACTIVA' &&
+      !EXCLUIR.some(x => String(i.servicio||'').toUpperCase() === x) &&
+      String(i.servicio||'').toUpperCase().includes(am.toUpperCase().replace(/\s*\(.*\)/,'').trim())
+    );
+    return insc ? insc.servicio : am;
+  }).filter(Boolean);
+
+  // Campo actividad: texto fijo si 1 sola, selector si varias
+  const actividadHTML = serviciosMonitor.length <= 1
+    ? `<div class="field-group">
+        <label class="field-label">Actividad</label>
+        <div style="padding:.6rem .75rem;background:#f5f5f5;border-radius:8px;font-size:13px;color:#555">
+          ${serviciosMonitor[0] || '—'}
+        </div>
+        <input type="hidden" id="fm-actividad" value="${serviciosMonitor[0] || ''}">
+       </div>`
+    : `<div class="field-group">
+        <label class="field-label">Actividad</label>
+        <select class="field-select" id="fm-actividad">
+          ${serviciosMonitor.map(s=>`<option value="${s}">${s}</option>`).join('')}
+        </select>
+       </div>`;
 
   openModal(`🕐 Fichar ${tipoDefault === 'ENTRADA' ? '🟢 Entrada' : '🔴 Salida'}`, `
     <div style="text-align:center;padding:.5rem 0 1rem">
       <div style="font-size:36px;font-weight:800;color:${tipoDefault==='ENTRADA'?'#2e7d32':'#c62828'}">${horaAct}</div>
-      <div style="font-size:12px;color:var(--grey-2)">${ahora.toLocaleDateString('es-ES',{weekday:'long',day:'numeric',month:'long'})}</div>
+      <div style="font-size:12px;color:var(--grey-2)">${fechaLegible}</div>
+      <div style="font-size:11px;color:var(--grey-2);margin-top:2px">Hora y fecha fijadas automáticamente</div>
     </div>
-    <div class="form-grid">
-      <div class="field-group"><label class="field-label">Tipo</label>
-        <select class="field-select" id="fm-tipo">
-          <option value="ENTRADA" ${tipoDefault==='ENTRADA'?'selected':''}>🟢 ENTRADA</option>
-          <option value="SALIDA"  ${tipoDefault==='SALIDA' ?'selected':''}>🔴 SALIDA</option>
-        </select>
-      </div>
-      <div class="field-group"><label class="field-label">Hora</label>
-        <input class="field-input" type="time" id="fm-hora" value="${horaAct}">
-      </div>
-    </div>
-    <div class="field-group">
-      <label class="field-label">Actividad</label>
-      <select class="field-select" id="fm-actividad">
-        <option value="">— Sin especificar —</option>
-        ${actividades.map(a=>`<option value="${a}" ${a===actPre?'selected':''}>${a}</option>`).join('')}
-      </select>
-    </div>
+    <input type="hidden" id="fm-tipo" value="${tipoDefault}">
+    <input type="hidden" id="fm-hora" value="${horaAct}">
+    ${actividadHTML}
     <div class="field-group">
       <label class="field-label">Notas (opcional)</label>
       <input class="field-input" type="text" id="fm-notas" placeholder="Observaciones…">
@@ -7234,8 +7274,9 @@ async function initApp() {
    PAGE: PITUSA EVENTOS
 ═══════════════════════════════════════════════════════════ */
 function pitusaEventos() {
-  // Botón recargar en topbar
+  // Botón recargar + nuevo evento en topbar
   document.getElementById('topbar-actions').innerHTML =
+    '<button class="btn btn-primary" onclick="modalNuevoEventoPitusa()" style="font-size:12px;margin-right:.5rem">+ Nuevo evento</button>' +
     '<button class="btn btn-secondary" onclick="recargarPitusa()" style="font-size:12px">🔄 Recargar</button>';
 
   const eventos = DB.eventosPitusa || [];
@@ -7375,6 +7416,95 @@ function pitusaEventos() {
         </table>
       </div>
     </div>`;
+}
+
+function modalNuevoEventoPitusa() {
+  const hoy = new Date().toISOString().split('T')[0];
+  openModal('🎉 Nuevo evento Pitusa', `
+    <div class="form-grid">
+      <div class="field-group full">
+        <label class="field-label">Cliente / Familia *</label>
+        <input class="field-input" type="text" id="ep-cliente" placeholder="Nombre del cliente">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Teléfono</label>
+        <input class="field-input" type="tel" id="ep-telefono" placeholder="600 000 000">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Fecha del evento *</label>
+        <input class="field-input" type="date" id="ep-fecha-evento" value="${hoy}">
+      </div>
+      <div class="field-group full">
+        <label class="field-label">Lugar</label>
+        <input class="field-input" type="text" id="ep-lugar" placeholder="Dirección o nombre del lugar">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Pax niños</label>
+        <input class="field-input" type="number" id="ep-pax-ninos" value="0" min="0">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Pax adultos</label>
+        <input class="field-input" type="number" id="ep-pax-adultos" value="0" min="0">
+      </div>
+      <div class="field-group full">
+        <label class="field-label">Intereses / Descripción</label>
+        <input class="field-input" type="text" id="ep-intereses" placeholder="Temática, preferencias…">
+      </div>
+      <div class="field-group">
+        <label class="field-label">PVP cliente (€)</label>
+        <input class="field-input" type="number" id="ep-pvp" value="0" min="0" step="0.01">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Estado</label>
+        <select class="field-select" id="ep-estado">
+          <option value="PRESUPUESTO">Presupuesto</option>
+          <option value="CONFIRMADO">Confirmado</option>
+          <option value="PENDIENTE">Pendiente</option>
+          <option value="CANCELADO">Cancelado</option>
+        </select>
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="guardarEventoPitusa()">💾 Guardar evento</button>`
+  );
+}
+
+async function guardarEventoPitusa() {
+  const cliente   = document.getElementById('ep-cliente')?.value.trim();
+  const fechaEvt  = document.getElementById('ep-fecha-evento')?.value;
+  if (!cliente || !fechaEvt) { showToast('Cliente y fecha son obligatorios', 'error'); return; }
+
+  const btn = document.querySelector('#modal-footer .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando…'; }
+
+  const fechaSolicitud = new Date().toISOString().split('T')[0];
+  const fila = {
+    'Fecha solicitud':        fechaSolicitud,
+    'Cliente':                cliente,
+    'Teléfono':               document.getElementById('ep-telefono')?.value.trim() || '',
+    'Fecha evento':           fechaEvt,
+    'Lugar':                  document.getElementById('ep-lugar')?.value.trim() || '',
+    'Pax Niños':              document.getElementById('ep-pax-ninos')?.value || '0',
+    'Pax Adultos':            document.getElementById('ep-pax-adultos')?.value || '0',
+    'Intereses':              document.getElementById('ep-intereses')?.value.trim() || '',
+    'PVP Final Cliente':      document.getElementById('ep-pvp')?.value || '0',
+    'Estado':                 document.getElementById('ep-estado')?.value || 'PRESUPUESTO',
+    'Check Pago Cliente':     'FALSE',
+    'Check Pago Proveedor':   'FALSE'
+  };
+
+  closeModal();
+  try {
+    const res = await writeToSheet('EVENTOS PITUSA', fila);
+    if (res && res.ok && !res.demo) {
+      showToast('✅ Evento guardado correctamente', 'success', 4000);
+      await recargarPitusa();
+    } else {
+      showToast('❌ Error al guardar: ' + (res?.error || 'sin respuesta'), 'error', 6000);
+    }
+  } catch(e) {
+    showToast('❌ Error: ' + e.message, 'error', 6000);
+  }
 }
 
 function recargarPitusa() {

@@ -746,10 +746,11 @@ const SYNC_KEY = 'sm_last_sync';
 
 // URL del GAS hardcodeada como fallback para incógnito/móvil/dispositivos nuevos
 // Si existe en localStorage (guardada desde Configuración) tiene prioridad
-const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbznOVE548gC8mMgobvUMVqR-bA4y8W2wskmv4aU4L070GhGEGkaY-qHoj9KamjLujPxmQ/exec';
+const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycby5sQ6uj6veCFtxSSP5_XNPOQEX3cjQkgpH98TEMzYqwyF9dYJwlAYe8QtU7huHtTmFZg/exec';
 const GAS_URL_OLD = 'https://script.google.com/macros/s/AKfycbzOBn9pwpWRYL8MDm_xS-vYJNk2WGcJ2WluO24fgBmjtdUBHPkJ7G349fPR22cPSI8Qfg/exec';
 // Si el dispositivo tiene guardada la URL vieja → reemplazar por la nueva automáticamente
-if (localStorage.getItem(CONFIG_KEY) === GAS_URL_OLD) {
+if (localStorage.getItem(CONFIG_KEY) === GAS_URL_OLD ||
+    localStorage.getItem(CONFIG_KEY) === 'https://script.google.com/macros/s/AKfycbznOVE548gC8mMgobvUMVqR-bA4y8W2wskmv4aU4L070GhGEGkaY-qHoj9KamjLujPxmQ/exec') {
   localStorage.setItem(CONFIG_KEY, GAS_URL_DEFAULT);
 }
 let GAS_URL = localStorage.getItem(CONFIG_KEY) || GAS_URL_DEFAULT;

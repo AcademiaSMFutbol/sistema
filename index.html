@@ -1172,8 +1172,8 @@ function normalizarDB(raw) {
         // % Pagado: leer de Sheets (puede tener fórmula) y como fallback calcular
         const pctRaw       = String(e['% Pagado']||'').replace('%','').replace(',','.').trim();
         const pctPagado    = pctRaw !== '' ? (Math.round(parseFloat(pctRaw)) || 0) : (pvp > 0 ? Math.round(importePag / pvp * 100) : 0);
-        const chkReserva   = chkTotal ? true : pctPagado >= 50;
         const chkTotal     = String(e['Check Pago Total']    ||'').toUpperCase()==='TRUE' || pctPagado >= 100;
+        const chkReserva   = chkTotal ? true : pctPagado >= 50;
         const chkProveedor = String(e['Check Pago Proveedor']||'').toUpperCase()==='TRUE';
         return {
           id:             String(e['Id'] || e['Id evento'] || i+1),

@@ -746,11 +746,12 @@ const SYNC_KEY = 'sm_last_sync';
 
 // URL del GAS hardcodeada como fallback para incógnito/móvil/dispositivos nuevos
 // Si existe en localStorage (guardada desde Configuración) tiene prioridad
-const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycby5sQ6uj6veCFtxSSP5_XNPOQEX3cjQkgpH98TEMzYqwyF9dYJwlAYe8QtU7huHtTmFZg/exec';
+const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzD19ttg07_UlDhLGx703rkLhOtMNGouOUap2NXiRg8N6Wi84-SHOs4tjOpS3uzcuEozQ/exec';
 const GAS_URL_OLD = 'https://script.google.com/macros/s/AKfycbzOBn9pwpWRYL8MDm_xS-vYJNk2WGcJ2WluO24fgBmjtdUBHPkJ7G349fPR22cPSI8Qfg/exec';
 // Si el dispositivo tiene guardada la URL vieja → reemplazar por la nueva automáticamente
 if (localStorage.getItem(CONFIG_KEY) === GAS_URL_OLD ||
-    localStorage.getItem(CONFIG_KEY) === 'https://script.google.com/macros/s/AKfycbznOVE548gC8mMgobvUMVqR-bA4y8W2wskmv4aU4L070GhGEGkaY-qHoj9KamjLujPxmQ/exec') {
+    localStorage.getItem(CONFIG_KEY) === 'https://script.google.com/macros/s/AKfycbznOVE548gC8mMgobvUMVqR-bA4y8W2wskmv4aU4L070GhGEGkaY-qHoj9KamjLujPxmQ/exec' ||
+    localStorage.getItem(CONFIG_KEY) === 'https://script.google.com/macros/s/AKfycby5sQ6uj6veCFtxSSP5_XNPOQEX3cjQkgpH98TEMzYqwyF9dYJwlAYe8QtU7huHtTmFZg/exec') {
   localStorage.setItem(CONFIG_KEY, GAS_URL_DEFAULT);
 }
 let GAS_URL = localStorage.getItem(CONFIG_KEY) || GAS_URL_DEFAULT;
@@ -1164,26 +1165,40 @@ function normalizarDB(raw) {
   if (_epRaw.length) {
     const _fmtEur = v => parseFloat(String(v||'0').replace(/[€\s]/g,'').replace(',','.')) || 0;
     DB.eventosPitusa = _epRaw
-      .filter(e => e['Id evento'] || e['Cliente (Nombre y apellidos)'] || e['CLIENTE'])
-      .map((e, i) => ({
-        id:                  String(e['Id evento'] || i+1),
-        fechaSolicitud:      String(e['Fecha solicitud'] || '').split('T')[0],
-        cliente:             String(e['Cliente (Nombre y apellidos)'] || e['CLIENTE'] || '').trim(),
-        telefono:            String(e['Teléfono'] || e['TELEFONO'] || '').trim(),
-        fechaEvento:         String(e['Fecha evento'] || e['FECHA EVENTO'] || '').split('T')[0],
-        lugar:               String(e['Lugar'] || '').trim(),
-        paxNinos:            parseInt(e['Pax Niños'] || e['Pax Ninos'] || 0) || 0,
-        paxAdultos:          parseInt(e['Pax Adultos'] || 0) || 0,
-        intereses:           String(e['Intereses'] || '').trim(),
-        proveedores:         String(e['Proveedores'] || '').trim(),
-        costeNeto:           _fmtEur(e['Coste Neto Total (€)']),
-        margen:              _fmtEur(e['Margen gestión']),
-        pvp:                 _fmtEur(e['PVP Final Cliente']),
-        estado:              String(e['Estado'] || 'PENDIENTE').trim(),
-        checkPagoCliente:    String(e['Check Pago Cliente']   || '').toUpperCase() === 'TRUE',
-        checkPagoProveedor:  String(e['Check Pago Proveedor'] || '').toUpperCase() === 'TRUE',
-        _raw: e
-      }));
+      .filter(e => e['Id'] || e['Id evento'] || e['Cliente (Nombre y apellidos)'] || e['CLIENTE'])
+      .map((e, i) => {
+        const pvp          = _fmtEur(e['PVP Final Cliente']);
+        const importePag   = _fmtEur(e['Importe Pagado']);
+        const pctPagado    = parseFloat(String(e['% Pagado']||'0').replace('%','').replace(',','.')) || 0;
+        const chkReserva   = String(e['Check Pago Reserva']  ||'').toUpperCase()==='TRUE';
+        const chkTotal     = String(e['Check Pago Total']    ||'').toUpperCase()==='TRUE';
+        const chkProveedor = String(e['Check Pago Proveedor']||'').toUpperCase()==='TRUE';
+        return {
+          id:             String(e['Id'] || e['Id evento'] || i+1),
+          fechaSolicitud: String(e['Fecha solicitud']||'').split('T')[0],
+          cliente:        String(e['Cliente (Nombre y apellidos)']||e['CLIENTE']||'').trim(),
+          telefono:       String(e['Teléfono']||e['TELEFONO']||'').trim(),
+          whatsapp:       String(e['Whatsapp']||'').trim(),
+          fechaEvento:    String(e['Fecha evento']||e['FECHA EVENTO']||'').split('T')[0],
+          lugar:          String(e['Lugar']||'').trim(),
+          paxNinos:       parseInt(e['Pax Niños']||e['Pax Ninos']||0)||0,
+          paxAdultos:     parseInt(e['Pax Adultos']||0)||0,
+          intereses:      String(e['Intereses']||'').trim(),
+          proveedores:    String(e['Proveedores']||'').trim(),
+          costeNeto:      _fmtEur(e['Coste Neto Total (€)']),
+          margen:         _fmtEur(e['Margen gestión']),
+          pvp,
+          estado:         String(e['Estado']||'PENDIENTE').trim(),
+          pdfPresupuesto: String(e['PDF Presupuesto']||'').trim(),
+          importePagado:  importePag,
+          pctPagado,
+          checkPagoReserva:   chkReserva,
+          checkPagoTotal:     chkTotal,
+          checkPagoProveedor: chkProveedor,
+          checkPagoCliente:   chkTotal,
+          _raw: e
+        };
+      });
   } else {
     DB.eventosPitusa = DB.eventosPitusa || [];
   }
@@ -7275,148 +7290,109 @@ async function initApp() {
    PAGE: PITUSA EVENTOS
 ═══════════════════════════════════════════════════════════ */
 function pitusaEventos() {
-  // Botón recargar + nuevo evento en topbar
   document.getElementById('topbar-actions').innerHTML =
     '<button class="btn btn-primary" onclick="modalNuevoEventoPitusa()" style="font-size:12px;margin-right:.5rem">+ Nuevo evento</button>' +
     '<button class="btn btn-secondary" onclick="recargarPitusa()" style="font-size:12px">🔄 Recargar</button>';
 
   const eventos = DB.eventosPitusa || [];
 
-  // ── KPIs ──────────────────────────────────────────────────
-  const total        = eventos.length;
-  const confirmados  = eventos.filter(e => e.estado.toUpperCase().includes('CONFIRM') || e.estado.toUpperCase().includes('ACTIV'));
-  const pendientes   = eventos.filter(e => e.estado.toUpperCase().includes('PEND') || e.estado.toUpperCase().includes('PRESUPU'));
-  const realizados   = eventos.filter(e => e.estado.toUpperCase().includes('REALIZ') || e.estado.toUpperCase().includes('COMPLET'));
-  const cancelados   = eventos.filter(e => e.estado.toUpperCase().includes('CANCEL'));
+  // Función badge estado
+  const estadoBadge = est => {
+    const e = (est||'').toUpperCase();
+    if (e.includes('CONFIRM') || e.includes('ACTIV')) return '<span class="badge badge-green">'  + est + '</span>';
+    if (e.includes('REALIZ')  || e.includes('COMPLET'))return '<span class="badge badge-blue">'  + est + '</span>';
+    if (e.includes('CANCEL'))                           return '<span class="badge badge-red">'   + est + '</span>';
+    return '<span class="badge badge-orange">' + est + '</span>';
+  };
 
-  const ingresosTotales  = eventos.reduce((s,e) => s + e.pvp, 0);
-  const margenTotal      = eventos.reduce((s,e) => s + e.margen, 0);
-  const costeTotal       = eventos.reduce((s,e) => s + e.costeNeto, 0);
-  const pendienteCobro   = eventos.filter(e => !e.checkPagoCliente && e.pvp > 0);
-  const pendientePago    = eventos.filter(e => !e.checkPagoProveedor && e.costeNeto > 0);
-  const totalPaxNinos    = eventos.reduce((s,e) => s + e.paxNinos, 0);
-  const totalPaxAdultos  = eventos.reduce((s,e) => s + e.paxAdultos, 0);
+  // Check de pago: 🟡 reserva (50%), ✅ completo, ⏳ pendiente
+  const checkPagoHTML = e => {
+    if (e.checkPagoTotal)   return '<span title="Pago completo"   style="font-size:18px">✅</span>';
+    if (e.checkPagoReserva) return '<span title="Reserva pagada"  style="font-size:18px">🟡</span>';
+    return                         '<span title="Pendiente"        style="font-size:18px">⏳</span>';
+  };
+  const checkProvHTML = e => e.checkPagoProveedor
+    ? '<span style="font-size:18px">✅</span>'
+    : '<span style="font-size:18px">⏳</span>';
 
-  // ── Próximos eventos (fechaEvento >= hoy, ordenados) ──────
+  // KPIs
+  const total       = eventos.length;
+  const confirmados = eventos.filter(e => e.estado.toUpperCase().includes('CONFIRM')||e.estado.toUpperCase().includes('ACTIV')).length;
+  const pendientes  = eventos.filter(e => e.estado.toUpperCase().includes('PEND')||e.estado.toUpperCase().includes('PRESUP')).length;
+  const ingresos    = eventos.reduce((s,e)=>s+e.pvp,0);
+  const margenTotal = eventos.reduce((s,e)=>s+e.margen,0);
+  const costeTotal  = eventos.reduce((s,e)=>s+e.costeNeto,0);
+  const sinCobrar   = eventos.filter(e=>!e.checkPagoTotal && e.pvp>0).reduce((s,e)=>s+(e.pvp-e.importePagado),0);
+  const sinPagar    = eventos.filter(e=>!e.checkPagoProveedor && e.costeNeto>0).reduce((s,e)=>s+e.costeNeto,0);
+  const totalPax    = eventos.reduce((s,e)=>s+e.paxNinos+e.paxAdultos,0);
+
+  // Tabla
   const hoy = new Date().toISOString().split('T')[0];
   const proximos = eventos
-    .filter(e => e.fechaEvento && e.fechaEvento >= hoy)
+    .filter(e => e.fechaEvento >= hoy)
     .sort((a,b) => a.fechaEvento.localeCompare(b.fechaEvento))
-    .slice(0, 5);
-
-  // ── Tabla completa ─────────────────────────────────────────
-  const estadoBadge = estado => {
-    const e = estado.toUpperCase();
-    if (e.includes('CONFIRM') || e.includes('ACTIV')) return `<span class="badge badge-green">${estado}</span>`;
-    if (e.includes('REALIZ') || e.includes('COMPLET'))return `<span class="badge badge-blue">${estado}</span>`;
-    if (e.includes('CANCEL'))                          return `<span class="badge badge-red">${estado}</span>`;
-    return `<span class="badge badge-orange">${estado}</span>`;
-  };
+    .slice(0,5);
 
   const filas = eventos
     .slice().sort((a,b) => (b.fechaEvento||'').localeCompare(a.fechaEvento||''))
-    .map(e => `<tr>
-      <td style="font-size:11px;color:var(--grey-2)">${fmtDate(e.fechaEvento)||'—'}</td>
-      <td><div style="font-weight:500;font-size:13px">${e.cliente||'—'}</div>
-          <div style="font-size:11px;color:var(--grey-2)">${e.telefono||''}</div></td>
-      <td style="font-size:12px">${e.lugar||'—'}</td>
-      <td style="text-align:center;font-size:12px">${e.paxNinos?'👶 '+e.paxNinos:'—'} ${e.paxAdultos?'🧑 '+e.paxAdultos:''}</td>
-      <td style="text-align:right;font-weight:600;color:var(--green)">${e.pvp?fmtEur(e.pvp):'—'}</td>
-      <td style="text-align:right;font-size:12px;color:var(--grey-2)">${e.margen?fmtEur(e.margen):'—'}</td>
-      <td>${estadoBadge(e.estado)}</td>
-      <td style="text-align:center">${e.checkPagoCliente?'✅':'⏳'}</td>
-      <td style="text-align:center">${e.checkPagoProveedor?'✅':'⏳'}</td>
-    </tr>`).join('');
+    .map(e => '<tr>' +
+      '<td style="font-size:11px;color:var(--grey-2);white-space:nowrap">' + fmtDate(e.fechaEvento) + '</td>' +
+      '<td><div style="font-weight:500;font-size:13px">' + (e.cliente||'—') + '</div>' +
+          '<div style="font-size:11px;color:var(--grey-2)">' + (e.telefono||'') + (e.whatsapp && e.whatsapp!==e.telefono ? ' · WA:'+e.whatsapp : '') + '</div></td>' +
+      '<td style="font-size:12px">' + (e.lugar||'—') + '</td>' +
+      '<td style="text-align:center;font-size:12px">' + (e.paxNinos?'👶 '+e.paxNinos:'') + ' ' + (e.paxAdultos?'🧑 '+e.paxAdultos:'') + '</td>' +
+      '<td style="text-align:right;font-weight:600;color:var(--green)">' + (e.pvp?fmtEur(e.pvp):'—') + '</td>' +
+      '<td style="text-align:right;font-size:12px">' + (e.importePagado?fmtEur(e.importePagado):'—') + '</td>' +
+      '<td style="text-align:center;font-size:11px;font-weight:600;color:' + (e.pctPagado>=100?'#2e7d32':e.pctPagado>=50?'#f57f17':'#c62828') + '">' + (e.pvp>0?e.pctPagado+'%':'—') + '</td>' +
+      '<td style="text-align:center">' + checkPagoHTML(e) + '</td>' +
+      '<td style="text-align:center">' + checkProvHTML(e) + '</td>' +
+      '<td>' + estadoBadge(e.estado) + '</td>' +
+    '</tr>').join('');
 
-  const proximosHTML = proximos.length ? proximos.map(e => `
-    <div style="display:flex;align-items:center;gap:12px;padding:.6rem 0;border-bottom:1px solid #f5f5f5">
-      <div style="min-width:48px;text-align:center;background:var(--green-bg);border-radius:8px;padding:4px 6px">
-        <div style="font-size:16px;font-weight:700;color:var(--green)">${fmtDate(e.fechaEvento).split(' ')[0]||'—'}</div>
-        <div style="font-size:10px;color:var(--grey-2)">${fmtDate(e.fechaEvento).split(' ').slice(1).join(' ')||''}</div>
-      </div>
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:600">${e.cliente}</div>
-        <div style="font-size:11px;color:var(--grey-2)">${e.lugar||'—'} · ${e.paxNinos||0} niños · ${e.paxAdultos||0} adultos</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:13px;font-weight:600;color:var(--green)">${e.pvp?fmtEur(e.pvp):'—'}</div>
-        <div>${estadoBadge(e.estado)}</div>
-      </div>
-    </div>`).join('')
-    : '<div style="font-size:13px;color:var(--grey-2);padding:.5rem 0">Sin próximos eventos</div>';
+  const proximosHTML = proximos.length ? proximos.map(e =>
+    '<div style="display:flex;align-items:center;gap:12px;padding:.6rem 0;border-bottom:1px solid #f5f5f5">' +
+      '<div style="min-width:48px;text-align:center;background:var(--green-bg);border-radius:8px;padding:4px 6px">' +
+        '<div style="font-size:16px;font-weight:700;color:var(--green)">' + (fmtDate(e.fechaEvento)||'—').split(' ')[0] + '</div>' +
+        '<div style="font-size:10px;color:var(--grey-2)">' + (fmtDate(e.fechaEvento)||'').split(' ').slice(1).join(' ') + '</div>' +
+      '</div>' +
+      '<div style="flex:1">' +
+        '<div style="font-size:13px;font-weight:600">' + e.cliente + '</div>' +
+        '<div style="font-size:11px;color:var(--grey-2)">' + (e.lugar||'—') + ' · ' + (e.paxNinos||0) + ' niños · ' + (e.paxAdultos||0) + ' adultos</div>' +
+      '</div>' +
+      '<div style="text-align:right">' +
+        '<div style="font-size:13px;font-weight:600;color:var(--green)">' + (e.pvp?fmtEur(e.pvp):'—') + '</div>' +
+        checkPagoHTML(e) +
+      '</div>' +
+    '</div>'
+  ).join('') : '<div style="font-size:13px;color:var(--grey-2);padding:.5rem 0">Sin próximos eventos</div>';
 
-  document.getElementById('page-content').innerHTML = `
-    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1rem">
-      <div class="kpi-card">
-        <div class="kpi-label">Total eventos</div>
-        <div class="kpi-value">${total}</div>
-        <div class="kpi-delta">${confirmados.length} confirmados · ${pendientes.length} pendientes</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Ingresos totales (PVP)</div>
-        <div class="kpi-value green">${fmtEur(ingresosTotales)}</div>
-        <div class="kpi-delta">Margen: ${fmtEur(margenTotal)}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Coste neto</div>
-        <div class="kpi-value">${fmtEur(costeTotal)}</div>
-        <div class="kpi-delta">Rentabilidad: ${ingresosTotales>0?Math.round(margenTotal/ingresosTotales*100)+'%':'—'}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Pax totales</div>
-        <div class="kpi-value">${totalPaxNinos + totalPaxAdultos}</div>
-        <div class="kpi-delta">👶 ${totalPaxNinos} niños · 🧑 ${totalPaxAdultos} adultos</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Cobros pendientes</div>
-        <div class="kpi-value ${pendienteCobro.length?'red':''}">${pendienteCobro.length}</div>
-        <div class="kpi-delta ${pendienteCobro.length?'down':''}">${fmtEur(pendienteCobro.reduce((s,e)=>s+e.pvp,0))}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Pagos a proveedores</div>
-        <div class="kpi-value ${pendientePago.length?'red':''}">${pendientePago.length}</div>
-        <div class="kpi-delta ${pendientePago.length?'down':''}">${fmtEur(pendientePago.reduce((s,e)=>s+e.costeNeto,0))}</div>
-      </div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;margin-bottom:1rem">
-      <div class="card">
-        <div class="card-header"><span>📅</span><div class="card-title">Próximos eventos</div></div>
-        <div class="card-body">${proximosHTML}</div>
-      </div>
-      <div class="card">
-        <div class="card-header"><span>📊</span><div class="card-title">Resumen por estado</div></div>
-        <div class="card-body">
-          ${[...new Set(eventos.map(e=>e.estado))].filter(Boolean).map(estado => {
-            const evs = eventos.filter(e=>e.estado===estado);
-            const pvpEst = evs.reduce((s,e)=>s+e.pvp,0);
-            return `<div style="display:flex;align-items:center;gap:10px;padding:.5rem 0;border-bottom:1px solid #f5f5f5">
-              ${estadoBadge(estado)}
-              <div style="flex:1;font-size:13px">${evs.length} evento${evs.length!==1?'s':''}</div>
-              <div style="font-size:13px;font-weight:600;color:var(--green)">${fmtEur(pvpEst)}</div>
-            </div>`;
-          }).join('') || '<div style="color:var(--grey-2);font-size:13px">Sin datos</div>'}
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <span>🎉</span>
-        <div class="card-title">Todos los eventos</div>
-        <span style="margin-left:auto;font-size:12px;color:var(--grey-2)">${total} registros</span>
-      </div>
-      <div style="overflow-x:auto">
-        <table class="data-table">
-          <thead><tr>
-            <th>Fecha</th><th>Cliente</th><th>Lugar</th><th>Pax</th>
-            <th style="text-align:right">PVP</th><th style="text-align:right">Margen</th>
-            <th>Estado</th><th style="text-align:center">Cobrado</th><th style="text-align:center">Pagado</th>
-          </tr></thead>
-          <tbody>${filas || '<tr><td colspan="9" style="text-align:center;color:var(--grey-2);padding:2rem">Sin eventos registrados</td></tr>'}</tbody>
-        </table>
-      </div>
-    </div>`;
+  document.getElementById('page-content').innerHTML =
+    '<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1rem">' +
+      '<div class="kpi-card"><div class="kpi-label">Total eventos</div><div class="kpi-value">' + total + '</div><div class="kpi-delta">' + confirmados + ' confirmados · ' + pendientes + ' pendientes</div></div>' +
+      '<div class="kpi-card"><div class="kpi-label">Ingresos PVP</div><div class="kpi-value green">' + fmtEur(ingresos) + '</div><div class="kpi-delta">Margen: ' + fmtEur(margenTotal) + '</div></div>' +
+      '<div class="kpi-card"><div class="kpi-label">Coste neto</div><div class="kpi-value">' + fmtEur(costeTotal) + '</div><div class="kpi-delta">' + (ingresos>0?Math.round(margenTotal/ingresos*100)+'% rentabilidad':'—') + '</div></div>' +
+      '<div class="kpi-card"><div class="kpi-label">Pax totales</div><div class="kpi-value">' + totalPax + '</div></div>' +
+      '<div class="kpi-card"><div class="kpi-label">Por cobrar</div><div class="kpi-value ' + (sinCobrar>0?'red':'') + '">' + fmtEur(sinCobrar) + '</div><div class="kpi-delta">clientes pendientes</div></div>' +
+      '<div class="kpi-card"><div class="kpi-label">Por pagar</div><div class="kpi-value ' + (sinPagar>0?'red':'') + '">' + fmtEur(sinPagar) + '</div><div class="kpi-delta">proveedores pendientes</div></div>' +
+    '</div>' +
+    '<div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;margin-bottom:1rem">' +
+      '<div class="card"><div class="card-header"><span>📅</span><div class="card-title">Próximos eventos</div></div><div class="card-body">' + proximosHTML + '</div></div>' +
+      '<div class="card"><div class="card-header"><span>💡</span><div class="card-title">Leyenda pagos</div></div><div class="card-body" style="font-size:12px;display:flex;flex-direction:column;gap:.4rem">' +
+        '<div>✅ Pago completo (100%)</div>' +
+        '<div>🟡 Reserva cobrada (≥50%)</div>' +
+        '<div>⏳ Pendiente de cobro</div>' +
+      '</div></div>' +
+    '</div>' +
+    '<div class="card"><div class="card-header"><span>🎉</span><div class="card-title">Todos los eventos</div>' +
+      '<span style="margin-left:auto;font-size:12px;color:var(--grey-2)">' + total + ' registros</span>' +
+    '</div>' +
+    '<div style="overflow-x:auto"><table class="data-table"><thead><tr>' +
+      '<th>Fecha</th><th>Cliente</th><th>Lugar</th><th>Pax</th>' +
+      '<th style="text-align:right">PVP</th><th style="text-align:right">Pagado</th><th style="text-align:center">%</th>' +
+      '<th style="text-align:center">Cliente</th><th style="text-align:center">Proveedor</th><th>Estado</th>' +
+    '</tr></thead><tbody>' +
+      (filas || '<tr><td colspan="10" style="text-align:center;color:var(--grey-2);padding:2rem">Sin eventos registrados</td></tr>') +
+    '</tbody></table></div></div>';
 }
 
 function modalNuevoEventoPitusa() {
@@ -7424,16 +7400,30 @@ function modalNuevoEventoPitusa() {
   openModal('🎉 Nuevo evento Pitusa', `
     <div class="form-grid">
       <div class="field-group full">
-        <label class="field-label">Cliente / Familia *</label>
-        <input class="field-input" type="text" id="ep-cliente" placeholder="Nombre del cliente">
+        <label class="field-label">Cliente (nombre y apellidos) *</label>
+        <input class="field-input" type="text" id="ep-cliente" placeholder="Nombre completo">
       </div>
       <div class="field-group">
         <label class="field-label">Teléfono</label>
         <input class="field-input" type="tel" id="ep-telefono" placeholder="600 000 000">
       </div>
       <div class="field-group">
+        <label class="field-label">WhatsApp</label>
+        <input class="field-input" type="tel" id="ep-whatsapp" placeholder="600 000 000">
+      </div>
+      <div class="field-group">
         <label class="field-label">Fecha del evento *</label>
         <input class="field-input" type="date" id="ep-fecha-evento" value="${hoy}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Estado</label>
+        <select class="field-select" id="ep-estado">
+          <option value="PRESUPUESTO">Presupuesto</option>
+          <option value="CONFIRMADO">Confirmado</option>
+          <option value="PENDIENTE">Pendiente</option>
+          <option value="REALIZADO">Realizado</option>
+          <option value="CANCELADO">Cancelado</option>
+        </select>
       </div>
       <div class="field-group full">
         <label class="field-label">Lugar</label>
@@ -7451,18 +7441,25 @@ function modalNuevoEventoPitusa() {
         <label class="field-label">Intereses / Descripción</label>
         <input class="field-input" type="text" id="ep-intereses" placeholder="Temática, preferencias…">
       </div>
+      <div class="field-group full">
+        <label class="field-label">Proveedores</label>
+        <input class="field-input" type="text" id="ep-proveedores" placeholder="Nombres de proveedores">
+      </div>
       <div class="field-group">
-        <label class="field-label">PVP cliente (€)</label>
+        <label class="field-label">Coste neto total (€)</label>
+        <input class="field-input" type="number" id="ep-coste" value="0" min="0" step="0.01">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Margen gestión (€)</label>
+        <input class="field-input" type="number" id="ep-margen" value="0" min="0" step="0.01">
+      </div>
+      <div class="field-group">
+        <label class="field-label">PVP final cliente (€)</label>
         <input class="field-input" type="number" id="ep-pvp" value="0" min="0" step="0.01">
       </div>
       <div class="field-group">
-        <label class="field-label">Estado</label>
-        <select class="field-select" id="ep-estado">
-          <option value="PRESUPUESTO">Presupuesto</option>
-          <option value="CONFIRMADO">Confirmado</option>
-          <option value="PENDIENTE">Pendiente</option>
-          <option value="CANCELADO">Cancelado</option>
-        </select>
+        <label class="field-label">Importe pagado (€)</label>
+        <input class="field-input" type="number" id="ep-importe-pagado" value="0" min="0" step="0.01">
       </div>
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -7471,41 +7468,49 @@ function modalNuevoEventoPitusa() {
 }
 
 async function guardarEventoPitusa() {
-  const cliente   = document.getElementById('ep-cliente')?.value.trim();
-  const fechaEvt  = document.getElementById('ep-fecha-evento')?.value;
+  const cliente  = document.getElementById('ep-cliente')?.value.trim();
+  const fechaEvt = document.getElementById('ep-fecha-evento')?.value;
   if (!cliente || !fechaEvt) { showToast('Cliente y fecha son obligatorios', 'error'); return; }
 
   const btn = document.querySelector('#modal-footer .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando…'; }
 
-  const fechaSolicitud = new Date().toISOString().split('T')[0];
+  const pvp         = parseFloat(document.getElementById('ep-pvp')?.value||0)||0;
+  const importePag  = parseFloat(document.getElementById('ep-importe-pagado')?.value||0)||0;
+  const pctPagado   = pvp > 0 ? Math.round(importePag/pvp*100) : 0;
+
   const fila = {
-    'Fecha solicitud':        fechaSolicitud,
-    'Cliente':                cliente,
-    'Teléfono':               document.getElementById('ep-telefono')?.value.trim() || '',
-    'Fecha evento':           fechaEvt,
-    'Lugar':                  document.getElementById('ep-lugar')?.value.trim() || '',
-    'Pax Niños':              document.getElementById('ep-pax-ninos')?.value || '0',
-    'Pax Adultos':            document.getElementById('ep-pax-adultos')?.value || '0',
-    'Intereses':              document.getElementById('ep-intereses')?.value.trim() || '',
-    'PVP Final Cliente':      document.getElementById('ep-pvp')?.value || '0',
-    'Estado':                 document.getElementById('ep-estado')?.value || 'PRESUPUESTO',
-    'Check Pago Cliente':     'FALSE',
-    'Check Pago Proveedor':   'FALSE'
+    'Fecha solicitud':            new Date().toISOString().split('T')[0],
+    'Cliente (Nombre y apellidos)': cliente,
+    'Teléfono':                   document.getElementById('ep-telefono')?.value.trim()||'',
+    'Whatsapp':                   document.getElementById('ep-whatsapp')?.value.trim()||'',
+    'Fecha evento':               fechaEvt,
+    'Lugar':                      document.getElementById('ep-lugar')?.value.trim()||'',
+    'Pax Niños':                  document.getElementById('ep-pax-ninos')?.value||'0',
+    'Pax Adultos':                document.getElementById('ep-pax-adultos')?.value||'0',
+    'Intereses':                  document.getElementById('ep-intereses')?.value.trim()||'',
+    'Proveedores':                document.getElementById('ep-proveedores')?.value.trim()||'',
+    'Coste Neto Total (€)':       document.getElementById('ep-coste')?.value||'0',
+    'Margen gestión':             document.getElementById('ep-margen')?.value||'0',
+    'PVP Final Cliente':          pvp,
+    'Estado':                     document.getElementById('ep-estado')?.value||'PRESUPUESTO',
+    'Importe Pagado':             importePag,
+    '% Pagado':                   pctPagado + '%',
+    'Check Pago Reserva':         importePag >= pvp*0.5 ? 'TRUE' : 'FALSE',
+    'Check Pago Total':           importePag >= pvp && pvp > 0 ? 'TRUE' : 'FALSE',
+    'Check Pago Proveedor':       'FALSE'
   };
 
   closeModal();
   try {
     const res = await writeToSheet('EVENTOS PITUSA', fila);
     if (res && res.ok && !res.demo) {
-      showToast('✅ Evento guardado correctamente', 'success', 4000);
-      await recargarPitusa();
+      showToast('✅ Evento guardado', 'success', 4000);
+      recargarPitusa();
     } else {
-      showToast('❌ Error al guardar: ' + (res?.error || 'sin respuesta'), 'error', 6000);
+      showToast('❌ Error: ' + (res?.error||'sin respuesta'), 'error', 6000);
     }
-  } catch(e) {
-    showToast('❌ Error: ' + e.message, 'error', 6000);
-  }
+  } catch(e) { showToast('❌ ' + e.message, 'error', 6000); }
 }
 
 function recargarPitusa() {

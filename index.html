@@ -1169,9 +1169,11 @@ function normalizarDB(raw) {
       .map((e, i) => {
         const pvp          = _fmtEur(e['PVP Final Cliente']);
         const importePag   = _fmtEur(e['Importe Pagado']);
-        const pctPagado    = pvp > 0 ? Math.round(importePag / pvp * 100) : 0;
-        const chkReserva   = String(e['Check Pago Reserva']  ||'').toUpperCase()==='TRUE';
-        const chkTotal     = String(e['Check Pago Total']    ||'').toUpperCase()==='TRUE';
+        // % Pagado: leer de Sheets (puede tener fórmula) y como fallback calcular
+        const pctRaw       = String(e['% Pagado']||'').replace('%','').replace(',','.').trim();
+        const pctPagado    = pctRaw !== '' ? (Math.round(parseFloat(pctRaw)) || 0) : (pvp > 0 ? Math.round(importePag / pvp * 100) : 0);
+        const chkReserva   = chkTotal ? true : pctPagado >= 50;
+        const chkTotal     = String(e['Check Pago Total']    ||'').toUpperCase()==='TRUE' || pctPagado >= 100;
         const chkProveedor = String(e['Check Pago Proveedor']||'').toUpperCase()==='TRUE';
         return {
           id:             String(e['Id'] || e['Id evento'] || i+1),
@@ -7338,7 +7340,14 @@ function pitusaEventos() {
     .map(e => '<tr>' +
       '<td style="font-size:11px;color:var(--grey-2);white-space:nowrap">' + fmtDate(e.fechaEvento) + '</td>' +
       '<td><div style="font-weight:500;font-size:13px">' + (e.cliente||'—') + '</div>' +
-          '<div style="font-size:11px;color:var(--grey-2)">' + (e.telefono||'') + (e.whatsapp && e.whatsapp!==e.telefono ? ' · WA:'+e.whatsapp : '') + '</div></td>' +
+          '<div style="font-size:11px;color:var(--grey-2);margin-top:2px;display:flex;align-items:center;gap:6px">' +
+            (e.telefono ? '<span>' + e.telefono + '</span>' : '') +
+            (e.whatsapp
+              ? '<a href="https://wa.me/' + e.whatsapp.replace(/[\s+\-()]/g,'') + '" target="_blank" ' +
+                'style="display:inline-flex;align-items:center;gap:3px;background:#25D366;color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-decoration:none">' +
+                '💬 WhatsApp</a>'
+              : '') +
+          '</div></td>' +
       '<td style="font-size:12px">' + (e.lugar||'—') + '</td>' +
       '<td style="text-align:center;font-size:12px">' + (e.paxNinos?'👶 '+e.paxNinos:'') + ' ' + (e.paxAdultos?'🧑 '+e.paxAdultos:'') + '</td>' +
       '<td style="text-align:right;font-weight:600;color:var(--green)">' + (e.pvp?fmtEur(e.pvp):'—') + '</td>' +

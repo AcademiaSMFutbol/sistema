@@ -7342,8 +7342,8 @@ function pitusaEventos() {
       '<td><div style="font-weight:500;font-size:13px">' + (e.cliente||'—') + '</div>' +
           '<div style="font-size:11px;color:var(--grey-2);margin-top:2px;display:flex;align-items:center;gap:6px">' +
             (e.telefono ? '<span>' + e.telefono + '</span>' : '') +
-            (e.whatsapp
-              ? '<a href="https://wa.me/' + e.whatsapp.replace(/[\s+\-()]/g,'') + '" target="_blank" ' +
+            (e.telefono
+              ? '<a href="https://wa.me/34' + e.telefono.replace(/[\s+\-().]/g,'').replace(/^34/,'') + '" target="_blank" ' +
                 'style="display:inline-flex;align-items:center;gap:3px;background:#25D366;color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-decoration:none">' +
                 '💬 WhatsApp</a>'
               : '') +

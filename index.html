@@ -654,6 +654,7 @@ tbody tr:hover { background: #fafafa; }
     </div>
 
     <div class="sidebar-footer">
+      <div id="queue-badge" style="display:none;font-size:11px;color:#f57f17;font-weight:600;padding:.3rem .5rem;background:#fff3e0;border-radius:6px;margin-bottom:.4rem;text-align:center"></div>
       <div class="sync-status" onclick="syncAll()">
         <div class="sync-dot" id="sync-dot"></div>
         <span class="sync-text" id="sync-text">Conectado</span>
@@ -1592,15 +1593,67 @@ async function gasPost(action, data = {}) {
 
 // ── writeToSheet — usa gasPost (fetch) en lugar de gasRequest (JSONP) ──
 // Más rápido y fiable en móvil. Sin timeout de 25s.
+// ── Cola offline — escrituras pendientes cuando no hay conexión ──────────
+const QUEUE_KEY = 'sm_write_queue';
+
+function queueGet() {
+  try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch(e) { return []; }
+}
+function queueSave(q) {
+  try { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); } catch(e) {}
+}
+function queueAdd(sheet, rowData) {
+  const q = queueGet();
+  q.push({ sheet, rowData, ts: Date.now(), intentos: 0 });
+  queueSave(q);
+  _queueBadgeUpdate();
+}
+function _queueBadgeUpdate() {
+  const n = queueGet().length;
+  const el = document.getElementById('queue-badge');
+  if (el) { el.textContent = n > 0 ? '⏳ ' + n + ' pendiente' + (n>1?'s':'') : ''; el.style.display = n>0?'':'none'; }
+}
+async function queueFlush() {
+  const q = queueGet();
+  if (!q.length) return;
+  if (!navigator.onLine) return;
+  const pendientes = [...q];
+  const fallidos = [];
+  for (const item of pendientes) {
+    try {
+      const res = await gasPost('APPEND', { sheet: item.sheet, row: item.rowData });
+      if (!res || !res.ok) { item.intentos = (item.intentos||0) + 1; fallidos.push(item); }
+    } catch(e) { item.intentos = (item.intentos||0) + 1; fallidos.push(item); }
+  }
+  queueSave(fallidos);
+  _queueBadgeUpdate();
+  if (fallidos.length < pendientes.length) {
+    showToast('✅ ' + (pendientes.length - fallidos.length) + ' registro' + (pendientes.length-fallidos.length>1?'s':'') + ' pendiente' + (pendientes.length-fallidos.length>1?'s':'') + ' enviado' + (pendientes.length-fallidos.length>1?'s':''), 'success', 4000);
+  }
+}
+
 async function writeToSheet(sheet, rowData) {
   if (!GAS_URL) return { ok: true, demo: true };
   const READONLY = ['CLIENTES','ALUMNOS','INSCRIPCIONES','PAGOS'];
   if (READONLY.includes(sheet)) return { ok: true, readonly: true };
+
+  // Guardar en cola offline ANTES de intentar enviar
+  queueAdd(sheet, rowData);
+
   try {
-    // Usar gasPost (JSONP) — evita CORS y redirects de Google
-    return await gasPost('APPEND', { sheet, row: rowData });
+    const res = await gasPost('APPEND', { sheet, row: rowData });
+    if (res && res.ok) {
+      // Éxito — eliminar de la cola (el último añadido)
+      const q = queueGet();
+      const idx = q.findLastIndex ? q.findLastIndex(i => i.sheet===sheet) : [...q].reverse().findIndex(i=>i.sheet===sheet);
+      if (idx >= 0) { const qi = q.findLastIndex ? idx : q.length-1-idx; q.splice(qi,1); queueSave(q); }
+      _queueBadgeUpdate();
+    }
+    return res;
   } catch(e) {
-    return { ok: false, error: e.message };
+    // Queda en cola — avisar al usuario
+    showToast('📵 Sin conexión — registro guardado localmente. Se enviará al recuperar señal.', 'warning', 6000);
+    return { ok: false, queued: true, error: e.message };
   }
 }
 
@@ -7215,6 +7268,16 @@ function configuracion() {
 const SESSION_TTL = 8 * 60 * 60 * 1000; // 8 horas en ms
 
 async function initApp() {
+  // Cola offline — reenviar cuando recupera conexión
+  window.addEventListener('online', () => {
+    showToast('📶 Conexión recuperada — enviando registros pendientes…', 'info', 3000);
+    setTimeout(queueFlush, 1500);
+  });
+  // Reintento cada 2 minutos si hay pendientes
+  setInterval(() => { if (queueGet().length > 0 && navigator.onLine) queueFlush(); }, 120000);
+  // Mostrar badge si hay pendientes al arrancar
+  _queueBadgeUpdate();
+
   // 1. Restaurar sesión activa (si no ha expirado)
   const savedSession = localStorage.getItem(SESSION_KEY);
   if (savedSession) {

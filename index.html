@@ -3601,7 +3601,7 @@ function _renderImpagos(mes, anyo) {
     const nombre   = al.nombre || '—';
     const telRaw   = (cliente.telefono || '').replace(/[\s\-().]/g,'').replace(/^\+34/,'').replace(/^34/,'');
     const msg      = encodeURIComponent(
-      `Hola, soy Samy de SM Fútbol. Te escribo porque no nos consta el pago de ${mesLabel} para ${nombre} en ${i.servicio}. ¿Podrías confirmarme si hay algún error? Gracias.`
+      `Hola ${(cliente.nombre||'').split(' ')[0]||''}, les hablamos desde SM Academia 👋\n\nLes escribimos porque en nuestro sistema no nos consta el pago de ${mesLabel} correspondiente a ${nombre} en ${i.servicio}. Es posible que haya un error por nuestra parte o que el pago esté en camino.\n\nSi ya han realizado el abono, por favor indíquennos la fecha y el método de pago para que podamos revisarlo. Si tienen cualquier duda, estamos a su disposición.\n\n¡Gracias y hasta pronto! 🙌\n\n_Este mensaje ha sido generado de forma automática por el sistema de gestión de SM Academia._`
     );
     const waUrl    = telRaw ? `https://wa.me/34${telRaw}?text=${msg}` : '';
     const precio   = i.precio ? parseFloat(i.precio) : 0;

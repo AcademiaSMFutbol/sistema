@@ -7630,10 +7630,6 @@ function modalNuevoEventoPitusa() {
         <input class="field-input" type="tel" id="ep-telefono" placeholder="600 000 000">
       </div>
       <div class="field-group">
-        <label class="field-label">WhatsApp</label>
-        <input class="field-input" type="tel" id="ep-whatsapp" placeholder="600 000 000">
-      </div>
-      <div class="field-group">
         <label class="field-label">Fecha del evento *</label>
         <input class="field-input" type="date" id="ep-fecha-evento" value="${hoy}">
       </div>
@@ -7672,10 +7668,6 @@ function modalNuevoEventoPitusa() {
         <input class="field-input" type="number" id="ep-coste" value="0" min="0" step="0.01">
       </div>
       <div class="field-group">
-        <label class="field-label">Margen gestión (€)</label>
-        <input class="field-input" type="number" id="ep-margen" value="0" min="0" step="0.01">
-      </div>
-      <div class="field-group">
         <label class="field-label">PVP final cliente (€)</label>
         <input class="field-input" type="number" id="ep-pvp" value="0" min="0" step="0.01">
       </div>
@@ -7697,30 +7689,26 @@ async function guardarEventoPitusa() {
   const btn = document.querySelector('#modal-footer .btn-primary');
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando…'; }
 
-  const pvp         = parseFloat(document.getElementById('ep-pvp')?.value||0)||0;
-  const importePag  = parseFloat(document.getElementById('ep-importe-pagado')?.value||0)||0;
-  const pctPagado   = pvp > 0 ? Math.round(importePag/pvp*100) : 0;
+  const pvp        = parseFloat(document.getElementById('ep-pvp')?.value||0)||0;
+  const importePag = parseFloat(document.getElementById('ep-importe-pagado')?.value||0)||0;
 
+  // Solo columnas sin fórmulas en Sheets
+  // Excluidos: Id (A), Whatsapp (E), Margen gestión, % Pagado, Check Pago Reserva, Check Pago Total
   const fila = {
-    'Fecha solicitud':            new Date().toISOString().split('T')[0],
+    'Fecha solicitud':              new Date().toISOString().split('T')[0],
     'Cliente (Nombre y apellidos)': cliente,
-    'Teléfono':                   document.getElementById('ep-telefono')?.value.trim()||'',
-    'Whatsapp':                   document.getElementById('ep-whatsapp')?.value.trim()||'',
-    'Fecha evento':               fechaEvt,
-    'Lugar':                      document.getElementById('ep-lugar')?.value.trim()||'',
-    'Pax Niños':                  document.getElementById('ep-pax-ninos')?.value||'0',
-    'Pax Adultos':                document.getElementById('ep-pax-adultos')?.value||'0',
-    'Intereses':                  document.getElementById('ep-intereses')?.value.trim()||'',
-    'Proveedores':                document.getElementById('ep-proveedores')?.value.trim()||'',
-    'Coste Neto Total (€)':       document.getElementById('ep-coste')?.value||'0',
-    'Margen gestión':             document.getElementById('ep-margen')?.value||'0',
-    'PVP Final Cliente':          pvp,
-    'Estado':                     document.getElementById('ep-estado')?.value||'PRESUPUESTO',
-    'Importe Pagado':             importePag,
-    '% Pagado':                   pctPagado + '%',
-    'Check Pago Reserva':         importePag >= pvp*0.5 ? 'TRUE' : 'FALSE',
-    'Check Pago Total':           importePag >= pvp && pvp > 0 ? 'TRUE' : 'FALSE',
-    'Check Pago Proveedor':       'FALSE'
+    'Teléfono':                     document.getElementById('ep-telefono')?.value.trim()||'',
+    'Fecha evento':                 fechaEvt,
+    'Lugar':                        document.getElementById('ep-lugar')?.value.trim()||'',
+    'Pax Niños':                    document.getElementById('ep-pax-ninos')?.value||'0',
+    'Pax Adultos':                  document.getElementById('ep-pax-adultos')?.value||'0',
+    'Intereses':                    document.getElementById('ep-intereses')?.value.trim()||'',
+    'Proveedores':                  document.getElementById('ep-proveedores')?.value.trim()||'',
+    'Coste Neto Total (€)':         document.getElementById('ep-coste')?.value||'0',
+    'PVP Final Cliente':            pvp,
+    'Estado':                       document.getElementById('ep-estado')?.value||'PRESUPUESTO',
+    'Importe Pagado':               importePag,
+    'Check Pago Proveedor':         'FALSE'
   };
 
   closeModal();
@@ -7728,7 +7716,9 @@ async function guardarEventoPitusa() {
     const res = await writeToSheet('EVENTOS PITUSA', fila);
     if (res && res.ok && !res.demo) {
       showToast('✅ Evento guardado', 'success', 4000);
-      recargarPitusa();
+      await recargarPitusa();
+    } else if (res && res.queued) {
+      showToast('📵 Sin conexión — evento guardado localmente', 'warning', 5000);
     } else {
       showToast('❌ Error: ' + (res?.error||'sin respuesta'), 'error', 6000);
     }

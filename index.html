@@ -3370,6 +3370,7 @@ async function guardarInscripcion() {
 function pagos() {
   addTopbarBtn('+ Registrar pago', () => modalNuevoPago(), 'btn-primary');
   addTopbarBtn('🔄 Actualizar', () => syncPagos(), 'btn-secondary');
+  addTopbarBtn('⚠️ Impagos', () => gestionImpagos(), 'btn-secondary');
   let filtered = [...DB.pagos].sort((a,b) => new Date(b.fecha||0) - new Date(a.fecha||0));
   const totalIng = filtered.filter(p=>(p.estado||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+p.totalRecibido,0);
   const totalPend = filtered.filter(p=>(p.estado||'').toUpperCase()!=='PAGADO').reduce((s,p)=>s+(p.totalEsperado-p.totalRecibido),0);
@@ -3502,6 +3503,139 @@ async function marcarPagado(id) {
   pagos();
   updateBadges();
   showToast(`Pago ${id} marcado como cobrado ✓`, 'success');
+}
+
+function gestionImpagos() {
+  const MESES = ['enero','febrero','marzo','abril','mayo','junio',
+                 'julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const mesActual = MESES[new Date().getMonth()];
+  const anyoActual = new Date().getFullYear();
+
+  // Modal selector de mes
+  openModal('⚠️ Gestión de impagos', `
+    <div class="field-group">
+      <label class="field-label">Mes a revisar</label>
+      <select class="field-select" id="imp-mes">
+        ${MESES.map((m,i) => `<option value="${m}" ${m===mesActual?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)} ${anyoActual}</option>`).join('')}
+      </select>
+    </div>
+    <div style="font-size:12px;color:var(--grey-2);margin-top:.5rem">
+      Alumnos activos en Tecnificación o Recogida Temprana con modalidad mensual o por sesiones que no tienen pago registrado.
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="closeModal();_renderImpagos(document.getElementById('imp-mes').value, ${anyoActual})">🔍 Ver impagos</button>`
+  );
+}
+
+function _renderImpagos(mes, anyo) {
+  const SERVICIOS_OK  = ['TECNIF', 'RECOGIDA'];
+  const SERVICIOS_NO  = ['INGLÉS', 'INGLES', 'BAILE', 'MULTIDEPORTE'];
+  const MODALIDADES_OK = ['MENSUALIDAD', 'MENSUAL', '1 SESIÓN', '2 SESIONES', '3 SESIONES',
+                          '1 SESION', '2 SESIONES', '3 SESIONES'];
+
+  // 1. Inscripciones que DEBEN pagar
+  const inscDeben = DB.inscripciones.filter(i => {
+    if (i.estado !== 'ACTIVA') return false;
+    const serv = (i.servicio||'').toUpperCase();
+    const mod  = (i.modalidad||'').toUpperCase();
+    // Servicio correcto
+    if (!SERVICIOS_OK.some(s => serv.includes(s))) return false;
+    // Sin servicios excluidos
+    if (SERVICIOS_NO.some(s => serv.includes(s))) return false;
+    // Modalidad mensual o por sesiones
+    if (!MODALIDADES_OK.some(m => mod.includes(m))) return false;
+    return true;
+  });
+
+  // 2. Alumnos activos de esas inscripciones
+  const alumnosDeben = inscDeben.filter(i => {
+    const al = DB.alumnos.find(a => String(a.id) === String(i.alumnoId));
+    return al && al.activo;
+  });
+
+  // 3. Quién SÍ tiene pago PAGADO en el mes
+  const pagadosIds = new Set(
+    DB.pagos.filter(p =>
+      (p.mes||'').toLowerCase() === mes.toLowerCase() &&
+      (p.fecha ? new Date(p.fecha).getFullYear() : anyo) === anyo &&
+      (p.estado||'').toUpperCase() === 'PAGADO'
+    ).map(p => String(p.alumnoId))
+  );
+
+  // 4. Impagos = deben pagar Y no tienen PAGADO
+  const impagos = alumnosDeben.filter(i => !pagadosIds.has(String(i.alumnoId)));
+
+  const mesLabel = mes.charAt(0).toUpperCase() + mes.slice(1);
+
+  if (!impagos.length) {
+    document.getElementById('page-content').innerHTML =
+      `<div class="card" style="text-align:center;padding:3rem">
+        <div style="font-size:48px;margin-bottom:1rem">🎉</div>
+        <div style="font-size:18px;font-weight:700;color:var(--green)">Sin impagos en ${mesLabel}</div>
+        <div style="font-size:13px;color:var(--grey-2);margin-top:.5rem">Todos los alumnos tienen el pago registrado.</div>
+        <button class="btn btn-secondary" style="margin-top:1.5rem" onclick="pagos()">← Volver a pagos</button>
+      </div>`;
+    return;
+  }
+
+  // Construir filas
+  const filas = impagos.map(i => {
+    const al       = getAlumno(i.alumnoId);
+    const cliente  = getCliente(al.clienteId || i.clienteId || '');
+    const nombre   = al.nombre || '—';
+    const telRaw   = (cliente.telefono || '').replace(/[\s\-().]/g,'').replace(/^\+34/,'').replace(/^34/,'');
+    const msg      = encodeURIComponent(
+      `Hola, soy Samy de SM Fútbol. Te escribo porque no nos consta el pago de ${mesLabel} para ${nombre} en ${i.servicio}. ¿Podrías confirmarme si hay algún error? Gracias.`
+    );
+    const waUrl    = telRaw ? `https://wa.me/34${telRaw}?text=${msg}` : '';
+    const precio   = i.precio ? parseFloat(i.precio) : 0;
+
+    return `<tr>
+      <td>
+        <div style="font-weight:600">${nombre}</div>
+        <div style="font-size:11px;color:var(--grey-2)">${cliente.nombre||'—'}</div>
+      </td>
+      <td style="font-size:12px">${i.servicio||'—'}</td>
+      <td style="font-size:12px">${i.modalidad||'—'}</td>
+      <td style="font-weight:600;color:var(--green)">${precio ? fmtEur(precio) : '—'}</td>
+      <td>${waUrl
+        ? `<a href="${waUrl}" target="_blank"
+             style="display:inline-flex;align-items:center;gap:4px;background:#25D366;color:#fff;
+                    padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;text-decoration:none">
+             💬 WhatsApp</a>`
+        : '<span style="font-size:11px;color:var(--grey-2)">Sin teléfono</span>'
+      }</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('page-content').innerHTML = `
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+      <button class="btn btn-secondary btn-sm" onclick="pagos()">← Volver</button>
+      <div>
+        <div style="font-size:16px;font-weight:700">Impagos · ${mesLabel} ${anyo}</div>
+        <div style="font-size:12px;color:var(--grey-2)">${impagos.length} alumno${impagos.length!==1?'s':''} sin pago registrado</div>
+      </div>
+      <div class="kpi-card" style="margin:0;padding:.5rem 1rem;flex-shrink:0">
+        <div class="kpi-label">Importe pendiente</div>
+        <div class="kpi-value red" style="font-size:20px">${fmtEur(impagos.reduce((s,i)=>s+(parseFloat(i.precio)||0),0))}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <span>⚠️</span>
+        <div class="card-title">Alumnos sin pago · ${mesLabel}</div>
+        <span style="margin-left:auto;font-size:12px;color:var(--grey-2)">${impagos.length} registros</span>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table">
+          <thead><tr>
+            <th>Alumno / Familia</th><th>Servicio</th><th>Modalidad</th>
+            <th>Importe</th><th>Contacto</th>
+          </tr></thead>
+          <tbody>${filas}</tbody>
+        </table>
+      </div>
+    </div>`;
 }
 
 function modalNuevoPago() {

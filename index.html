@@ -3530,28 +3530,44 @@ function gestionImpagos() {
 function _renderImpagos(mes, anyo) {
   const SERVICIOS_OK  = ['TECNIF', 'RECOGIDA'];
   const SERVICIOS_NO  = ['INGLÉS', 'INGLES', 'BAILE', 'MULTIDEPORTE'];
-  const MODALIDADES_OK = ['MENSUALIDAD', 'MENSUAL', '1 SESIÓN', '2 SESIONES', '3 SESIONES',
-                          '1 SESION', '2 SESIONES', '3 SESIONES'];
+  const MODALIDADES_OK = ['1 SESIÓN / SEMANA', '2 SESIONES / SEMANA', '3 SESIONES / SEMANA',
+                          '1 SESION / SEMANA', '2 SESIONES / SEMANA', '3 SESIONES / SEMANA',
+                          'MENSUALIDAD', 'MENSUAL'];
+  const MODALIDADES_NO = ['SUELTA', 'PUNTUAL', 'ESPORÁD', 'ESPORAD'];
 
-  // 1. Inscripciones que DEBEN pagar
-  const inscDeben = DB.inscripciones.filter(i => {
+  // Prioridad de modalidad — más sesiones tiene prioridad sobre menos
+  const modPrioridad = mod => {
+    const m = (mod||'').toUpperCase();
+    if (m.includes('3')) return 3;
+    if (m.includes('2')) return 2;
+    if (m.includes('1')) return 1;
+    if (m.includes('MENSUAL')) return 1;
+    return 0;
+  };
+
+  // 1. Todas las inscripciones ACTIVAS que cumplen los filtros
+  const inscFiltradas = DB.inscripciones.filter(i => {
     if (i.estado !== 'ACTIVA') return false;
     const serv = (i.servicio||'').toUpperCase();
     const mod  = (i.modalidad||'').toUpperCase();
-    // Servicio correcto
     if (!SERVICIOS_OK.some(s => serv.includes(s))) return false;
-    // Sin servicios excluidos
     if (SERVICIOS_NO.some(s => serv.includes(s))) return false;
-    // Modalidad mensual o por sesiones
+    if (MODALIDADES_NO.some(m => mod.includes(m))) return false;
     if (!MODALIDADES_OK.some(m => mod.includes(m))) return false;
-    return true;
-  });
-
-  // 2. Alumnos activos de esas inscripciones
-  const alumnosDeben = inscDeben.filter(i => {
     const al = DB.alumnos.find(a => String(a.id) === String(i.alumnoId));
     return al && al.activo;
   });
+
+  // 2. Deduplicar por alumnoId — una sola inscripción por alumno
+  //    Si tiene varias activas, tomar la de mayor modalidad
+  const porAlumno = {};
+  inscFiltradas.forEach(i => {
+    const aid = String(i.alumnoId);
+    if (!porAlumno[aid] || modPrioridad(i.modalidad) > modPrioridad(porAlumno[aid].modalidad)) {
+      porAlumno[aid] = i;
+    }
+  });
+  const alumnosDeben = Object.values(porAlumno);
 
   // 3. Quién SÍ tiene pago PAGADO en el mes
   const pagadosIds = new Set(

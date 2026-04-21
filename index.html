@@ -1170,9 +1170,9 @@ function normalizarDB(raw) {
       .map((e, i) => {
         const pvp          = _fmtEur(e['PVP Final Cliente']);
         const importePag   = _fmtEur(e['Importe Pagado']);
-        // % Pagado: leer de Sheets (puede tener fórmula) y como fallback calcular
-        const pctRaw       = String(e['% Pagado']||'').replace('%','').replace(',','.').trim();
-        const pctPagado    = pctRaw !== '' ? (Math.round(parseFloat(pctRaw)) || 0) : (pvp > 0 ? Math.round(importePag / pvp * 100) : 0);
+        // % Pagado: siempre calcular desde importePag/pvp — más fiable que leer Sheets
+        // (Sheets puede devolver 0.12 o "12%" según formato de celda)
+        const pctPagado    = pvp > 0 ? Math.round(importePag / pvp * 100) : 0;
         const chkTotal     = String(e['Check Pago Total']    ||'').toUpperCase()==='TRUE' || pctPagado >= 100;
         const chkReserva   = chkTotal ? true : pctPagado >= 50;
         const chkProveedor = String(e['Check Pago Proveedor']||'').toUpperCase()==='TRUE';
@@ -7514,9 +7514,10 @@ function pitusaEventos() {
   // Función badge estado
   const estadoBadge = est => {
     const e = (est||'').toUpperCase();
-    if (e.includes('CONFIRM') || e.includes('ACTIV')) return '<span class="badge badge-green">'  + est + '</span>';
-    if (e.includes('REALIZ')  || e.includes('COMPLET'))return '<span class="badge badge-blue">'  + est + '</span>';
-    if (e.includes('CANCEL'))                           return '<span class="badge badge-red">'   + est + '</span>';
+    if (e === 'RESERVADO')     return '<span class="badge" style="background:#1b5e20;color:#fff">'  + est + '</span>';
+    if (e === 'NUEVO')         return '<span class="badge" style="background:#c62828;color:#fff">'  + est + '</span>';
+    if (e === 'PRESUPUESTADO') return '<span class="badge" style="background:#f57f17;color:#fff">'  + est + '</span>';
+    if (e === 'PENDIENTE')     return '<span class="badge" style="background:#1565c0;color:#fff">'  + est + '</span>';
     return '<span class="badge badge-orange">' + est + '</span>';
   };
 
@@ -7636,11 +7637,10 @@ function modalNuevoEventoPitusa() {
       <div class="field-group">
         <label class="field-label">Estado</label>
         <select class="field-select" id="ep-estado">
-          <option value="PRESUPUESTO">Presupuesto</option>
-          <option value="CONFIRMADO">Confirmado</option>
-          <option value="PENDIENTE">Pendiente</option>
-          <option value="REALIZADO">Realizado</option>
-          <option value="CANCELADO">Cancelado</option>
+          <option value="NUEVO">NUEVO</option>
+          <option value="PRESUPUESTADO">PRESUPUESTADO</option>
+          <option value="RESERVADO">RESERVADO</option>
+          <option value="PENDIENTE" selected>PENDIENTE</option>
         </select>
       </div>
       <div class="field-group full">

@@ -3806,7 +3806,8 @@ async function emitirFacturaVF(pagos, numFactura) {
   if (!pagos || !pagos.length) return null;
 
   const ahora       = new Date();
-  const fechaExp    = ahora.toISOString().split('T')[0];
+  const _isoVF      = ahora.toISOString().split('T')[0];
+  const fechaExp    = _isoVF.split('-').reverse().join('-'); // dd-mm-yyyy para AEAT
   const horaExp     = ahora.toTimeString().slice(0,8);
   const cliente     = getCliente(pagos[0].clienteId || '');
   const servicio    = pagos[0].servicio || '';
@@ -3946,7 +3947,8 @@ async function construirXMLVeriFactu(facturaId) {
   const descuento = pagos.reduce((s,p) => s + (p.descEur || 0), 0);
 
   const ahora   = new Date();
-  const fechaExp = ahora.toISOString().split('T')[0];
+  const _iso    = ahora.toISOString().split('T')[0]; // yyyy-mm-dd interno
+  const fechaExp = _iso.split('-').reverse().join('-'); // dd-mm-yyyy para AEAT
   const horaExp  = ahora.toTimeString().slice(0,8);
   const periodo  = pagos[0].mes
     ? (pagos[0].mes.charAt(0).toUpperCase() + pagos[0].mes.slice(1)) + ' ' +

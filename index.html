@@ -747,7 +747,7 @@ const SYNC_KEY = 'sm_last_sync';
 
 // URL del GAS hardcodeada como fallback para incógnito/móvil/dispositivos nuevos
 // Si existe en localStorage (guardada desde Configuración) tiene prioridad
-const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbzD19ttg07_UlDhLGx703rkLhOtMNGouOUap2NXiRg8N6Wi84-SHOs4tjOpS3uzcuEozQ/exec';
+const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxNyggKJbo9IgkpNImaH5TFTcRE4HsfEqXnoPaZiaThshwxW1HqWihPzlKdnpbU7tTfGA/exec';
 const GAS_URL_OLD = 'https://script.google.com/macros/s/AKfycbzOBn9pwpWRYL8MDm_xS-vYJNk2WGcJ2WluO24fgBmjtdUBHPkJ7G349fPR22cPSI8Qfg/exec';
 // Si el dispositivo tiene guardada la URL vieja → reemplazar por la nueva automáticamente
 if (localStorage.getItem(CONFIG_KEY) === GAS_URL_OLD ||
@@ -1204,6 +1204,23 @@ function normalizarDB(raw) {
       });
   } else {
     DB.eventosPitusa = DB.eventosPitusa || [];
+  }
+
+  // FACTURAS VeriFactu
+  if (raw.facturas && raw.facturas.length) {
+    DB.facturas = raw.facturas
+      .filter(f => f['Id Factura'])
+      .map(f => ({
+        idFactura:    String(f['Id Factura']||'').trim(),
+        fechaExp:     String(f['Fecha expedición']||'').split('T')[0],
+        total:        parseFloat(f['Total factura']||0)||0,
+        hashActual:   String(f['Hash actual']||'').trim(),
+        hashAnterior: String(f['Hash anterior']||'').trim(),
+        estadoAeat:   String(f['Estado Envío']||'PENDIENTE').trim(),
+        _raw: f
+      }));
+  } else {
+    DB.facturas = DB.facturas || [];
   }
 
   // PERSONAL — desde hoja PERSONAL
@@ -3728,6 +3745,174 @@ async function guardarPago() {
 /* ═══════════════════════════════════════════════════════════
    PAGE: FACTURAS
 ═══════════════════════════════════════════════════════════ */
+// ════════════════════════════════════════════════════════════
+// VERIFACTU — Motor de integridad y emisión AEAT
+// NIF Emisor: 45766626F — Antonio Samuel Martín Rivera
+// Serie: SM-26-XXXX | IGIC: 3% tecnificación / 7% extraescolares
+// ════════════════════════════════════════════════════════════
+
+const VF_NIF_EMISOR    = '45766626F';
+const VF_NOMBRE_EMISOR = 'Antonio Samuel Martín Rivera';
+const VF_VERSION       = '1.0';
+const VF_CLAVE_REGIMEN = '01';
+
+// SHA-256 nativo del browser — sin dependencias externas
+async function sha256hex(texto) {
+  const encoder = new TextEncoder();
+  const data     = encoder.encode(texto);
+  const hashBuf  = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hashBuf))
+    .map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// Cadena a firmar según esquema AEAT VeriFactu 1.0
+// Orden obligatorio: NIF|NumFactura|FechaExpedicion|TotalFactura|HashAnterior
+async function generarHashVF(numFactura, fechaExpedicion, totalFactura, hashAnterior) {
+  const cadena = [
+    VF_NIF_EMISOR,
+    numFactura,
+    fechaExpedicion,        // formato yyyy-MM-dd
+    totalFactura.toFixed(2),
+    hashAnterior || ''      // vacío en la primera factura
+  ].join('|');
+  return await sha256hex(cadena);
+}
+
+// Obtener el hash de la última factura emitida (para encadenamiento)
+function obtenerHashAnterior() {
+  // DB.facturas ordenadas por número — tomar el hash de la más reciente
+  if (!DB.facturas || !DB.facturas.length) return '';
+  const ultima = [...DB.facturas]
+    .filter(f => f.hashActual && f.hashActual.length === 64)
+    .sort((a,b) => (b.idFactura||'').localeCompare(a.idFactura||''));
+  return ultima.length ? ultima[0].hashActual : '';
+}
+
+// Determinar tipo IGIC según servicio
+function igicPorServicio(servicio) {
+  const s = (servicio||'').toUpperCase();
+  if (s.includes('RECOGIDA') || s.includes('MULTIDEPORTE') ||
+      s.includes('INGLÉS')   || s.includes('INGLES') ||
+      s.includes('BAILE')    || s.includes('EXTRAESCOLAR')) {
+    return 7;
+  }
+  return 3; // Tecnificación y resto
+}
+
+// Emitir una factura VeriFactu completa
+// pagos: array de pagos del mismo cliente/periodo
+// Returns: objeto factura listo para escribir en hoja FACTURAS
+async function emitirFacturaVF(pagos, numFactura) {
+  if (!pagos || !pagos.length) return null;
+
+  const ahora       = new Date();
+  const fechaExp    = ahora.toISOString().split('T')[0];
+  const horaExp     = ahora.toTimeString().slice(0,8);
+  const cliente     = getCliente(pagos[0].clienteId || '');
+  const servicio    = pagos[0].servicio || '';
+  const tipoIgic    = igicPorServicio(servicio);
+  const periodo     = pagos[0].mes
+    ? (pagos[0].mes.charAt(0).toUpperCase() + pagos[0].mes.slice(1)) +
+      ' ' + (pagos[0].fecha ? new Date(pagos[0].fecha).getFullYear() : new Date().getFullYear())
+    : '';
+
+  // Importes
+  const base        = pagos.reduce((s,p) => s + (p.base || 0), 0);
+  const cuotaIgic   = pagos.reduce((s,p) => s + (p.igicEur || 0), 0);
+  const total       = pagos.reduce((s,p) => s + (p.totalEsperado || 0), 0);
+  const descuento   = pagos.reduce((s,p) => s + (p.descEur || 0), 0);
+
+  // Hash VeriFactu
+  const hashAnterior = obtenerHashAnterior();
+  const hashActual   = await generarHashVF(numFactura, fechaExp, total, hashAnterior);
+  const tsHuella     = ahora.toISOString().replace('T',' ').substring(0,19);
+
+  // Descripción
+  const alumnos = [...new Set(pagos.map(p => {
+    const al = getAlumno(p.alumnoId);
+    return al.nombre || '';
+  }).filter(Boolean))].join(', ');
+  const descripcion = `${servicio} — ${periodo}${alumnos ? ' — ' + alumnos : ''}`;
+
+  return {
+    // Identificación
+    'Id Factura':              numFactura,
+    'Fecha expedición':        fechaExp,
+    'Hora expedición':         horaExp,
+    'Fecha operación':         pagos[0].fecha ? pagos[0].fecha.split('T')[0] : fechaExp,
+    'Tipo factura':            'F',
+    // Emisor
+    'NIF Emisor':              VF_NIF_EMISOR,
+    'Nombre emisor':           VF_NOMBRE_EMISOR,
+    // Receptor
+    'NIF Receptor':            cliente.nif || '',
+    'Nombre receptor':         cliente.nombre || '',
+    // Importes — solo el tipo IGIC correcto
+    'Base exenta':             '',
+    'Causa exención':          '',
+    'Base imponible 3':        tipoIgic === 3 ? base.toFixed(2) : '',
+    'Tipo IGIC 3':             tipoIgic === 3 ? 3 : '',
+    'Cuota IGIC 3':            tipoIgic === 3 ? cuotaIgic.toFixed(2) : '',
+    'Base imponible 7':        tipoIgic === 7 ? base.toFixed(2) : '',
+    'Tipo IGIC 7':             tipoIgic === 7 ? 7 : '',
+    'Cuota IGIC 7':            tipoIgic === 7 ? cuotaIgic.toFixed(2) : '',
+    'Importe recargo':         '',
+    'Importe retención IRPF':  '',
+    'Descuento €':             descuento > 0 ? descuento.toFixed(2) : '',
+    'Total factura':           total.toFixed(2),
+    // Régimen y descripción
+    'Clave régimen':           VF_CLAVE_REGIMEN,
+    'Descripción operación':   descripcion,
+    // Rectificación
+    'Id Factura rectificada':  '',
+    'Motivo rectificación':    '',
+    // VeriFactu — integridad
+    'Hash anterior':           hashAnterior,
+    'Hash actual':             hashActual,
+    'Fecha alta sistema':      tsHuella,
+    'Num Registro inalterable': hashActual.substring(0,16).toUpperCase(),
+    'Indicador Verifactu':     'S',
+    'Versión Esquema':         VF_VERSION,
+    // Estado AEAT
+    'Estado Envío':            'PENDIENTE',
+    'Código error AEAT':       '',
+    'CSV Respuesta':           '',
+    'URL QR':                  '',
+    'Certificado Huella':      ''
+  };
+}
+
+// Emitir y guardar en hoja FACTURAS
+async function emitirYGuardarFactura(pagos, numFactura) {
+  const fila = await emitirFacturaVF(pagos, numFactura);
+  if (!fila) return null;
+  const res = await writeToSheet('FACTURAS', fila);
+  if (res && res.ok && !res.demo) {
+    showToast(`✅ Factura ${numFactura} emitida y registrada en VeriFactu`, 'success', 5000);
+  }
+  return fila;
+}
+
+// Vista previa del hash antes de emitir
+async function previstaHashVF(numFactura, fechaExp, total) {
+  const hashAnterior = obtenerHashAnterior();
+  const hash         = await generarHashVF(numFactura, fechaExp, total, hashAnterior);
+  openModal('🔐 Vista previa VeriFactu', `
+    <div style="font-family:monospace;font-size:11px;background:#f5f5f5;padding:1rem;border-radius:8px">
+      <div style="margin-bottom:.5rem"><strong>Factura:</strong> ${numFactura}</div>
+      <div style="margin-bottom:.5rem"><strong>NIF Emisor:</strong> ${VF_NIF_EMISOR}</div>
+      <div style="margin-bottom:.5rem"><strong>Fecha:</strong> ${fechaExp}</div>
+      <div style="margin-bottom:.5rem"><strong>Total:</strong> ${total.toFixed(2)} €</div>
+      <div style="margin-bottom:.5rem"><strong>Hash anterior:</strong> ${hashAnterior ? hashAnterior.substring(0,20)+'...' : '— (primera factura)'}</div>
+      <div style="word-break:break-all;background:#e8f5e9;padding:.5rem;border-radius:4px;margin-top:.75rem">
+        <div style="font-size:10px;color:#2e7d32;font-weight:700;margin-bottom:4px">HASH SHA-256 GENERADO:</div>
+        ${hash}
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`
+  );
+}
+
 function facturas() {
   const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
   addTopbarBtn('Generar pendientes', () => generarTodasFacturas(), 'btn-primary');

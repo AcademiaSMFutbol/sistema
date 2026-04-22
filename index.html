@@ -2941,7 +2941,7 @@ function clientes() {
     </div>
     <div class="card">
       <div class="table-wrap"><table>
-        <thead><tr><th>Cliente</th><th>Teléfono</th><th>Alumnos</th><th>Estado</th><th></th></tr></thead>
+        <thead><tr><th>Cliente</th><th>Teléfono</th><th>Alumnos</th><th>Estado</th><th>VeriFactu</th><th></th></tr></thead>
         <tbody id="clientes-table"></tbody>
       </table></div>
     </div>`;
@@ -3913,6 +3913,193 @@ async function previstaHashVF(numFactura, fechaExp, total) {
   );
 }
 
+// ════════════════════════════════════════════════════════════
+// VERIFACTU — Generación XML AEAT + QR
+// ════════════════════════════════════════════════════════════
+
+// URL QR oficial AEAT VeriFactu
+function urlQRVeriFactu(numFactura, fechaExp, total) {
+  return 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR' +
+    '?nif='      + encodeURIComponent(VF_NIF_EMISOR) +
+    '&numserie=' + encodeURIComponent(numFactura) +
+    '&fecha='    + encodeURIComponent(fechaExp) +
+    '&importe='  + parseFloat(total).toFixed(2);
+}
+
+// Generar QR como imagen SVG usando API pública qrserver
+function imgQRVeriFactu(url) {
+  const encoded = encodeURIComponent(url);
+  return 'https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=' + encoded;
+}
+
+// Construir XML VeriFactu según esquema LRFACT v1.0 AEAT
+async function construirXMLVeriFactu(facturaId) {
+  const pagos = DB.pagos.filter(p => p.facturaId === facturaId);
+  if (!pagos.length) return null;
+
+  const cliente   = getCliente(pagos[0].clienteId || '');
+  const servicio  = pagos[0].servicio || '';
+  const tipoIgic  = igicPorServicio(servicio);
+  const base      = pagos.reduce((s,p) => s + (p.base    || 0), 0);
+  const cuota     = pagos.reduce((s,p) => s + (p.igicEur || 0), 0);
+  const total     = pagos.reduce((s,p) => s + (p.totalEsperado || 0), 0);
+  const descuento = pagos.reduce((s,p) => s + (p.descEur || 0), 0);
+
+  const ahora   = new Date();
+  const fechaExp = ahora.toISOString().split('T')[0];
+  const horaExp  = ahora.toTimeString().slice(0,8);
+  const periodo  = pagos[0].mes
+    ? (pagos[0].mes.charAt(0).toUpperCase() + pagos[0].mes.slice(1)) + ' ' +
+      (pagos[0].fecha ? new Date(pagos[0].fecha).getFullYear() : ahora.getFullYear())
+    : '';
+
+  const hashAnterior = obtenerHashAnterior();
+  const hashActual   = await generarHashVF(facturaId, fechaExp, total, hashAnterior);
+  const urlQR        = urlQRVeriFactu(facturaId, fechaExp, total);
+
+  const bloqueIgic = tipoIgic === 3
+    ? `<DetalleIVA>
+        <TipoImpositivo>3.00</TipoImpositivo>
+        <BaseImponible>${base.toFixed(2)}</BaseImponible>
+        <CuotaRepercutida>${cuota.toFixed(2)}</CuotaRepercutida>
+      </DetalleIVA>`
+    : `<DetalleIVA>
+        <TipoImpositivo>7.00</TipoImpositivo>
+        <BaseImponible>${base.toFixed(2)}</BaseImponible>
+        <CuotaRepercutida>${cuota.toFixed(2)}</CuotaRepercutida>
+      </DetalleIVA>`;
+
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<T:RegFactuSistemaFacturacion xmlns:T="https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tike/cont/ws/SistemaFacturacion.xsd">
+  <T:Cabecera>
+    <T:ObligadoEmision>
+      <T:NIF>${VF_NIF_EMISOR}</T:NIF>
+      <T:NombreRazon>${VF_NOMBRE_EMISOR}</T:NombreRazon>
+    </T:ObligadoEmision>
+  </T:Cabecera>
+  <T:RegistroFactura>
+    <T:RegistroAlta>
+      <T:IDVersion>${VF_VERSION}</T:IDVersion>
+      <T:IDFactura>
+        <T:IDEmisorFactura>${VF_NIF_EMISOR}</T:IDEmisorFactura>
+        <T:NumSerieFactura>${facturaId}</T:NumSerieFactura>
+        <T:FechaExpedicionFactura>${fechaExp}</T:FechaExpedicionFactura>
+      </T:IDFactura>
+      <T:NombreRazonEmisor>${VF_NOMBRE_EMISOR}</T:NombreRazonEmisor>
+      <T:TipoFactura>F1</T:TipoFactura>
+      <T:DescripcionOperacion>${servicio}${periodo ? ' - ' + periodo : ''}</T:DescripcionOperacion>
+      <T:Destinatarios>
+        <T:IDDestinatario>
+          <T:NombreRazon>${cliente.nombre || ''}</T:NombreRazon>
+          ${cliente.nif ? '<T:NIF>' + cliente.nif + '</T:NIF>' : '<T:IDOtro><T:ID>NO_IDENTIFICADO</T:ID></T:IDOtro>'}
+        </T:IDDestinatario>
+      </T:Destinatarios>
+      <T:Desglose>
+        <T:DesgloseFactura>
+          <T:Sujeta>
+            <T:NoExenta>
+              <T:TipoNoExenta>S1</T:TipoNoExenta>
+              <T:DesgloseIVA>
+                ${bloqueIgic}
+              </T:DesgloseIVA>
+            </T:NoExenta>
+          </T:Sujeta>
+        </T:DesgloseFactura>
+      </T:Desglose>
+      ${descuento > 0 ? '<T:ImporteTotal>' + (-(descuento)).toFixed(2) + '</T:ImporteTotal>' : ''}
+      <T:CuotaTotal>${cuota.toFixed(2)}</T:CuotaTotal>
+      <T:ImporteTotal>${total.toFixed(2)}</T:ImporteTotal>
+      <T:Encadenamiento>
+        ${hashAnterior
+          ? '<T:EncadenamientoFacturaAnterior><T:IDEmisorFacturaAnterior>' + VF_NIF_EMISOR + '</T:IDEmisorFacturaAnterior><T:NumSerieFacturaAnterior>' + (DB.facturas.find(f=>f.hashActual===hashAnterior)?.idFactura||'') + '</T:NumSerieFacturaAnterior><T:FechaExpedicionFacturaAnterior>' + fechaExp + '</T:FechaExpedicionFacturaAnterior><T:Huella>' + hashAnterior + '</T:Huella></T:EncadenamientoFacturaAnterior>'
+          : '<T:PrimerRegistro>S</T:PrimerRegistro>'}
+      </T:Encadenamiento>
+      <T:SistemaInformatico>
+        <T:NombreRazon>SM Academia</T:NombreRazon>
+        <T:NIF>${VF_NIF_EMISOR}</T:NIF>
+        <T:NombreSistemaInformatico>SM Academia ERP</T:NombreSistemaInformatico>
+        <T:IdSistemaInformatico>SMACAD01</T:IdSistemaInformatico>
+        <T:Version>1.0</T:Version>
+        <T:NumeroInstalacion>SM-LPA-001</T:NumeroInstalacion>
+        <T:TipoUsoPosibleSoloVerifactu>S</T:TipoUsoPosibleSoloVerifactu>
+        <T:TipoUsoPosibleMultiOT>N</T:TipoUsoPosibleMultiOT>
+        <T:IndicadorMultiplesOT>N</T:IndicadorMultiplesOT>
+      </T:SistemaInformatico>
+      <T:FechaHoraHusoHorarioGeneration>${fechaExp}T${horaExp}+01:00</T:FechaHoraHusoHorarioGeneration>
+      <T:NumRegistro>1</T:NumRegistro>
+      <T:Huella>${hashActual}</T:Huella>
+      <T:URL_QR>${urlQR}</T:URL_QR>
+    </T:RegistroAlta>
+  </T:RegistroFactura>
+</T:RegFactuSistemaFacturacion>`;
+
+  return { xml, hashActual, hashAnterior, urlQR, fechaExp, horaExp, total, base, cuota, tipoIgic, cliente, periodo };
+}
+
+// Descargar XML + mostrar modal con QR
+async function generarXMLVeriFactu(facturaId) {
+  showToast('Generando XML VeriFactu...', 'info', 2000);
+
+  const resultado = await construirXMLVeriFactu(facturaId);
+  if (!resultado) { showToast('Factura no encontrada', 'error'); return; }
+
+  const { xml, hashActual, urlQR, fechaExp, total, base, cuota, tipoIgic, cliente, periodo } = resultado;
+  const qrImg = imgQRVeriFactu(urlQR);
+
+  // Descargar XML automáticamente
+  const blob = new Blob([xml], { type: 'application/xml' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = facturaId + '_VeriFactu.xml';
+  a.click();
+  URL.revokeObjectURL(url);
+
+  // Modal con resumen y QR
+  openModal('VeriFactu · ' + facturaId,
+    `<div style="display:grid;grid-template-columns:1fr auto;gap:1rem;align-items:start">
+      <div>
+        <div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">
+          XML descargado — fírmalo con <strong>Autofirma</strong> y súbelo al portal AEAT
+        </div>
+        <table style="font-size:12px;width:100%;border-collapse:collapse">
+          <tr><td style="padding:4px 0;color:var(--grey-2)">Factura</td><td><strong>${facturaId}</strong></td></tr>
+          <tr><td style="padding:4px 0;color:var(--grey-2)">Cliente</td><td>${cliente.nombre||'—'}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--grey-2)">Periodo</td><td>${periodo}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--grey-2)">Base ${tipoIgic}% IGIC</td><td>${fmtEur(base)}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--grey-2)">Cuota IGIC</td><td>${fmtEur(cuota)}</td></tr>
+          <tr><td style="padding:4px 0;color:var(--grey-2)">Total</td><td><strong style="color:var(--green)">${fmtEur(total)}</strong></td></tr>
+          <tr><td style="padding:4px 0;color:var(--grey-2)">Fecha</td><td>${fechaExp}</td></tr>
+        </table>
+        <div style="margin-top:1rem;padding:.75rem;background:#f5f5f5;border-radius:8px">
+          <div style="font-size:10px;color:var(--grey-2);margin-bottom:4px;font-weight:600">HASH SHA-256</div>
+          <div style="font-size:10px;font-family:monospace;word-break:break-all;color:#333">${hashActual}</div>
+        </div>
+      </div>
+      <div style="text-align:center;flex-shrink:0">
+        <img src="${qrImg}" width="120" height="120" style="border:1px solid #eee;border-radius:8px"
+             onerror="this.style.display='none'">
+        <div style="font-size:10px;color:var(--grey-2);margin-top:4px">QR VeriFactu</div>
+        <a href="${urlQR}" target="_blank"
+           style="font-size:10px;color:var(--green);display:block;margin-top:4px">Verificar en AEAT</a>
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+     <button class="btn btn-primary" onclick="window.open('${urlQR}','_blank')">🔗 Portal AEAT</button>`
+  );
+
+  // Guardar hash en DB.facturas si no existe
+  if (!DB.facturas) DB.facturas = [];
+  const existe = DB.facturas.find(f => f.idFactura === facturaId);
+  if (!existe) {
+    DB.facturas.push({ idFactura: facturaId, fechaExp, total, hashActual, estadoAeat: 'PENDIENTE' });
+    saveCacheLocal();
+  }
+
+  // Escribir en hoja FACTURAS de Sheets
+  await emitirYGuardarFactura(DB.pagos.filter(p=>p.facturaId===facturaId), facturaId);
+}
+
 function facturas() {
   const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
   addTopbarBtn('Generar pendientes', () => generarTodasFacturas(), 'btn-primary');
@@ -3946,7 +4133,7 @@ function facturas() {
             <td><span class="badge badge-grey">${f.pagos.length} pago(s)</span></td>
             <td><strong>${fmtEur(f.total)}</strong></td>
             <td><span class="badge badge-green">Emitida</span></td>
-            <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button></td>
+            <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button> <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();generarXMLVeriFactu('${f.id}')">XML</button></td>
           </tr>`).join('') || `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">Sin facturas emitidas</div></div></td></tr>`}
         </tbody>
       </table></div>
@@ -3981,7 +4168,7 @@ function facturas() {
       <td><span class="badge badge-grey">${f.pagos.length} pago(s)</span></td>
       <td><strong>${fmtEur(f.total)}</strong></td>
       <td><span class="badge badge-green">Emitida</span></td>
-      <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button> <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();generarXMLVeriFactu('${f.id}')">XML</button></td>
     </tr>`).join('') || '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">Sin facturas</div></div></td></tr>';
   };
 }

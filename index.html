@@ -4291,16 +4291,14 @@ function modalAlquilerCuevas() {
   const ahora    = new Date();
   const mesAct   = ahora.getFullYear() + '-' + String(ahora.getMonth()+1).padStart(2,'0');
 
-  // Construir opciones de meses con datos disponibles
+  // Construir opciones con TODOS los meses que tienen sesiones (no solo Cuevas)
+  // así marzo aparece aunque tenga pocas filas o el LUGAR venga con variación
+  const rawSes = (window._rawDB && window._rawDB.sesiones) || [];
   const mesesDisp = [...new Set(
-    (window._rawDB && window._rawDB.sesiones || [])
-      .filter(s => (String(s.LUGAR||'').trim().toLowerCase().includes('cuevas')))
+    rawSes
       .map(s => String(s.FECHA||'').slice(0,7))
-      .filter(Boolean)
+      .filter(m => /^\d{4}-\d{2}$/.test(m))
   )].sort().reverse();
-
-  // Añadir mes actual si no está
-  if (!mesesDisp.includes(mesAct)) mesesDisp.unshift(mesAct);
 
   const optsMes = mesesDisp.map(m => {
     const [y, mo] = m.split('-');
@@ -4339,9 +4337,11 @@ function calcularAlquilerCuevas() {
   const PRECIO = 1.5;
 
   // Filtrar filas de Cuevas Torres en el mes seleccionado
+  // Cubre: "Cuevas Torres", "Cancha Cuevas Torres", "cuevas torres", etc.
   const filasCuevas = raw.filter(s => {
     const fecha = String(s.FECHA||'').slice(0,7);
-    const lugar = String(s.LUGAR||'').trim().toLowerCase();
+    const lugar = String(s.LUGAR||'').trim().toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, ''); // quitar tildes
     return fecha === mes && lugar.includes('cuevas');
   });
 

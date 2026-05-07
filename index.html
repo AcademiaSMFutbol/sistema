@@ -4354,21 +4354,22 @@ function calcularAlquilerCuevas() {
     return;
   }
 
-  // Agrupar por Nº de sesión — contar alumnos únicos por sesión
+  // Agrupar por Nº de sesión — si está vacío, usar fecha como clave
   const sesiones = {};
   filasCuevas.forEach(s => {
     const num    = String(s['Nº']||'').trim();
+    const fecha  = String(s.FECHA||'').split('T')[0];
     const alumno = String(s.ALUMNO||'').trim();
-    if (!num) return;
-    if (!sesiones[num]) {
-      sesiones[num] = {
-        num,
-        fecha:   String(s.FECHA||'').split('T')[0],
-        grupo:   String(s.GRUPO||'').trim(),
+    const clave  = num ? 'N_' + num : 'F_' + fecha; // Nº si existe, fecha si no
+    if (!sesiones[clave]) {
+      sesiones[clave] = {
+        num:    num || '—',
+        fecha,
+        grupo:  String(s.GRUPO||'').trim(),
         alumnos: new Set()
       };
     }
-    if (alumno) sesiones[num].alumnos.add(alumno);
+    if (alumno) sesiones[clave].alumnos.add(alumno);
   });
 
   const listaSesiones = Object.values(sesiones)

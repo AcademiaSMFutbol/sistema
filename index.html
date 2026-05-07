@@ -933,7 +933,11 @@ function getFotoMonitor(nombre) {
 
 function normalizarDB(raw) {
 
-  // CLIENTES: NOMBRE + APELLIDOS → nombre completo, ID_CLIENTE → id
+  // Preservar raw.sesiones para cálculos que necesitan nivel de fila (ej. alquiler Cuevas)
+  if (raw.sesiones) {
+    window._rawDB = window._rawDB || {};
+    window._rawDB.sesiones = raw.sesiones;
+  }
   if (raw.clientes && raw.clientes.length) {
     DB.clientes = raw.clientes.map(c => ({
       id: String(c.ID_CLIENTE),
@@ -4280,6 +4284,168 @@ function generarFacturaPago(pid) { navigate('facturas'); }
 /* ═══════════════════════════════════════════════════════════
    PAGE: SM FÚTBOL
 ═══════════════════════════════════════════════════════════ */
+// ════════════════════════════════════════════════════════════
+// ALQUILER CUEVAS TORRES
+// ════════════════════════════════════════════════════════════
+function modalAlquilerCuevas() {
+  const ahora    = new Date();
+  const mesAct   = ahora.getFullYear() + '-' + String(ahora.getMonth()+1).padStart(2,'0');
+
+  // Construir opciones de meses con datos disponibles
+  const mesesDisp = [...new Set(
+    (window._rawDB && window._rawDB.sesiones || [])
+      .filter(s => (String(s.LUGAR||'').trim().toLowerCase().includes('cuevas')))
+      .map(s => String(s.FECHA||'').slice(0,7))
+      .filter(Boolean)
+  )].sort().reverse();
+
+  // Añadir mes actual si no está
+  if (!mesesDisp.includes(mesAct)) mesesDisp.unshift(mesAct);
+
+  const optsMes = mesesDisp.map(m => {
+    const [y, mo] = m.split('-');
+    const nombre  = new Date(y, mo-1, 1)
+      .toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+    return `<option value="${m}">${nombre.charAt(0).toUpperCase()+nombre.slice(1)}</option>`;
+  }).join('');
+
+  openModal('Alquiler Cuevas Torres', `
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem">
+      <div>
+        <label class="field-label">Mes</label>
+        <select class="field-select" id="ct-mes" onchange="calcularAlquilerCuevas()" style="min-width:200px">
+          ${optsMes}
+        </select>
+      </div>
+      <div style="font-size:12px;color:var(--grey-2);margin-top:1.2rem">
+        Precio por jugador: <strong>1,50 €</strong>
+      </div>
+    </div>
+    <div id="ct-resultado"></div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+     <button class="btn btn-primary" onclick="copiarResumenCuevas()">📋 Copiar resumen</button>`
+  );
+
+  // Calcular al abrir
+  setTimeout(() => calcularAlquilerCuevas(), 50);
+}
+
+function calcularAlquilerCuevas() {
+  const mes     = document.getElementById('ct-mes')?.value;
+  const divRes  = document.getElementById('ct-resultado');
+  if (!mes || !divRes) return;
+
+  const raw = (window._rawDB && window._rawDB.sesiones) || [];
+  const PRECIO = 1.5;
+
+  // Filtrar filas de Cuevas Torres en el mes seleccionado
+  const filasCuevas = raw.filter(s => {
+    const fecha = String(s.FECHA||'').slice(0,7);
+    const lugar = String(s.LUGAR||'').trim().toLowerCase();
+    return fecha === mes && lugar.includes('cuevas');
+  });
+
+  if (!filasCuevas.length) {
+    divRes.innerHTML = `<div class="empty-state" style="padding:1.5rem">
+      <div class="empty-icon">📭</div>
+      <div class="empty-title">Sin sesiones en Cuevas Torres</div>
+      <div class="empty-desc">No hay sesiones registradas para este mes.</div>
+    </div>`;
+    return;
+  }
+
+  // Agrupar por Nº de sesión — contar alumnos únicos por sesión
+  const sesiones = {};
+  filasCuevas.forEach(s => {
+    const num    = String(s['Nº']||'').trim();
+    const alumno = String(s.ALUMNO||'').trim();
+    if (!num) return;
+    if (!sesiones[num]) {
+      sesiones[num] = {
+        num,
+        fecha:   String(s.FECHA||'').split('T')[0],
+        grupo:   String(s.GRUPO||'').trim(),
+        alumnos: new Set()
+      };
+    }
+    if (alumno) sesiones[num].alumnos.add(alumno);
+  });
+
+  const listaSesiones = Object.values(sesiones)
+    .sort((a,b) => a.fecha.localeCompare(b.fecha));
+
+  const totalJugadores = listaSesiones.reduce((s, ses) => s + ses.alumnos.size, 0);
+  const totalEur       = totalJugadores * PRECIO;
+
+  // Nombre del mes para el resumen
+  const [y, mo] = mes.split('-');
+  const nomMes  = new Date(y, mo-1, 1)
+    .toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+
+  // Tabla de sesiones
+  const filas = listaSesiones.map(ses => `
+    <tr>
+      <td style="padding:6px 8px;color:var(--grey-2)">${fmtDate(ses.fecha)}</td>
+      <td style="padding:6px 8px">${ses.grupo||'—'}</td>
+      <td style="padding:6px 8px;text-align:center"><strong>${ses.alumnos.size}</strong></td>
+      <td style="padding:6px 8px;text-align:right;color:var(--green)">${fmtEur(ses.alumnos.size * PRECIO)}</td>
+    </tr>`).join('');
+
+  divRes.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:1rem">
+      <thead>
+        <tr style="background:var(--bg-secondary);font-size:11px;text-transform:uppercase;color:var(--grey-2)">
+          <th style="padding:6px 8px;text-align:left">Fecha</th>
+          <th style="padding:6px 8px;text-align:left">Grupo</th>
+          <th style="padding:6px 8px;text-align:center">Jugadores</th>
+          <th style="padding:6px 8px;text-align:right">Coste</th>
+        </tr>
+      </thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:.5rem">
+      <div class="kpi-card" style="text-align:center;padding:1rem">
+        <div class="kpi-label">Sesiones</div>
+        <div class="kpi-value" style="font-size:1.6rem">${listaSesiones.length}</div>
+      </div>
+      <div class="kpi-card" style="text-align:center;padding:1rem">
+        <div class="kpi-label">Jugadores totales</div>
+        <div class="kpi-value" style="font-size:1.6rem">${totalJugadores}</div>
+      </div>
+      <div class="kpi-card" style="text-align:center;padding:1rem;background:var(--green);color:#fff">
+        <div class="kpi-label" style="color:rgba(255,255,255,.8)">Total a pagar</div>
+        <div class="kpi-value" style="font-size:1.6rem;color:#fff">${fmtEur(totalEur)}</div>
+      </div>
+    </div>`;
+
+  // Guardar para copiar
+  window._resumenCuevas = {
+    mes: nomMes,
+    sesiones: listaSesiones.length,
+    jugadores: totalJugadores,
+    total: totalEur,
+    detalle: listaSesiones.map(s =>
+      `${fmtDate(s.fecha)} (${s.grupo}): ${s.alumnos.size} jugadores — ${fmtEur(s.alumnos.size*PRECIO)}`
+    ).join('\n')
+  };
+}
+
+function copiarResumenCuevas() {
+  const r = window._resumenCuevas;
+  if (!r) return;
+  const txt = `Alquiler Cuevas Torres — ${r.mes}
+Sesiones: ${r.sesiones}
+Jugadores totales: ${r.jugadores}
+Precio/jugador: 1,50 €
+Total: ${fmtEur(r.total)}
+
+Detalle:
+${r.detalle}`;
+  navigator.clipboard.writeText(txt)
+    .then(() => showToast('Resumen copiado al portapapeles', 'success'))
+    .catch(() => showToast('No se pudo copiar', 'error'));
+}
+
 function futbol() {
   const role      = currentUser.role;
   const isMonitor = role === 'MONITOR';
@@ -4306,6 +4472,7 @@ function futbol() {
     return;
   } else {
     addTopbarBtn('+ Nueva sesión', () => modalNuevaSesion(), 'btn-primary');
+  addTopbarBtn('🏟️ Alquiler Cuevas Torres', () => modalAlquilerCuevas(), 'btn-secondary');
   }
 
   // Camino SM ranking

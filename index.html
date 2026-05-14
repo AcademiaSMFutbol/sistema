@@ -999,15 +999,6 @@ function normalizarDB(raw) {
         observaciones: a.OBSERVACIONES || '',
         totalInscripciones: a['TOTAL INSCRIPCIONES'] || 0,
         activo,
-        horasMes:    parseFloat(String(a['HORAS_MES']||0).replace(',','.'))||0,
-        precioHora:  parseFloat(String(a['PRECIO_HORA']||0).replace(',','.'))||0,
-        precioSMI:   parseFloat(String(a['PRECIO_SMI']||0).replace(',','.'))||0,
-        compDed:     parseFloat(String(a['COMPLEMENTO_DEDICACION']||0).replace(',','.'))||0,
-        nroNomina:   parseInt(a['NRO_NOMINA']||0)||0,
-        direccion:   String(a['DIRECCION']||'').trim(),
-        iban:        String(a['IBAN']||'').trim(),
-        antiguedad:  String(a['ANTIGÜEDAD']||a['ANTIGUEDAD']||'').trim(),
-        nAfiliacionSS: String(a['Nº AFILIACIÓN S.S.']||a['N AFILIACION S.S.']||'').trim(),
         // Campos que la app usa internamente (inferidos)
         actividad: '',   // se rellena desde inscripciones
         modalidad: '',
@@ -1297,6 +1288,21 @@ function normalizarDB(raw) {
           certDelitos,
           certVence,
           activo,
+          // Campos nómina
+          horasMes:      parseFloat(String(p['HORAS_MES']||0).replace(',','.'))||0,
+          precioHora:    parseFloat(String(p['PRECIO_HORA']||0).replace(',','.'))||0,
+          precioSMI:     parseFloat(String(p['PRECIO_SMI']||0).replace(',','.'))||0,
+          compDed:       parseFloat(String(p['COMPLEMENTO_DEDICACION']||0).replace(',','.'))||0,
+          nroNomina:     parseInt(p['NRO_NOMINA']||0)||0,
+          direccion:     String(p['DIRECCION']||'').trim(),
+          iban:          String(p['IBAN']||'').trim(),
+          dni:           String(p['NIF_TRABAJADOR']||p['DNI']||'').trim(),
+          antiguedad:    String(p['ANTIGÜEDAD']||p['ANTIGUEDAD']||'').trim(),
+          nAfiliacionSS: String(
+            Object.entries(p).find(([k]) =>
+              k.replace(/[^A-Za-z0-9]/g,'').toUpperCase().includes('NAFILIACION')
+            )?.[1] || ''
+          ).trim(),
           actividades: [],
           _raw: p
         };

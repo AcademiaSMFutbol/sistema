@@ -952,8 +952,10 @@ function getFotoMonitor(nombre) {
 function normalizarDB(raw) {
 
   // CONFIG_NOMINAS — parámetros de nóminas
-  if (raw.configNominas && raw.configNominas.length) {
-    DB.configNominas = raw.configNominas.filter(r => r.PARAMETRO);
+  // GAS convierte nombre a lowercase: CONFIG_NOMINAS → config_nominas
+  const rawCfg = raw.configNominas || raw['config_nominas'] || raw.CONFIG_NOMINAS || [];
+  if (rawCfg.length) {
+    DB.configNominas = rawCfg.filter(r => r.PARAMETRO);
   } else {
     DB.configNominas = DB.configNominas || [];
   }

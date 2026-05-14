@@ -1,6 +1,21 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<!-- Google Analytics 4 — SM Academia App -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-JH2R25ZTLB"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-JH2R25ZTLB', {
+    page_title: 'SM Academia App',
+    send_page_view: true
+  });
+  // Helper para eventos personalizados
+  window.gaEvent = function(nombre, params) {
+    if (typeof gtag === 'function') gtag('event', nombre, params || {});
+  };
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SM Academia — Sistema 360°</title>
@@ -637,6 +652,9 @@ tbody tr:hover { background: #fafafa; }
         <div class="nav-item" onclick="navigate('personal')" data-page="personal">
           <span class="nav-icon">👥</span><span>Personal</span>
         </div>
+        <div class="nav-item" onclick="navigate('nominas')" data-page="nominas">
+          <span class="nav-icon">🧾</span><span>Nóminas</span>
+        </div>
         <div class="nav-item" onclick="navigate('registro-horario')" data-page="registro-horario">
           <span class="nav-icon">🕐</span><span>Reg. Horario</span>
         </div>
@@ -747,7 +765,7 @@ const SYNC_KEY = 'sm_last_sync';
 
 // URL del GAS hardcodeada como fallback para incógnito/móvil/dispositivos nuevos
 // Si existe en localStorage (guardada desde Configuración) tiene prioridad
-const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbxNyggKJbo9IgkpNImaH5TFTcRE4HsfEqXnoPaZiaThshwxW1HqWihPzlKdnpbU7tTfGA/exec';
+const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbwZOhEUs3dbIGGWLEdx5gMMFD7L85B5yyIdxwRqdZkZcikYNwC7cH3bPiGGudOfBko7zQ/exec';
 const GAS_URL_OLD = 'https://script.google.com/macros/s/AKfycbzOBn9pwpWRYL8MDm_xS-vYJNk2WGcJ2WluO24fgBmjtdUBHPkJ7G349fPR22cPSI8Qfg/exec';
 // Si el dispositivo tiene guardada la URL vieja → reemplazar por la nueva automáticamente
 if (localStorage.getItem(CONFIG_KEY) === GAS_URL_OLD ||
@@ -933,6 +951,13 @@ function getFotoMonitor(nombre) {
 
 function normalizarDB(raw) {
 
+  // CONFIG_NOMINAS — parámetros de nóminas
+  if (raw.configNominas && raw.configNominas.length) {
+    DB.configNominas = raw.configNominas.filter(r => r.PARAMETRO);
+  } else {
+    DB.configNominas = DB.configNominas || [];
+  }
+
   // Preservar raw.sesiones para cálculos que necesitan nivel de fila (ej. alquiler Cuevas)
   if (raw.sesiones) {
     window._rawDB = window._rawDB || {};
@@ -974,6 +999,15 @@ function normalizarDB(raw) {
         observaciones: a.OBSERVACIONES || '',
         totalInscripciones: a['TOTAL INSCRIPCIONES'] || 0,
         activo,
+        horasMes:    parseFloat(String(a['HORAS_MES']||0).replace(',','.'))||0,
+        precioHora:  parseFloat(String(a['PRECIO_HORA']||0).replace(',','.'))||0,
+        precioSMI:   parseFloat(String(a['PRECIO_SMI']||0).replace(',','.'))||0,
+        compDed:     parseFloat(String(a['COMPLEMENTO_DEDICACION']||0).replace(',','.'))||0,
+        nroNomina:   parseInt(a['NRO_NOMINA']||0)||0,
+        direccion:   String(a['DIRECCION']||'').trim(),
+        iban:        String(a['IBAN']||'').trim(),
+        antiguedad:  String(a['ANTIGÜEDAD']||a['ANTIGUEDAD']||'').trim(),
+        nAfiliacionSS: String(a['Nº AFILIACIÓN S.S.']||a['N AFILIACION S.S.']||'').trim(),
         // Campos que la app usa internamente (inferidos)
         actividad: '',   // se rellena desde inscripciones
         modalidad: '',
@@ -2023,6 +2057,7 @@ async function doLogin() {
   }
   currentUser = { role, name, initials: name.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase(), ts: Date.now() };
   localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
+  window.gaEvent('login', { rol: role });
   // Mostrar pantalla de carga y sincronizar antes de entrar
   lsShow();
   syncAllWithProgress().catch(e => {
@@ -2296,6 +2331,7 @@ const PAGE_META = {
   clientes:       { title: 'Clientes', sub: 'Gestión de tutores y familias' },
   alumnos:        { title: 'Alumnos', sub: 'Fichas y seguimiento individual' },
   inscripciones:  { title: 'Inscripciones', sub: 'Altas, bajas y contratos' },
+  nominas:        { title: 'Nóminas', sub: 'Generación y archivo de recibos de salario' },
   pagos:          { title: 'Pagos', sub: 'Control de cobros y morosidad' },
   facturas:       { title: 'Facturas', sub: 'Emisión y archivo VeriFactu' },
   futbol:         { title: 'SM Fútbol', sub: 'Sesiones, evaluaciones y Camino SM' },
@@ -2331,6 +2367,7 @@ function navigate(page) {
     return;
   }
   currentPage = page;
+  window.gaEvent('navegacion_seccion', { seccion: page, rol: currentUser?.role || 'FAMILIA' });
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.page === page);
   });
@@ -2347,7 +2384,8 @@ function renderCurrentPage() {
     dashboard, clientes, alumnos, inscripciones, pagos, facturas,
     futbol, extraescolares, personal, incidencias, informes, configuracion,
     'registro-horario': registroHorario,
-    pitusa: pitusaEventos
+    pitusa: pitusaEventos,
+    nominas: nominas
   };
   if (pages[currentPage]) pages[currentPage]();
 }
@@ -4045,6 +4083,7 @@ async function construirXMLVeriFactu(facturaId) {
 // Descargar XML + mostrar modal con QR
 async function generarXMLVeriFactu(facturaId) {
   showToast('Generando XML VeriFactu...', 'info', 2000);
+  window.gaEvent('descarga_factura_xml', { factura_id: facturaId });
 
   const resultado = await construirXMLVeriFactu(facturaId);
   if (!resultado) { showToast('Factura no encontrada', 'error'); return; }
@@ -4225,6 +4264,7 @@ async function huellaVerifactu(fid, total, fecha) {
 }
 
 async function descargarFacturaPdf(fid) {
+  window.gaEvent('descarga_factura_pdf', { factura_id: fid });
   const ps = DB.pagos.filter(p=>p.facturaId===fid);
   const c = getCliente(ps[0]?.clienteId||'');
   // Hash VeriFactu real (SHA-256 encadenado)
@@ -5941,6 +5981,444 @@ function asistencia() {
 /* ═══════════════════════════════════════════════════════════
    PAGE: PERSONAL
 ═══════════════════════════════════════════════════════════ */
+// ════════════════════════════════════════════════════════════
+// NÓMINAS — Generación de recibos de salario
+// Datos desde CONFIG_NOMINAS + PERSONAL de Sheets
+// ════════════════════════════════════════════════════════════
+
+function getCfgNomina(param) {
+  if (!DB.configNominas) return null;
+  const row = DB.configNominas.find(r => r.PARAMETRO === param);
+  return row ? row.VALOR : null;
+}
+
+function nominas() {
+  const role = currentUser.role;
+  if (role !== 'ADMIN') {
+    document.getElementById('page-content').innerHTML =
+      '<div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-title">Acceso restringido</div></div>';
+    return;
+  }
+
+  // Monitores activos con datos de nómina
+  const monitores = DB.personal.filter(p =>
+    p.activo && p.horasMes && p.precioHora
+  );
+
+  addTopbarBtn('+ Generar nóminas', () => modalGenerarNominas(), 'btn-primary');
+  addTopbarBtn('🔄 Actualizar', () => { sincronizarConfigNominas(); navigate('nominas'); }, 'btn-secondary');
+
+  const content = document.getElementById('page-content');
+
+  if (!DB.configNominas || !DB.configNominas.length) {
+    content.innerHTML = `<div class="empty-state">
+      <div class="empty-icon">⚙️</div>
+      <div class="empty-title">CONFIG_NOMINAS no cargada</div>
+      <div class="empty-desc">Pulsa Actualizar para sincronizar la configuración desde Sheets.</div>
+    </div>`;
+    return;
+  }
+
+  const ultimoNro = parseInt(getCfgNomina('ULTIMO_NRO_NOMINA')) || 0;
+
+  content.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem">
+      <div class="kpi-card">
+        <div class="kpi-label">Monitores activos</div>
+        <div class="kpi-value">${monitores.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Última nómina emitida</div>
+        <div class="kpi-value">Nº ${ultimoNro}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Próxima nómina</div>
+        <div class="kpi-value">Nº ${ultimoNro + 1}</div>
+      </div>
+    </div>
+
+    <div class="section-card">
+      <div class="section-card-title">Monitores</div>
+      <table class="data-table">
+        <thead><tr>
+          <th>Nombre</th><th>Horas/mes</th><th>Precio/h</th>
+          <th>Salario base</th><th>Coste empresa</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${monitores.map(p => {
+            const base    = (p.horasMes * p.precioHora).toFixed(2);
+            const ppExtra = (base / 6).toFixed(2);
+            const compSMI = (p.horasMes * (p.precioSMI || 0)).toFixed(2);
+            const compDed = parseFloat(getCfgNomina('COMP_DEDICACION') || 0);
+            const total   = (parseFloat(base) + parseFloat(ppExtra) + parseFloat(compSMI) + compDed).toFixed(2);
+            // Coste empresa
+            const ccEmp   = parseFloat(getCfgNomina('COT_CC_EMPRESA')       || 0) / 100;
+            const meiEmp  = parseFloat(getCfgNomina('COT_MEI_EMPRESA')       || 0) / 100;
+            const atEmp   = parseFloat(getCfgNomina('COT_ATEP_EMPRESA')      || 0) / 100;
+            const desEmp  = parseFloat(getCfgNomina('COT_DESEMPLEO_EMPRESA') || 0) / 100;
+            const fpEmp   = parseFloat(getCfgNomina('COT_FP_EMPRESA')        || 0) / 100;
+            const fogEmp  = parseFloat(getCfgNomina('COT_FOGASA_EMPRESA')    || 0) / 100;
+            const costeEmp = (parseFloat(total) * (1 + ccEmp + meiEmp + atEmp + desEmp + fpEmp + fogEmp)).toFixed(2);
+            return `<tr>
+              <td><strong>${p.nombre} ${p.apellidos}</strong><br>
+                  <span style="font-size:11px;color:var(--grey-2)">${p.actividad||''} · ${p.horasMes}h/mes</span></td>
+              <td>${p.horasMes}</td>
+              <td>${parseFloat(p.precioHora).toFixed(3)} €</td>
+              <td>${fmtEur(base)}</td>
+              <td>${fmtEur(costeEmp)}</td>
+              <td><button class="btn btn-primary btn-sm"
+                onclick="modalVistaPreviaNomina('${p.id}')">Ver nómina</button></td>
+            </tr>`;
+          }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--grey-2)">Sin monitores con datos de nómina completos</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+async function sincronizarConfigNominas() {
+  showToast('Sincronizando configuración...', 'info', 2000);
+  // Forzar recarga completa
+  await syncAll();
+}
+
+function modalGenerarNominas() {
+  const meses = [];
+  const hoy = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    meses.push({
+      val:  d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'),
+      txt:  d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+        .replace(/^\w/, c => c.toUpperCase())
+    });
+  }
+
+  const monitores = DB.personal.filter(p => p.activo && p.horasMes && p.precioHora);
+
+  openModal('Generar nóminas', `
+    <div style="display:grid;gap:1rem">
+      <div class="field-group">
+        <label class="field-label">Mes de la nómina *</label>
+        <select class="field-select" id="nom-mes">
+          ${meses.map(m => `<option value="${m.val}">${m.txt}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Monitores a incluir</label>
+        <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.25rem">
+          ${monitores.map(p => `
+            <label style="display:flex;align-items:center;gap:.5rem;font-size:13px">
+              <input type="checkbox" class="nom-check" value="${p.id}" checked>
+              ${p.nombre} ${p.apellidos} — ${p.horasMes}h
+            </label>`).join('')}
+        </div>
+      </div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="generarNominasSeleccionadas()">Generar PDF(s)</button>`
+  );
+}
+
+async function generarNominasSeleccionadas() {
+  const mes = document.getElementById('nom-mes')?.value;
+  const checks = [...document.querySelectorAll('.nom-check:checked')].map(c => c.value);
+  if (!mes || !checks.length) { showToast('Selecciona mes y al menos un monitor', 'error'); return; }
+
+  closeModal();
+  let nroActual = parseInt(getCfgNomina('ULTIMO_NRO_NOMINA')) || 0;
+
+  for (const pid of checks) {
+    nroActual++;
+    const p = DB.personal.find(m => m.id === pid);
+    if (!p) continue;
+    await generarPDFNomina(p, mes, nroActual);
+    await new Promise(r => setTimeout(r, 300)); // pequeña pausa entre PDFs
+  }
+
+  // Actualizar contador en Sheets
+  await writeToSheet('CONFIG_NOMINAS', {
+    PARAMETRO: 'ULTIMO_NRO_NOMINA',
+    VALOR: nroActual
+  });
+  showToast(`${checks.length} nómina(s) generada(s) correctamente`, 'success', 5000);
+}
+
+function modalVistaPreviaNomina(pid) {
+  const p = DB.personal.find(m => m.id === pid);
+  if (!p) return;
+  const hoy = new Date();
+  const mesVal = hoy.getFullYear() + '-' + String(hoy.getMonth()).padStart(2,'0');
+  const nroActual = (parseInt(getCfgNomina('ULTIMO_NRO_NOMINA')) || 0) + 1;
+
+  openModal('Vista previa — ' + p.nombre + ' ' + p.apellidos,
+    `<div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">
+      Mes actual. Para otros meses usa "Generar nóminas".
+    </div>
+    <div id="nomina-preview-wrap"></div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+     <button class="btn btn-primary" onclick="generarPDFNomina(
+       DB.personal.find(m=>m.id==='${pid}'),
+       '${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}',
+       ${nroActual}
+     )">Descargar PDF</button>`
+  );
+
+  // Renderizar preview
+  setTimeout(() => {
+    const wrap = document.getElementById('nomina-preview-wrap');
+    if (wrap) wrap.innerHTML = buildNominaHTML(p,
+      hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0'),
+      nroActual, true);
+  }, 50);
+}
+
+function buildNominaHTML(monitor, mes, nro, preview = false) {
+  // Parámetros desde CONFIG_NOMINAS
+  const cfg = k => parseFloat(getCfgNomina(k) || 0);
+  const cfgStr = k => String(getCfgNomina(k) || '');
+
+  const [anio, mesNum] = mes.split('-');
+  const diasMes = new Date(anio, mesNum, 0).getDate();
+  const primerDia = `01 ${new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'short'}).toUpperCase()} ${anio}`;
+  const ultimoDia = `${diasMes} ${new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'short'}).toUpperCase()} ${anio}`;
+  const fechaEmision = `${diasMes} ${new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'long'}).toUpperCase()} ${anio}`;
+  const nomMes = new Date(anio, mesNum-1, 1)
+    .toLocaleDateString('es-ES',{month:'long',year:'numeric'})
+    .replace(/^\w/, c => c.toUpperCase());
+
+  // Cálculo conceptos
+  const horasMes   = parseFloat(monitor.horasMes   || 0);
+  const precioH    = parseFloat(monitor.precioHora  || 0);
+  const precioSMI  = parseFloat(monitor.precioSMI   || 0);
+  const compDed    = cfg('COMP_DEDICACION');
+
+  const salBase    = horasMes * precioH;
+  const ppExtra    = salBase / 6;
+  const compSMI    = horasMes * precioSMI;
+  const totalDev   = salBase + ppExtra + compSMI + compDed;
+
+  // Deducciones trabajador
+  const pCC   = cfg('COT_CC_TRABAJADOR')        / 100;
+  const pMEI  = cfg('COT_MEI_TRABAJADOR')       / 100;
+  const pFP   = cfg('COT_FP_TRABAJADOR')        / 100;
+  const pDes  = cfg('COT_DESEMPLEO_TRABAJADOR') / 100;
+
+  const dedCC  = totalDev * pCC;
+  const dedMEI = totalDev * pMEI;
+  const dedFP  = totalDev * pFP;
+  const dedDes = totalDev * pDes;
+  const totalDed = dedCC + dedMEI + dedFP + dedDes;
+  const liquido  = totalDev - totalDed;
+
+  // Coste empresa
+  const eCC   = cfg('COT_CC_EMPRESA')           / 100;
+  const eMEI  = cfg('COT_MEI_EMPRESA')          / 100;
+  const eAT   = cfg('COT_ATEP_EMPRESA')         / 100;
+  const eDes  = cfg('COT_DESEMPLEO_EMPRESA')    / 100;
+  const eFP   = cfg('COT_FP_EMPRESA')           / 100;
+  const eFOG  = cfg('COT_FOGASA_EMPRESA')       / 100;
+
+  const apCC   = totalDev * eCC;
+  const apMEI  = totalDev * eMEI;
+  const apAT   = totalDev * eAT;
+  const apDes  = totalDev * eDes;
+  const apFP   = totalDev * eFP;
+  const apFOG  = totalDev * eFOG;
+  const costeEmp = totalDev + apCC + apMEI + apAT + apDes + apFP + apFOG;
+
+  const f2 = v => v.toFixed(2).replace('.', ',');
+  const f3 = v => v.toFixed(3).replace('.', ',');
+
+  const scale = preview ? 'transform:scale(0.6);transform-origin:top left;width:167%' : '';
+
+  return `<div style="font-family:'Courier New',monospace;font-size:10px;width:740px;border:1px solid #ccc;padding:12px;background:#fff;color:#000;${scale}">
+
+  <!-- Dirección trabajador -->
+  <div style="text-align:right;margin-bottom:8px;font-size:9px">
+    ${monitor.apellidos ? monitor.apellidos.toUpperCase() : ''} ${monitor.nombre ? monitor.nombre.toUpperCase() : ''}<br>
+    ${monitor.direccion || ''}<br>
+    35000 PALMAS DE GRAN CANAR<br>
+    LAS PALMAS
+  </div>
+
+  <!-- NIF empresa -->
+  <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+    <span>NIF. ${cfgStr('NIF_EMPRESA')}</span>
+    <span>${nro}</span>
+  </div>
+
+  <!-- Tabla cabecera -->
+  <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:2px">
+    <tr style="border:1px solid #000">
+      <td colspan="2" style="border:1px solid #000;padding:2px 4px"><strong>EMPRESA</strong></td>
+      <td colspan="3" style="border:1px solid #000;padding:2px 4px"><strong>DOMICILIO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;white-space:nowrap"><strong>Nº INS. S.S.</strong></td>
+    </tr>
+    <tr style="border:1px solid #000">
+      <td colspan="2" style="border:1px solid #000;padding:2px 4px">${cfgStr('NOMBRE_EMPRESA')}</td>
+      <td colspan="3" style="border:1px solid #000;padding:2px 4px">${cfgStr('DOMICILIO_EMPRESA')}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${cfgStr('NIF_SS_EMPRESA')}</td>
+    </tr>
+    <tr style="border:1px solid #000">
+      <td style="border:1px solid #000;padding:2px 4px"><strong>TRABAJADOR/A</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>CATEGORIA</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>NºMATRIC</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>ANTIGUEDAD</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>D.N.I.</strong></td>
+    </tr>
+    <tr style="border:1px solid #000">
+      <td style="border:1px solid #000;padding:2px 4px">${((monitor.apellidos||'')+' '+(monitor.nombre||'')).toUpperCase().substring(0,28)}</td>
+      <td style="border:1px solid #000;padding:2px 4px"></td>
+      <td style="border:1px solid #000;padding:2px 4px">MONITOR-AN</td>
+      <td style="border:1px solid #000;padding:2px 4px">${nro}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${monitor.antiguedad || ''}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${monitor.dni || ''}</td>
+    </tr>
+    <tr style="border:1px solid #000">
+      <td style="border:1px solid #000;padding:2px 4px"><strong>Nº AFILIACION. S.S.</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>TARIFA</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>COD.CT</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>SECCION</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>NRO.</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>PERIODO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;white-space:nowrap"><strong>TOT. DIAS</strong></td>
+    </tr>
+    <tr style="border:1px solid #000">
+      <td style="border:1px solid #000;padding:2px 4px">${monitor.nAfiliacionSS || ''}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${parseInt(getCfgNomina('TARIFA')||7)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${parseInt(getCfgNomina('COD_CT')||200)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${parseInt(getCfgNomina('SECCION')||22)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${nro}</td>
+      <td style="border:1px solid #000;padding:2px 4px">MENS ${primerDia} a ${ultimoDia}</td>
+      <td style="border:1px solid #000;padding:2px 4px;text-align:right">${diasMes}</td>
+    </tr>
+  </table>
+
+  <!-- Conceptos -->
+  <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:2px">
+    <tr style="border:1px solid #000;background:#eee">
+      <td style="border:1px solid #000;padding:2px 4px;width:60px"><strong>CUANTIA</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:60px"><strong>PRECIO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:50px"><strong>CONCEPTO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:70px;text-align:right"><strong>DEVENGOS</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:70px;text-align:right"><strong>DEDUCCIONES</strong></td>
+    </tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioH)}</td><td style="padding:2px 4px">1</td><td style="padding:2px 4px">*Salario Base</td><td style="padding:2px 4px;text-align:right">${f2(salBase)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${diasMes}</td><td></td><td style="padding:2px 4px">30</td><td style="padding:2px 4px">*Prorrata pagas extras</td><td style="padding:2px 4px;text-align:right">${f2(ppExtra)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioSMI)}</td><td style="padding:2px 4px">40</td><td style="padding:2px 4px">*Complemento S.M.I.</td><td style="padding:2px 4px;text-align:right">${f2(compSMI)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(compDed/horasMes)}</td><td style="padding:2px 4px">202</td><td style="padding:2px 4px">*Complemento de dedicación</td><td style="padding:2px 4px;text-align:right">${f2(compDed)}</td><td></td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">995</td><td style="padding:2px 4px">COTIZACION CONT.COMU ${cfg('COT_CC_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedCC)}</td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">994</td><td style="padding:2px 4px">COTIZACION MEI ${cfg('COT_MEI_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedMEI)}</td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">996</td><td style="padding:2px 4px">COTIZACION FORMACION ${cfg('COT_FP_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedFP)}</td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">997</td><td style="padding:2px 4px">COTIZACION DESEMPLEO ${cfg('COT_DESEMPLEO_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedDes)}</td></tr>
+    <tr><td colspan="6" style="padding:2px 4px">Horas en Alta a Tiempo Parcial: ${f2(horasMes)}</td></tr>
+    <tr style="height:60px"><td colspan="6"></td></tr>
+  </table>
+
+  <!-- Totales -->
+  <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:4px">
+    <tr style="border:1px solid #000;background:#eee">
+      <td style="border:1px solid #000;padding:2px 4px"><strong>REM. TOTAL</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>P.P.EXTRAS</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>BASE S.S.</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>BASE A.T. Y DES.</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>BASE I.R.P.F.</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>T. DEVENGADO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>T. A DEDUCIR</strong></td>
+    </tr>
+    <tr style="border:1px solid #000">
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDed)}</td>
+    </tr>
+  </table>
+  <div style="font-size:8px;margin-bottom:6px">* Percepciones Salariales sujetas a Cot. S.S. &nbsp;&nbsp;&nbsp; - Percepciones no Salariales excluídas Cot. S.S.</div>
+
+  <!-- Firma y líquido -->
+  <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:4px">
+    <tr>
+      <td style="border:1px solid #000;padding:2px 4px;width:120px"><strong>FECHA</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:200px"><strong>SELLO EMPRESA</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>RECIBI</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:130px;text-align:right"></td>
+    </tr>
+    <tr>
+      <td style="border:1px solid #000;padding:4px;vertical-align:top">
+        ${diasMes} ${new Date(anio,mesNum-1,1).toLocaleDateString('es-ES',{month:'long'}).toUpperCase()} ${anio}<br>
+        ${cfgStr('CIUDAD_EMPRESA')}
+      </td>
+      <td style="border:1px solid #000;padding:4px;height:50px"></td>
+      <td style="border:1px solid #000;padding:4px"></td>
+      <td style="border:1px solid #000;padding:4px;vertical-align:bottom;text-align:right">
+        <strong>LIQUIDO A PERCIBIR</strong><br>
+        <span style="font-size:12px;font-weight:bold">${f2(liquido)}</span>
+      </td>
+    </tr>
+  </table>
+
+  <div style="font-size:9px;margin-bottom:2px">IBAN: ${monitor.iban || ''}</div>
+  <div style="display:flex;justify-content:space-between;font-size:9px;margin-bottom:6px">
+    <span>SWIFT/BIC:</span>
+    <span>COSTE EMPRESA: ${f2(costeEmp)}</span>
+  </div>
+
+  <!-- Bases SS empresa -->
+  <table style="width:100%;border-collapse:collapse;font-size:8px">
+    <tr><td colspan="3" style="border:1px solid #000;padding:2px 4px;background:#eee">
+      <strong>DETERMINACIÓN DE LAS B. DE COTIZACIÓN A LA S.S. Y CONCEPTOS DE RECAUDACIÓN CONJUNTA Y APORTACIÓN DE LA EMPRESA</strong>
+    </td></tr>
+    <tr style="border:1px solid #000;background:#eee">
+      <td style="border:1px solid #000;padding:2px 4px;width:60%"><strong>CONCEPTO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:15%;text-align:right"><strong>BASE</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:10%;text-align:right"><strong>TIPO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:15%;text-align:right"><strong>APORTACIÓN EMPRESARIAL</strong></td>
+    </tr>
+    <tr><td style="padding:2px 4px">1. Contingencias comunes.....................................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_CC_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apCC)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Mecanismo Equidad Intergeneracional (MEI).................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_MEI_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apMEI)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;AT y EP......................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_ATEP_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apAT)}</td></tr>
+    <tr><td style="padding:2px 4px">2. Contingencias profesionales y conceptos de recaudación conjunta</td><td></td><td></td><td></td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Desempleo.................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_DESEMPLEO_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apDes)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Formación Profesional...............</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_FP_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apFP)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Fondo Garantía Salarial............</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_FOGASA_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apFOG)}</td></tr>
+    <tr><td style="padding:2px 4px">3. Cotización adicional horas extraordinarias.............................</td><td></td><td></td><td></td></tr>
+    <tr><td style="padding:2px 4px">4. Cotización adicional de solidaridad.........................................</td><td></td><td></td><td></td></tr>
+  </table>
+</div>`;
+}
+
+async function generarPDFNomina(monitor, mes, nro) {
+  window.gaEvent('descarga_nomina', { monitor_id: monitor.id, mes });
+
+  const html = buildNominaHTML(monitor, mes, nro, false);
+  const [anio, mesNum] = mes.split('-');
+  const nomMes = new Date(anio, mesNum-1, 1)
+    .toLocaleDateString('es-ES',{month:'long',year:'numeric'})
+    .replace(/^\w/, c => c.toUpperCase()).replace(' ', '_');
+  const nombreArchivo = `Nomina_${(monitor.apellidos||'').replace(/ /g,'_')}_${nomMes}.pdf`;
+
+  // Abrir ventana de impresión
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html><html><head>
+    <title>${nombreArchivo}</title>
+    <style>
+      @media print { @page { margin: 10mm; size: A4; } body { margin: 0; } }
+      body { font-family: 'Courier New', monospace; }
+    </style>
+  </head><body>${html}
+    <script>window.onload=function(){window.print();}<\/script>
+  </body></html>`);
+  win.document.close();
+
+  showToast('Nómina generada — usa Guardar como PDF en el diálogo de impresión', 'success', 6000);
+}
+
+
 function personal() {
   const role = currentUser.role;
   // MONITOR: solo ve su propia ficha, solo edita sus datos y foto

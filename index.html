@@ -493,6 +493,7 @@ tbody tr:hover { background: #fafafa; }
         <option value="ADMIN">Admin (Samy Martín)</option>
         <option value="MONITOR">Monitor</option>
         <option value="FAMILIA">Familia</option>
+        <option value="AMPA">AMPA (Responsables)</option>
       </select>
     </div>
     <!-- Monitor: login con Google (se muestra al seleccionar Monitor) -->
@@ -815,6 +816,12 @@ function getFamiliaPass() {
     return stored.familia || ''; // vacío → login fallará hasta que Admin configure pass familias
   } catch(e) { return ''; }
 }
+function getAmpaPass() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
+    return stored.ampa || '';
+  } catch(e) { return ''; }
+}
 function setPassword(role, newPass) {
   try {
     const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
@@ -826,9 +833,10 @@ function setPassword(role, newPass) {
 
 // Objeto legacy para compatibilidad — NO contiene passes reales
 const CREDENTIALS = {
-  'ADMIN':   { name: 'Samy Martín', role: 'ADMIN',   initials: 'SM' },
-  'MONITOR': { name: 'Monitor',     role: 'MONITOR',  initials: 'MO' },
-  'FAMILIA': { name: 'Familia',     role: 'FAMILIA',  initials: 'FA' }
+  'ADMIN':   { name: 'Samy Martín',       role: 'ADMIN',   initials: 'SM' },
+  'MONITOR': { name: 'Monitor',           role: 'MONITOR',  initials: 'MO' },
+  'FAMILIA': { name: 'Familia',           role: 'FAMILIA',  initials: 'FA' },
+  'AMPA':    { name: 'AMPA Escaleritas',  role: 'AMPA',     initials: 'AM' }
 };
 
 /* ═══════════════════════════════════════════════════════════
@@ -1603,6 +1611,14 @@ async function syncAll() {
       }
     } catch(eae) {}
 
+    // CONFIG_NOMINAS — parámetros de nóminas (puede no venir en GET_ALL)
+    try {
+      const resCfg = await gasRequest('GET_SHEET', { sheet: 'CONFIG_NOMINAS' }, 15000);
+      if (resCfg.ok && Array.isArray(resCfg.rows) && resCfg.rows.length) {
+        normalizarDB({ configNominas: resCfg.rows });
+      }
+    } catch(ecfg) {}
+
     setSyncState('ok');
     saveCacheLocal();
     updateBadges();
@@ -2058,6 +2074,20 @@ async function doLogin() {
     startApp();
     return;
 
+  } else if (role === 'AMPA') {
+    const ampaPass = getAmpaPass();
+    if (!ampaPass) {
+      err.style.display = 'block';
+      err.textContent = 'Acceso AMPA no configurado. Contacta con SM Academia.';
+      return;
+    }
+    if (pass !== ampaPass) {
+      err.style.display = 'block';
+      err.textContent = 'Contraseña incorrecta.';
+      return;
+    }
+    name = CREDENTIALS.AMPA.name;
+
   } else {
     err.style.display = 'block';
     err.textContent = 'Rol no válido.';
@@ -2138,7 +2168,14 @@ function modalCambiarPassword() {
         <label class="field-label">Nueva contraseña para todas las familias</label>
         <input type="password" class="field-input" id="cp-familia" placeholder="Dejar vacío para no cambiar">
       </div>
-      <div style="font-size:11px;color:var(--grey-2);margin-top:.25rem">Esta contraseña la usan todas las familias para entrar al sistema.</div>`;
+      <div style="font-size:11px;color:var(--grey-2);margin-top:.25rem">Esta contraseña la usan todas las familias para entrar al sistema.</div>
+      <hr style="margin:1rem 0;border:none;border-top:1px solid #eee">
+      <div style="font-size:12px;font-weight:600;color:var(--grey-2);margin-bottom:.5rem">CONTRASEÑA RESPONSABLES AMPA</div>
+      <div class="field-group">
+        <label class="field-label">Nueva contraseña para las responsables del AMPA</label>
+        <input type="password" class="field-input" id="cp-ampa" placeholder="Dejar vacío para no cambiar">
+      </div>
+      <div style="font-size:11px;color:var(--grey-2);margin-top:.25rem">Permite a las directivas del AMPA descargar el informe mensual de asistencia.</div>`;
   } else if (role === 'MONITOR') {
     campos = `
       <div style="padding:1rem;background:var(--green-bg);border-radius:8px;font-size:13px">
@@ -2168,6 +2205,7 @@ function confirmarCambioPassword() {
   const nueva   = document.getElementById('cp-nueva')?.value || '';
   const confirm = document.getElementById('cp-confirm')?.value || '';
   const familia = document.getElementById('cp-familia')?.value || '';
+  const ampa    = document.getElementById('cp-ampa')?.value   || '';
 
   if (actual !== getAdminPass()) {
     showToast('Contraseña actual incorrecta', 'error'); return;
@@ -2179,8 +2217,9 @@ function confirmarCambioPassword() {
     showToast('Las contraseñas no coinciden', 'error'); return;
   }
   let cambios = 0;
-  if (nueva) { setPassword('admin', nueva); cambios++; }
-  if (familia) { setPassword('familia', familia); cambios++; }
+  if (nueva)   { setPassword('admin',   nueva);   cambios++; }
+  if (familia) { setPassword('familia', familia);  cambios++; }
+  if (ampa)    { setPassword('ampa',    ampa);     cambios++; }
   closeModal();
   if (cambios > 0) showToast(`${cambios} contraseña(s) actualizada(s) ✓`, 'success');
   else showToast('Sin cambios', 'info');
@@ -2202,6 +2241,7 @@ function startApp() {
   const isAdmin  = currentUser.role === 'ADMIN';
   const isMonitor = currentUser.role === 'MONITOR';
   const isFamilia = currentUser.role === 'FAMILIA';
+  const isAmpa   = currentUser.role === 'AMPA';
   document.getElementById('nav-admin').style.display   = isAdmin ? '' : 'none';
   document.getElementById('nav-admin-2').style.display = isAdmin ? '' : 'none';
 
@@ -2277,6 +2317,19 @@ function startApp() {
     setInterval(updateSyncTime, 60000);
     return;
   }
+  // ── AMPA ──
+  if (isAmpa) {
+    document.querySelectorAll('.nav-section').forEach(s => s.style.display = 'none');
+    if (!loadCacheLocal()) loadDemoData();
+    if (GAS_URL) {
+      syncAll().then(() => portalAmpa()).catch(() => portalAmpa());
+    } else {
+      portalAmpa();
+    }
+    setInterval(updateSyncTime, 60000);
+    return;
+  }
+
   // ── FAMILIA ──
   if (isFamilia) {
     // Ocultar todo el sidebar excepto el logout
@@ -2369,9 +2422,13 @@ function navigate(page) {
       page = permitidas[1] || 'extraescolares';
     }
   }
-  // FAMILIA: siempre su portal propio
+  // FAMILIA / AMPA: siempre su portal propio
   if (currentUser && currentUser.role === 'FAMILIA') {
     portalFamilia();
+    return;
+  }
+  if (currentUser && currentUser.role === 'AMPA') {
+    portalAmpa();
     return;
   }
   currentPage = page;
@@ -2388,6 +2445,7 @@ function navigate(page) {
 
 function renderCurrentPage() {
   if (currentUser && currentUser.role === 'FAMILIA') { portalFamilia(); return; }
+  if (currentUser && currentUser.role === 'AMPA')    { portalAmpa();    return; }
   const pages = {
     dashboard, clientes, alumnos, inscripciones, pagos, facturas,
     futbol, extraescolares, personal, incidencias, informes, configuracion,
@@ -2649,13 +2707,14 @@ async function syncAllWithProgress() {
 // Recarga silenciosa de pasos opcionales tras entrar a la app
 async function _syncOpcionales() {
   const pasos = [
-    { action: 'GET_SESIONES',          key: 'sesiones',           extract: r => ({ sesiones: r.sesiones || [] }), check: r => r.ok },
-    { action: 'GET_REGISTRO_HORARIO',  key: 'registro horario',   extract: r => ({ 'registro horario': r.registros }), check: r => r.ok && Array.isArray(r.registros) },
-    { action: 'GET_ASISTENCIAS_EXTRA', key: 'asistencias_extra',  extract: r => ({ asistencias_extra: r.asistencias }), check: r => r.ok && Array.isArray(r.asistencias) },
+    { action: 'GET_SESIONES',          data: {},                          extract: r => ({ sesiones: r.sesiones || [] }),                  check: r => r.ok },
+    { action: 'GET_REGISTRO_HORARIO',  data: {},                          extract: r => ({ 'registro horario': r.registros }),             check: r => r.ok && Array.isArray(r.registros) },
+    { action: 'GET_ASISTENCIAS_EXTRA', data: {},                          extract: r => ({ asistencias_extra: r.asistencias }),            check: r => r.ok && Array.isArray(r.asistencias) },
+    { action: 'GET_SHEET',             data: { sheet: 'CONFIG_NOMINAS' }, extract: r => ({ configNominas: r.rows }),                       check: r => r.ok && Array.isArray(r.rows) && r.rows.length > 0 },
   ];
   for (const paso of pasos) {
     try {
-      const res = await gasRequest(paso.action, {}, 20000);
+      const res = await gasRequest(paso.action, paso.data || {}, 20000);
       if (paso.check(res)) normalizarDB(paso.extract(res));
     } catch(e) { /* silencioso */ }
   }
@@ -6084,9 +6143,21 @@ function nominas() {
 }
 
 async function sincronizarConfigNominas() {
-  showToast('Sincronizando configuración...', 'info', 2000);
-  // Forzar recarga completa
-  await syncAll();
+  showToast('Sincronizando configuración de nóminas...', 'info', 2500);
+  try {
+    const res = await gasRequest('GET_SHEET', { sheet: 'CONFIG_NOMINAS' }, 20000);
+    if (res.ok && Array.isArray(res.rows) && res.rows.length) {
+      normalizarDB({ configNominas: res.rows });
+      saveCacheLocal();
+      showToast('Configuración de nóminas actualizada ✓', 'success');
+    } else {
+      // Si GET_SHEET no devuelve datos, intentar sync completo
+      await syncAll();
+    }
+  } catch(e) {
+    showToast('Error sincronizando: ' + e.message, 'error');
+  }
+  navigate('nominas');
 }
 
 function modalGenerarNominas() {
@@ -8751,6 +8822,69 @@ async function guardarEventoPitusa() {
       showToast('❌ Error: ' + (res?.error||'sin respuesta'), 'error', 6000);
     }
   } catch(e) { showToast('❌ ' + e.message, 'error', 6000); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PORTAL AMPA — Vista privada para responsables del AMPA
+═══════════════════════════════════════════════════════════ */
+function portalAmpa() {
+  document.getElementById('page-title').textContent = 'Portal AMPA';
+  document.getElementById('page-sub').textContent   = 'Informe mensual de actividades extraescolares';
+  document.getElementById('topbar-actions').innerHTML = '';
+
+  const hoy = new Date();
+  const opts = [];
+  for (let i = 0; i < 12; i++) {
+    const d   = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
+    const mes = d.toLocaleDateString('es-ES', { month: 'long' });
+    const anyo = d.getFullYear();
+    const label = mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + anyo;
+    opts.push(`<option value="${mes}|${anyo}">${label}</option>`);
+  }
+
+  const nRegistros = (DB.asistencias_extra || []).length;
+
+  document.getElementById('page-content').innerHTML = `
+    <div style="max-width:520px;margin:2.5rem auto">
+      <div class="section-card">
+        <div class="section-card-title">Informe mensual de asistencia</div>
+        <p style="font-size:13px;color:var(--grey-2);margin-bottom:1.5rem;line-height:1.6">
+          Descarga el informe de asistencia de las actividades extraescolares del
+          <strong>CEIP Escaleritas</strong> en formato PDF.
+        </p>
+        <div class="field-group" style="margin-bottom:1.5rem">
+          <label class="field-label">Mes del informe</label>
+          <select class="field-select" id="ampa-portal-mes" style="width:100%">
+            ${opts.join('')}
+          </select>
+        </div>
+        <button class="btn btn-primary" style="width:100%;padding:.85rem" onclick="
+          const val = document.getElementById('ampa-portal-mes').value.split('|');
+          generarInformeAMPA(val[0], parseInt(val[1]));
+        ">📄 Descargar informe PDF</button>
+      </div>
+      <div style="margin-top:1rem;padding:1rem 1.25rem;background:var(--grey-bg);border-radius:10px;
+                  font-size:12px;color:var(--grey-2);display:flex;align-items:center;justify-content:space-between">
+        <span><strong>${nRegistros}</strong> registros de asistencia cargados</span>
+        <button onclick="syncAmpaData()" style="background:none;border:none;color:var(--green);
+                font-size:12px;font-weight:600;cursor:pointer;padding:0">🔄 Actualizar</button>
+      </div>
+    </div>`;
+}
+
+async function syncAmpaData() {
+  showToast('Actualizando datos AMPA…', 'info');
+  try {
+    const res = await gasRequest('GET_ASISTENCIAS_EXTRA');
+    if (res.ok && Array.isArray(res.asistencias)) {
+      normalizarDB({ asistencias_extra: res.asistencias });
+      saveCacheLocal();
+      showToast('Datos actualizados ✓', 'success');
+    } else {
+      showToast('Sin nuevos datos', 'warning');
+    }
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+  portalAmpa();
 }
 
 function recargarPitusa() {

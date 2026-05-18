@@ -1299,20 +1299,25 @@ function normalizarDB(raw) {
           certVence,
           activo,
           // Campos nómina
-          horasMes:      parseFloat(String(p['HORAS_MES']||0).replace(',','.'))||0,
-          precioHora:    parseFloat(String(p['PRECIO_HORA']||0).replace(',','.'))||0,
-          precioSMI:     parseFloat(String(p['PRECIO_SMI']||0).replace(',','.'))||0,
-          compDed:       parseFloat(String(p['COMPLEMENTO_DEDICACION']||0).replace(',','.'))||0,
-          nroNomina:     parseInt(p['NRO_NOMINA']||0)||0,
-          direccion:     String(p['DIRECCION']||'').trim(),
-          iban:          String(p['IBAN']||'').trim(),
-          dni:           String(p['NIF_TRABAJADOR']||p['DNI']||'').trim(),
-          antiguedad:    String(p['ANTIGÜEDAD']||p['ANTIGUEDAD']||'').trim(),
-          nAfiliacionSS: String(
+          horasMes:        parseFloat(String(p['HORAS_MES']||0).replace(',','.'))||0,
+          precioHora:      parseFloat(String(p['PRECIO_HORA']||0).replace(',','.'))||0,
+          precioSMI:       parseFloat(String(p['PRECIO_SMI']||0).replace(',','.'))||0,
+          compDed:         parseFloat(String(p['COMPLEMENTO_DEDICACION']||0).replace(',','.'))||0,
+          nroNomina:       parseInt(p['NRO_NOMINA']||0)||0,
+          direccion:       String(p['DIRECCION']||'').trim(),
+          iban:            String(p['IBAN']||'').trim(),
+          dni:             String(p['NIF_TRABAJADOR']||p['DNI']||'').trim(),
+          antiguedad:      String(p['ANTIGÜEDAD']||p['ANTIGUEDAD']||'').trim(),
+          nAfiliacionSS:   String(
             Object.entries(p).find(([k]) =>
               k.replace(/[^A-Za-z0-9]/g,'').toUpperCase().includes('NAFILIACION')
             )?.[1] || ''
           ).trim(),
+          // Campos nómina adicionales
+          apellidosNomina: (p.APELLIDOS||'').trim().toUpperCase(),
+          nombreNomina:    (p.NOMBRE||'').trim().toUpperCase(),
+          horasJornada:    parseFloat(String(p['HORAS_JORNADA']||p['HORAS_PARCIAL']||'0').replace(',','.'))||0,
+          matricula:       String(p['MATRICULA']||p['NRO_MATRICULA']||'').trim(),
           actividades: [],
           _raw: p
         };
@@ -6251,70 +6256,96 @@ function modalVistaPreviaNomina(pid) {
   }, 50);
 }
 
+function _fmtDDMmmAA(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const s = String(dateStr).trim();
+    let d;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      const [y,m,dd] = s.split('-').map(Number); d = new Date(y, m-1, dd);
+    } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+      const [dd,m,y] = s.split('/').map(Number); d = new Date(y, m-1, dd);
+    } else return s;
+    const dia = String(d.getDate()).padStart(2,'0');
+    const mes = d.toLocaleDateString('es-ES',{month:'short'}).toUpperCase();
+    return `${dia} ${mes} ${String(d.getFullYear()).slice(-2)}`;
+  } catch(e) { return String(dateStr); }
+}
+
 function buildNominaHTML(monitor, mes, nro, preview = false) {
   // Parámetros desde CONFIG_NOMINAS
-  const cfg = k => parseFloat(getCfgNomina(k) || 0);
+  const cfg    = k => parseFloat(getCfgNomina(k) || 0);
   const cfgStr = k => String(getCfgNomina(k) || '');
 
   const [anio, mesNum] = mes.split('-');
-  const diasMes = new Date(anio, mesNum, 0).getDate();
-  const primerDia = `01 ${new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'short'}).toUpperCase()} ${anio}`;
-  const ultimoDia = `${diasMes} ${new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'short'}).toUpperCase()} ${anio}`;
-  const fechaEmision = `${diasMes} ${new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'long'}).toUpperCase()} ${anio}`;
-  const nomMes = new Date(anio, mesNum-1, 1)
-    .toLocaleDateString('es-ES',{month:'long',year:'numeric'})
-    .replace(/^\w/, c => c.toUpperCase());
+  const diasMes   = new Date(anio, mesNum, 0).getDate();
+  const anio2d    = String(anio).slice(-2);
+  const mesAbrev  = new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'short'}).toUpperCase();
+  const mesLargo  = new Date(anio, mesNum-1, 1).toLocaleDateString('es-ES',{month:'long'}).toUpperCase();
+  const primerDia = `01 ${mesAbrev} ${anio2d}`;
+  const ultimoDia = `${diasMes} ${mesAbrev} ${anio2d}`;
+
+  // Nombres: apellidos primero (formato oficial nómina)
+  const apellidosTrab = monitor.apellidosNomina ||
+    (monitor.nombre || '').toUpperCase().split(' ').slice(2).join(' ');
+  const nombreTrab    = monitor.nombreNomina ||
+    (monitor.nombre || '').toUpperCase().split(' ').slice(0,2).join(' ');
+  const nombreCompleto = (`${apellidosTrab} ${nombreTrab}`).trim().toUpperCase();
 
   // Cálculo conceptos
-  const horasMes   = parseFloat(monitor.horasMes   || 0);
-  const precioH    = parseFloat(monitor.precioHora  || 0);
-  const precioSMI  = parseFloat(monitor.precioSMI   || 0);
-  const compDed    = cfg('COMP_DEDICACION');
+  const horasMes  = parseFloat(monitor.horasMes   || 0);
+  const precioH   = parseFloat(monitor.precioHora  || 0);
+  const precioSMI = parseFloat(monitor.precioSMI   || 0);
+  const compDed   = cfg('COMP_DEDICACION');
 
-  const salBase    = horasMes * precioH;
-  const ppExtra    = salBase / 6;
-  const compSMI    = horasMes * precioSMI;
-  const totalDev   = salBase + ppExtra + compSMI + compDed;
+  // Redondeo a 2 decimales en cada paso (igual que el software de nóminas)
+  const salBase  = Math.round(horasMes * precioH  * 100) / 100;
+  const ppExtra  = Math.ceil (salBase  / 6        * 100) / 100;
+  const compSMI  = Math.round(horasMes * precioSMI * 100) / 100;
+  const totalDev = Math.round((salBase + ppExtra + compSMI + compDed) * 100) / 100;
 
-  // Deducciones trabajador
-  const pCC   = cfg('COT_CC_TRABAJADOR')        / 100;
-  const pMEI  = cfg('COT_MEI_TRABAJADOR')       / 100;
-  const pFP   = cfg('COT_FP_TRABAJADOR')        / 100;
-  const pDes  = cfg('COT_DESEMPLEO_TRABAJADOR') / 100;
+  // Deducciones trabajador (sobre base = totalDev)
+  const pCC  = cfg('COT_CC_TRABAJADOR')        / 100;
+  const pMEI = cfg('COT_MEI_TRABAJADOR')       / 100;
+  const pFP  = cfg('COT_FP_TRABAJADOR')        / 100;
+  const pDes = cfg('COT_DESEMPLEO_TRABAJADOR') / 100;
 
-  const dedCC  = totalDev * pCC;
-  const dedMEI = totalDev * pMEI;
-  const dedFP  = totalDev * pFP;
-  const dedDes = totalDev * pDes;
-  const totalDed = dedCC + dedMEI + dedFP + dedDes;
-  const liquido  = totalDev - totalDed;
+  const dedCC  = Math.round(totalDev * pCC  * 100) / 100;
+  const dedMEI = Math.round(totalDev * pMEI * 100) / 100;
+  const dedFP  = Math.round(totalDev * pFP  * 100) / 100;
+  const dedDes = Math.round(totalDev * pDes * 100) / 100;
+  const totalDed = Math.round((dedCC + dedMEI + dedFP + dedDes) * 100) / 100;
+  const liquido  = Math.round((totalDev - totalDed) * 100) / 100;
 
-  // Coste empresa
-  const eCC   = cfg('COT_CC_EMPRESA')           / 100;
-  const eMEI  = cfg('COT_MEI_EMPRESA')          / 100;
-  const eAT   = cfg('COT_ATEP_EMPRESA')         / 100;
-  const eDes  = cfg('COT_DESEMPLEO_EMPRESA')    / 100;
-  const eFP   = cfg('COT_FP_EMPRESA')           / 100;
-  const eFOG  = cfg('COT_FOGASA_EMPRESA')       / 100;
+  // Cotizaciones empresa
+  const eCC  = cfg('COT_CC_EMPRESA')           / 100;
+  const eMEI = cfg('COT_MEI_EMPRESA')          / 100;
+  const eAT  = cfg('COT_ATEP_EMPRESA')         / 100;
+  const eDes = cfg('COT_DESEMPLEO_EMPRESA')    / 100;
+  const eFP  = cfg('COT_FP_EMPRESA')           / 100;
+  const eFOG = cfg('COT_FOGASA_EMPRESA')       / 100;
 
-  const apCC   = totalDev * eCC;
-  const apMEI  = totalDev * eMEI;
-  const apAT   = totalDev * eAT;
-  const apDes  = totalDev * eDes;
-  const apFP   = totalDev * eFP;
-  const apFOG  = totalDev * eFOG;
-  const costeEmp = totalDev + apCC + apMEI + apAT + apDes + apFP + apFOG;
+  const apCC  = Math.round(totalDev * eCC  * 100) / 100;
+  const apMEI = Math.round(totalDev * eMEI * 100) / 100;
+  const apAT  = Math.round(totalDev * eAT  * 100) / 100;
+  const apDes = Math.round(totalDev * eDes * 100) / 100;
+  const apFP  = Math.round(totalDev * eFP  * 100) / 100;
+  const apFOG = Math.round(totalDev * eFOG * 100) / 100;
+  const costeEmp = Math.round((totalDev + apCC + apMEI + apAT + apDes + apFP + apFOG) * 100) / 100;
 
-  const f2 = v => v.toFixed(2).replace('.', ',');
-  const f3 = v => v.toFixed(3).replace('.', ',');
+  const f2 = v => parseFloat(v).toFixed(2).replace('.', ',');
+  const f3 = v => parseFloat(v).toFixed(3).replace('.', ',');
+
+  // Horas en Alta: campo específico o fallback a horasMes
+  const horasAlta = parseFloat(monitor.horasJornada || 0) || horasMes;
 
   const scale = preview ? 'transform:scale(0.6);transform-origin:top left;width:167%' : '';
 
   return `<div style="font-family:'Courier New',monospace;font-size:10px;width:740px;border:1px solid #ccc;padding:12px;background:#fff;color:#000;${scale}">
 
-  <!-- Dirección trabajador -->
+  <!-- Dirección trabajador (esquina superior derecha) -->
   <div style="text-align:right;margin-bottom:8px;font-size:9px">
-    ${monitor.apellidos ? monitor.apellidos.toUpperCase() : ''} ${monitor.nombre ? monitor.nombre.toUpperCase() : ''}<br>
+    ${nombreCompleto}<br>
     ${monitor.direccion || ''}<br>
     35000 PALMAS DE GRAN CANAR<br>
     LAS PALMAS
@@ -6328,115 +6359,111 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
 
   <!-- Tabla cabecera -->
   <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:2px">
-    <tr style="border:1px solid #000">
+    <tr>
       <td colspan="2" style="border:1px solid #000;padding:2px 4px"><strong>EMPRESA</strong></td>
       <td colspan="3" style="border:1px solid #000;padding:2px 4px"><strong>DOMICILIO</strong></td>
       <td style="border:1px solid #000;padding:2px 4px;white-space:nowrap"><strong>Nº INS. S.S.</strong></td>
     </tr>
-    <tr style="border:1px solid #000">
+    <tr>
       <td colspan="2" style="border:1px solid #000;padding:2px 4px">${cfgStr('NOMBRE_EMPRESA')}</td>
       <td colspan="3" style="border:1px solid #000;padding:2px 4px">${cfgStr('DOMICILIO_EMPRESA')}</td>
       <td style="border:1px solid #000;padding:2px 4px">${cfgStr('NIF_SS_EMPRESA')}</td>
     </tr>
-    <tr style="border:1px solid #000">
-      <td style="border:1px solid #000;padding:2px 4px"><strong>TRABAJADOR/A</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px"></td>
+    <tr>
+      <td colspan="2" style="border:1px solid #000;padding:2px 4px"><strong>TRABAJADOR/A</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>CATEGORIA</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>NºMATRIC</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>ANTIGUEDAD</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>D.N.I.</strong></td>
     </tr>
-    <tr style="border:1px solid #000">
-      <td style="border:1px solid #000;padding:2px 4px">${((monitor.apellidos||'')+' '+(monitor.nombre||'')).toUpperCase().substring(0,28)}</td>
-      <td style="border:1px solid #000;padding:2px 4px"></td>
+    <tr>
+      <td colspan="2" style="border:1px solid #000;padding:2px 4px">${nombreCompleto.substring(0,30)}</td>
       <td style="border:1px solid #000;padding:2px 4px">MONITOR-AN</td>
-      <td style="border:1px solid #000;padding:2px 4px">${nro}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${monitor.antiguedad || ''}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${monitor.matricula || ''}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${_fmtDDMmmAA(monitor.antiguedad)}</td>
       <td style="border:1px solid #000;padding:2px 4px">${monitor.dni || ''}</td>
     </tr>
-    <tr style="border:1px solid #000">
+    <tr>
       <td style="border:1px solid #000;padding:2px 4px"><strong>Nº AFILIACION. S.S.</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>TARIFA</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>COD.CT</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>SECCION</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px"><strong>NRO.</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>PERIODO</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px;white-space:nowrap"><strong>TOT. DIAS</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;white-space:nowrap"><strong>NRO. TOT. DIAS</strong></td>
     </tr>
-    <tr style="border:1px solid #000">
+    <tr>
       <td style="border:1px solid #000;padding:2px 4px">${monitor.nAfiliacionSS || ''}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${parseInt(getCfgNomina('TARIFA')||7)}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${parseInt(getCfgNomina('COD_CT')||200)}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${parseInt(getCfgNomina('SECCION')||22)}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${nro}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('TARIFA')||200}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('COD_CT')||23}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('SECCION')||''}</td>
       <td style="border:1px solid #000;padding:2px 4px">MENS ${primerDia} a ${ultimoDia}</td>
       <td style="border:1px solid #000;padding:2px 4px;text-align:right">${diasMes}</td>
     </tr>
   </table>
 
-  <!-- Conceptos -->
+  <!-- Conceptos devengos/deducciones -->
   <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:2px">
-    <tr style="border:1px solid #000;background:#eee">
-      <td style="border:1px solid #000;padding:2px 4px;width:60px"><strong>CUANTIA</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px;width:60px"><strong>PRECIO</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px;width:50px"><strong>CONCEPTO</strong></td>
+    <tr style="background:#eee">
+      <td style="border:1px solid #000;padding:2px 4px;width:55px"><strong>CUANTIA</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:55px"><strong>PRECIO</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:40px"><strong>CPTO.</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"></td>
-      <td style="border:1px solid #000;padding:2px 4px;width:70px;text-align:right"><strong>DEVENGOS</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px;width:70px;text-align:right"><strong>DEDUCCIONES</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:72px;text-align:right"><strong>DEVENGOS</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:72px;text-align:right"><strong>DEDUCCIONES</strong></td>
     </tr>
     <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioH)}</td><td style="padding:2px 4px">1</td><td style="padding:2px 4px">*Salario Base</td><td style="padding:2px 4px;text-align:right">${f2(salBase)}</td><td></td></tr>
-    <tr><td style="padding:2px 4px;text-align:right">${diasMes}</td><td></td><td style="padding:2px 4px">30</td><td style="padding:2px 4px">*Prorrata pagas extras</td><td style="padding:2px 4px;text-align:right">${f2(ppExtra)}</td><td></td></tr>
-    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioSMI)}</td><td style="padding:2px 4px">40</td><td style="padding:2px 4px">*Complemento S.M.I.</td><td style="padding:2px 4px;text-align:right">${f2(compSMI)}</td><td></td></tr>
-    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(compDed/horasMes)}</td><td style="padding:2px 4px">202</td><td style="padding:2px 4px">*Complemento de dedicación</td><td style="padding:2px 4px;text-align:right">${f2(compDed)}</td><td></td></tr>
-    <tr><td></td><td></td><td style="padding:2px 4px">995</td><td style="padding:2px 4px">COTIZACION CONT.COMU ${cfg('COT_CC_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedCC)}</td></tr>
-    <tr><td></td><td></td><td style="padding:2px 4px">994</td><td style="padding:2px 4px">COTIZACION MEI ${cfg('COT_MEI_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedMEI)}</td></tr>
-    <tr><td></td><td></td><td style="padding:2px 4px">996</td><td style="padding:2px 4px">COTIZACION FORMACION ${cfg('COT_FP_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedFP)}</td></tr>
-    <tr><td></td><td></td><td style="padding:2px 4px">997</td><td style="padding:2px 4px">COTIZACION DESEMPLEO ${cfg('COT_DESEMPLEO_TRABAJADOR').toFixed(2)}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedDes)}</td></tr>
-    <tr><td colspan="6" style="padding:2px 4px">Horas en Alta a Tiempo Parcial: ${f2(horasMes)}</td></tr>
-    <tr style="height:60px"><td colspan="6"></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td></td><td style="padding:2px 4px">240</td><td style="padding:2px 4px">*Prorrata pagas extras</td><td style="padding:2px 4px;text-align:right">${f2(ppExtra)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioSMI)}</td><td style="padding:2px 4px">2402</td><td style="padding:2px 4px">*Complemento S.M.I.</td><td style="padding:2px 4px;text-align:right">${f2(compSMI)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(compDed/horasMes)}</td><td style="padding:2px 4px">4202</td><td style="padding:2px 4px">*Complemento de dedicación</td><td style="padding:2px 4px;text-align:right">${f2(compDed)}</td><td></td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">995</td><td style="padding:2px 4px">COTIZACION CONT.COMU ${f2(cfg('COT_CC_TRABAJADOR'))}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedCC)}</td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">994</td><td style="padding:2px 4px">COTIZACION MEI ${f2(cfg('COT_MEI_TRABAJADOR'))}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedMEI)}</td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">996</td><td style="padding:2px 4px">COTIZACION FORMACION ${f2(cfg('COT_FP_TRABAJADOR'))}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedFP)}</td></tr>
+    <tr><td></td><td></td><td style="padding:2px 4px">997</td><td style="padding:2px 4px">COTIZACION DESEMPLEO ${f2(cfg('COT_DESEMPLEO_TRABAJADOR'))}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedDes)}</td></tr>
+    <tr><td colspan="6" style="padding:2px 4px">Horas en Alta a Tiempo Parcial: ${f2(horasAlta)}</td></tr>
+    <tr style="height:55px"><td colspan="6"></td></tr>
   </table>
 
-  <!-- Totales -->
+  <!-- Totales bases -->
   <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:4px">
-    <tr style="border:1px solid #000;background:#eee">
+    <tr style="background:#eee">
+      <td style="border:1px solid #000;padding:2px 4px"><strong>BASE S.S.T.</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>A DEDUCIR</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>REM. TOTAL</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>P.P.EXTRAS</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px"><strong>BASE S.S.</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px"><strong>BASE A.T. Y DES.</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>BASE I.R.P.F.</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>T. DEVENGADO</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px"><strong>T. A DEDUCIR</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px"><strong>BASE A.T. Y DES.</strong></td>
     </tr>
-    <tr style="border:1px solid #000">
-      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+    <tr>
       <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
       <td style="border:1px solid #000;padding:2px 4px">${f2(totalDed)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${f2(totalDev)}</td>
     </tr>
   </table>
   <div style="font-size:8px;margin-bottom:6px">* Percepciones Salariales sujetas a Cot. S.S. &nbsp;&nbsp;&nbsp; - Percepciones no Salariales excluídas Cot. S.S.</div>
 
-  <!-- Firma y líquido -->
+  <!-- Fecha, sello y líquido -->
   <table style="width:100%;border-collapse:collapse;font-size:9px;margin-bottom:4px">
     <tr>
       <td style="border:1px solid #000;padding:2px 4px;width:120px"><strong>FECHA</strong></td>
       <td style="border:1px solid #000;padding:2px 4px;width:200px"><strong>SELLO EMPRESA</strong></td>
       <td style="border:1px solid #000;padding:2px 4px"><strong>RECIBI</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px;width:130px;text-align:right"></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:140px;text-align:right"></td>
     </tr>
     <tr>
       <td style="border:1px solid #000;padding:4px;vertical-align:top">
-        ${diasMes} ${new Date(anio,mesNum-1,1).toLocaleDateString('es-ES',{month:'long'}).toUpperCase()} ${anio}<br>
+        ${diasMes} ${mesLargo} ${anio}<br>
         ${cfgStr('CIUDAD_EMPRESA')}
       </td>
       <td style="border:1px solid #000;padding:4px;height:50px"></td>
       <td style="border:1px solid #000;padding:4px"></td>
       <td style="border:1px solid #000;padding:4px;vertical-align:bottom;text-align:right">
         <strong>LIQUIDO A PERCIBIR</strong><br>
-        <span style="font-size:12px;font-weight:bold">${f2(liquido)}</span>
+        <span style="font-size:13px;font-weight:bold">${f2(liquido)}</span>
       </td>
     </tr>
   </table>
@@ -6447,24 +6474,24 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
     <span>COSTE EMPRESA: ${f2(costeEmp)}</span>
   </div>
 
-  <!-- Bases SS empresa -->
+  <!-- Bases y cotizaciones empresa -->
   <table style="width:100%;border-collapse:collapse;font-size:8px">
-    <tr><td colspan="3" style="border:1px solid #000;padding:2px 4px;background:#eee">
+    <tr><td colspan="4" style="border:1px solid #000;padding:2px 4px;background:#eee">
       <strong>DETERMINACIÓN DE LAS B. DE COTIZACIÓN A LA S.S. Y CONCEPTOS DE RECAUDACIÓN CONJUNTA Y APORTACIÓN DE LA EMPRESA</strong>
     </td></tr>
-    <tr style="border:1px solid #000;background:#eee">
+    <tr style="background:#eee">
       <td style="border:1px solid #000;padding:2px 4px;width:60%"><strong>CONCEPTO</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px;width:15%;text-align:right"><strong>BASE</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:13%;text-align:right"><strong>BASE</strong></td>
       <td style="border:1px solid #000;padding:2px 4px;width:10%;text-align:right"><strong>TIPO</strong></td>
-      <td style="border:1px solid #000;padding:2px 4px;width:15%;text-align:right"><strong>APORTACIÓN EMPRESARIAL</strong></td>
+      <td style="border:1px solid #000;padding:2px 4px;width:17%;text-align:right"><strong>APORTACIÓN EMPRESARIAL</strong></td>
     </tr>
-    <tr><td style="padding:2px 4px">1. Contingencias comunes.....................................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_CC_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apCC)}</td></tr>
-    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Mecanismo Equidad Intergeneracional (MEI).................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_MEI_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apMEI)}</td></tr>
-    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;AT y EP......................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_ATEP_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apAT)}</td></tr>
+    <tr><td style="padding:2px 4px">1. Contingencias comunes.....................................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${f2(cfg('COT_CC_EMPRESA'))}</td><td style="padding:2px 4px;text-align:right">${f2(apCC)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Mecanismo Equidad Intergeneracional (MEI).................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${f2(cfg('COT_MEI_EMPRESA'))}</td><td style="padding:2px 4px;text-align:right">${f2(apMEI)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;AT y EP.........................................................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${f2(cfg('COT_ATEP_EMPRESA'))}</td><td style="padding:2px 4px;text-align:right">${f2(apAT)}</td></tr>
     <tr><td style="padding:2px 4px">2. Contingencias profesionales y conceptos de recaudación conjunta</td><td></td><td></td><td></td></tr>
-    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Desempleo.................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_DESEMPLEO_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apDes)}</td></tr>
-    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Formación Profesional...............</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_FP_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apFP)}</td></tr>
-    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Fondo Garantía Salarial............</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${cfg('COT_FOGASA_EMPRESA').toFixed(2)}</td><td style="padding:2px 4px;text-align:right">${f2(apFOG)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Desempleo.........................................................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${f2(cfg('COT_DESEMPLEO_EMPRESA'))}</td><td style="padding:2px 4px;text-align:right">${f2(apDes)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Formación Profesional.........................................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${f2(cfg('COT_FP_EMPRESA'))}</td><td style="padding:2px 4px;text-align:right">${f2(apFP)}</td></tr>
+    <tr><td style="padding:2px 4px">&nbsp;&nbsp;&nbsp;Fondo Garantía Salarial...................................................</td><td style="padding:2px 4px;text-align:right">${f2(totalDev)}</td><td style="padding:2px 4px;text-align:right">${f2(cfg('COT_FOGASA_EMPRESA'))}</td><td style="padding:2px 4px;text-align:right">${f2(apFOG)}</td></tr>
     <tr><td style="padding:2px 4px">3. Cotización adicional horas extraordinarias.............................</td><td></td><td></td><td></td></tr>
     <tr><td style="padding:2px 4px">4. Cotización adicional de solidaridad.........................................</td><td></td><td></td><td></td></tr>
   </table>

@@ -6293,16 +6293,17 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
     (monitor.nombre || '').toUpperCase().split(' ').slice(0,2).join(' ');
   const nombreCompleto = (`${apellidosTrab} ${nombreTrab}`).trim().toUpperCase();
 
-  // Cálculo conceptos — horasJornada = horas mensuales reales; horasMes = horas semanales (fallback)
-  const horasMes  = parseFloat(monitor.horasJornada || monitor.horasMes || 0);
+  // CUANTIA = días del mes (no horas). PRECIO_HORA/SMI son tarifas DIARIAS.
+  // HORAS_MES (17) solo se usa para mostrar "Horas en Alta a Tiempo Parcial".
+  const horasAlta = parseFloat(monitor.horasMes || 0); // para línea "Horas en Alta"
   const precioH   = parseFloat(monitor.precioHora  || 0);
   const precioSMI = parseFloat(monitor.precioSMI   || 0);
   const compDed   = parseFloat(monitor.compDed || 0) || cfg('COMP_DEDICACION');
 
-  // Redondeo a 2 decimales en cada paso (igual que el software de nóminas)
-  const salBase  = Math.round(horasMes * precioH  * 100) / 100;
-  const ppExtra  = Math.ceil (salBase  / 6        * 100) / 100;
-  const compSMI  = Math.round(horasMes * precioSMI * 100) / 100;
+  // Cálculo: días × tarifa_diaria
+  const salBase  = Math.round(diasMes * precioH   * 100) / 100;
+  const ppExtra  = Math.ceil (salBase / 6          * 100) / 100;
+  const compSMI  = Math.round(diasMes * precioSMI  * 100) / 100;
   const totalDev = Math.round((salBase + ppExtra + compSMI + compDed) * 100) / 100;
 
   // Deducciones trabajador (sobre base = totalDev)
@@ -6336,9 +6337,6 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
 
   const f2 = v => parseFloat(v).toFixed(2).replace('.', ',');
   const f3 = v => parseFloat(v).toFixed(3).replace('.', ',');
-
-  // Horas en Alta: usa el valor ya resuelto en horasMes (que ya prioriza horasJornada)
-  const horasAlta = horasMes;
 
   const scale = preview ? 'transform:scale(0.6);transform-origin:top left;width:167%' : '';
 
@@ -6394,9 +6392,9 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
     </tr>
     <tr>
       <td style="border:1px solid #000;padding:2px 4px">${monitor.nAfiliacionSS || ''}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('TARIFA')||200}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('COD_CT')||23}</td>
-      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('SECCION')||''}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('TARIFA')||7}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('COD_CT')||200}</td>
+      <td style="border:1px solid #000;padding:2px 4px">${getCfgNomina('SECCION')||monitor.nroNomina||''}</td>
       <td style="border:1px solid #000;padding:2px 4px">MENS ${primerDia} a ${ultimoDia}</td>
       <td style="border:1px solid #000;padding:2px 4px;text-align:right">${diasMes}</td>
     </tr>
@@ -6412,10 +6410,10 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
       <td style="border:1px solid #000;padding:2px 4px;width:72px;text-align:right"><strong>DEVENGOS</strong></td>
       <td style="border:1px solid #000;padding:2px 4px;width:72px;text-align:right"><strong>DEDUCCIONES</strong></td>
     </tr>
-    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioH)}</td><td style="padding:2px 4px">1</td><td style="padding:2px 4px">*Salario Base</td><td style="padding:2px 4px;text-align:right">${f2(salBase)}</td><td></td></tr>
-    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td></td><td style="padding:2px 4px">240</td><td style="padding:2px 4px">*Prorrata pagas extras</td><td style="padding:2px 4px;text-align:right">${f2(ppExtra)}</td><td></td></tr>
-    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioSMI)}</td><td style="padding:2px 4px">2402</td><td style="padding:2px 4px">*Complemento S.M.I.</td><td style="padding:2px 4px;text-align:right">${f2(compSMI)}</td><td></td></tr>
-    <tr><td style="padding:2px 4px;text-align:right">${f2(horasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(compDed/horasMes)}</td><td style="padding:2px 4px">4202</td><td style="padding:2px 4px">*Complemento de dedicación</td><td style="padding:2px 4px;text-align:right">${f2(compDed)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(diasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioH)}</td><td style="padding:2px 4px">1</td><td style="padding:2px 4px">*Salario Base</td><td style="padding:2px 4px;text-align:right">${f2(salBase)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(diasMes)}</td><td></td><td style="padding:2px 4px">240</td><td style="padding:2px 4px">*Prorrata pagas extras</td><td style="padding:2px 4px;text-align:right">${f2(ppExtra)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(diasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(precioSMI)}</td><td style="padding:2px 4px">2402</td><td style="padding:2px 4px">*Complemento S.M.I.</td><td style="padding:2px 4px;text-align:right">${f2(compSMI)}</td><td></td></tr>
+    <tr><td style="padding:2px 4px;text-align:right">${f2(diasMes)}</td><td style="padding:2px 4px;text-align:right">${f3(compDed/diasMes)}</td><td style="padding:2px 4px">202</td><td style="padding:2px 4px">*Complemento de dedicaci&#xf3;n</td><td style="padding:2px 4px;text-align:right">${f2(compDed)}</td><td></td></tr>
     <tr><td></td><td></td><td style="padding:2px 4px">995</td><td style="padding:2px 4px">COTIZACION CONT.COMU ${f2(cfg('COT_CC_TRABAJADOR'))}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedCC)}</td></tr>
     <tr><td></td><td></td><td style="padding:2px 4px">994</td><td style="padding:2px 4px">COTIZACION MEI ${f2(cfg('COT_MEI_TRABAJADOR'))}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedMEI)}</td></tr>
     <tr><td></td><td></td><td style="padding:2px 4px">996</td><td style="padding:2px 4px">COTIZACION FORMACION ${f2(cfg('COT_FP_TRABAJADOR'))}</td><td></td><td style="padding:2px 4px;text-align:right">${f2(dedFP)}</td></tr>

@@ -1317,7 +1317,7 @@ function normalizarDB(raw) {
           apellidosNomina: (p.APELLIDOS||'').trim().toUpperCase(),
           nombreNomina:    (p.NOMBRE||'').trim().toUpperCase(),
           horasJornada:    parseFloat(String(p['HORAS_JORNADA']||p['HORAS_PARCIAL']||'0').replace(',','.'))||0,
-          matricula:       String(p['MATRICULA']||p['NRO_MATRICULA']||'').trim(),
+          matricula:       String(p['MATRICULA']||p['NRO_MATRICULA']||p['NRO_NOMINA']||'').trim(),
           actividades: [],
           _raw: p
         };
@@ -6074,7 +6074,7 @@ function nominas() {
 
   // Monitores activos con datos de nómina
   const monitores = DB.personal.filter(p =>
-    p.activo && p.horasMes && p.precioHora
+    p.activo && (p.horasJornada || p.horasMes) && p.precioHora
   );
 
   addTopbarBtn('+ Generar nóminas', () => modalGenerarNominas(), 'btn-primary');
@@ -6118,10 +6118,11 @@ function nominas() {
         </tr></thead>
         <tbody>
           ${monitores.map(p => {
-            const base    = (p.horasMes * p.precioHora).toFixed(2);
-            const ppExtra = (base / 6).toFixed(2);
-            const compSMI = (p.horasMes * (p.precioSMI || 0)).toFixed(2);
-            const compDed = parseFloat(getCfgNomina('COMP_DEDICACION') || 0);
+            const hMes    = parseFloat(p.horasJornada || p.horasMes || 0);
+            const base    = (hMes * p.precioHora).toFixed(2);
+            const ppExtra = (Math.ceil(parseFloat(base) / 6 * 100) / 100).toFixed(2);
+            const compSMI = (hMes * (p.precioSMI || 0)).toFixed(2);
+            const compDed = parseFloat(p.compDed || 0) || parseFloat(getCfgNomina('COMP_DEDICACION') || 0);
             const total   = (parseFloat(base) + parseFloat(ppExtra) + parseFloat(compSMI) + compDed).toFixed(2);
             // Coste empresa
             const ccEmp   = parseFloat(getCfgNomina('COT_CC_EMPRESA')       || 0) / 100;
@@ -6132,9 +6133,9 @@ function nominas() {
             const fogEmp  = parseFloat(getCfgNomina('COT_FOGASA_EMPRESA')    || 0) / 100;
             const costeEmp = (parseFloat(total) * (1 + ccEmp + meiEmp + atEmp + desEmp + fpEmp + fogEmp)).toFixed(2);
             return `<tr>
-              <td><strong>${p.nombre} ${p.apellidos}</strong><br>
-                  <span style="font-size:11px;color:var(--grey-2)">${p.actividad||''} · ${p.horasMes}h/mes</span></td>
-              <td>${p.horasMes}</td>
+              <td><strong>${p.nombre}</strong><br>
+                  <span style="font-size:11px;color:var(--grey-2)">${p.actividad||''} · ${hMes}h/mes</span></td>
+              <td>${hMes}</td>
               <td>${parseFloat(p.precioHora).toFixed(3)} €</td>
               <td>${fmtEur(base)}</td>
               <td>${fmtEur(costeEmp)}</td>
@@ -6177,7 +6178,7 @@ function modalGenerarNominas() {
     });
   }
 
-  const monitores = DB.personal.filter(p => p.activo && p.horasMes && p.precioHora);
+  const monitores = DB.personal.filter(p => p.activo && (p.horasJornada || p.horasMes) && p.precioHora);
 
   openModal('Generar nóminas', `
     <div style="display:grid;gap:1rem">
@@ -6193,7 +6194,7 @@ function modalGenerarNominas() {
           ${monitores.map(p => `
             <label style="display:flex;align-items:center;gap:.5rem;font-size:13px">
               <input type="checkbox" class="nom-check" value="${p.id}" checked>
-              ${p.nombre} ${p.apellidos} — ${p.horasMes}h
+              ${p.nombre} — ${p.horasJornada || p.horasMes}h/mes
             </label>`).join('')}
         </div>
       </div>
@@ -6234,7 +6235,7 @@ function modalVistaPreviaNomina(pid) {
   const mesVal = hoy.getFullYear() + '-' + String(hoy.getMonth()).padStart(2,'0');
   const nroActual = (parseInt(getCfgNomina('ULTIMO_NRO_NOMINA')) || 0) + 1;
 
-  openModal('Vista previa — ' + p.nombre + ' ' + p.apellidos,
+  openModal('Vista previa — ' + p.nombre,
     `<div style="font-size:12px;color:var(--grey-2);margin-bottom:1rem">
       Mes actual. Para otros meses usa "Generar nóminas".
     </div>
@@ -6292,11 +6293,11 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
     (monitor.nombre || '').toUpperCase().split(' ').slice(0,2).join(' ');
   const nombreCompleto = (`${apellidosTrab} ${nombreTrab}`).trim().toUpperCase();
 
-  // Cálculo conceptos
-  const horasMes  = parseFloat(monitor.horasMes   || 0);
+  // Cálculo conceptos — horasJornada = horas mensuales reales; horasMes = horas semanales (fallback)
+  const horasMes  = parseFloat(monitor.horasJornada || monitor.horasMes || 0);
   const precioH   = parseFloat(monitor.precioHora  || 0);
   const precioSMI = parseFloat(monitor.precioSMI   || 0);
-  const compDed   = cfg('COMP_DEDICACION');
+  const compDed   = parseFloat(monitor.compDed || 0) || cfg('COMP_DEDICACION');
 
   // Redondeo a 2 decimales en cada paso (igual que el software de nóminas)
   const salBase  = Math.round(horasMes * precioH  * 100) / 100;
@@ -6336,8 +6337,8 @@ function buildNominaHTML(monitor, mes, nro, preview = false) {
   const f2 = v => parseFloat(v).toFixed(2).replace('.', ',');
   const f3 = v => parseFloat(v).toFixed(3).replace('.', ',');
 
-  // Horas en Alta: campo específico o fallback a horasMes
-  const horasAlta = parseFloat(monitor.horasJornada || 0) || horasMes;
+  // Horas en Alta: usa el valor ya resuelto en horasMes (que ya prioriza horasJornada)
+  const horasAlta = horasMes;
 
   const scale = preview ? 'transform:scale(0.6);transform-origin:top left;width:167%' : '';
 

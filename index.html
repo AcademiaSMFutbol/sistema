@@ -8825,64 +8825,40 @@ async function _extractPDFText(file) {
   return out;
 }
 
-/* Parser BBVA real:
-   Cada transacción ocupa N líneas consecutivas:
-   1) DD/MM  DD/MM            ← F.Oper  F.Valor (ambas fechas en la misma línea)
-   2) TIPO DE OPERACION       ← una línea (BIZUM, TRANSFERENCIAS, PAGO CON TARJETA…)
-   3+) Descripción libre      ← una o varias líneas
-   -2) -11,10 o 55,00         ← importe (con o sin signo, formato español)
-   -1) 1.234,56               ← saldo (siempre positivo, formato español)
-   Los bloques se separan por: footer R9…, "Titulares:", "SALDO ANTERIOR"     */
+/* Parser BBVA real (formato PDF.js):
+   PDF.js renderiza cada fila de la tabla en una sola línea:
+   "DD/MM DD/MM CONCEPTO [-]IMPORTE SALDO"
+   Las líneas de descripción adicional van en la(s) línea(s) siguientes.
+   Ejemplo:
+     01/04 31/03 BIZUM 55,00 519,05
+     RECIBIDO: Mes de abril. Alberto Garcia Suar
+     01/04 01/04 CUOTAS DE LA SEGURIDAD SOCIAL -107,64 411,23
+     N 2026086002231748 TGSS. COTIZACION 001 REGIMEN GENERAL        */
 function _parseBBVAText(text) {
-  const lines    = text.split('\n').map(l=>l.trim()).filter(Boolean);
-  // Accept "01/04 31/03" or "01/04  31/03" — two DD/MM pairs separated by whitespace
-  const dateRe   = /^\d{2}\/\d{2}\s+\d{2}\/\d{2}(\s.*)?$/;        // "01/04 31/03" (may have trailing text)
-  const numRe    = /^-?\d{1,3}(?:\.\d{3})*,\d{2}$/;                // "55,00" "-107,64" "1.176,14"
-  const breakRe  = /^(R9\d{5,}|Titulares:|SALDO ANTERIOR|EXTRACTO MENSUAL)/;
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  // Matches: DD/MM DD/MM <concepto> <importe> <saldo>  (all on one line)
+  // importe may be negative; saldo is always positive; both in Spanish format
+  const txnRe  = /^(\d{2}\/\d{2})\s+\d{2}\/\d{2}\s+(.*?)\s+(-?\d{1,3}(?:\.\d{3})*,\d{2})\s+(\d{1,3}(?:\.\d{3})*,\d{2})$/;
+  // Lines that are page headers/footers — skip them even mid-transaction
+  const skipRe = /^(SALDO ANTERIOR|EXTRACTO|F\.Oper|Titulares:|IBAN\s|R9\d{5,}|HOJA\s|TOTAL\s+MOVIMIENTOS|BIC:|Fecha de emisión)/;
 
-  // Intentar extraer el año del documento
   const yearM = text.match(/\b(20\d{2})\b/);
   const year  = yearM ? yearM[1] : String(new Date().getFullYear());
 
-  // Agrupar líneas en bloques de transacción
-  const blocks = [];
+  const txns = [];
   let cur = null;
   for (const line of lines) {
-    if (dateRe.test(line)) {
-      if (cur && cur.length > 2) blocks.push(cur);
-      cur = [line];
-    } else if (breakRe.test(line)) {
-      if (cur && cur.length > 2) blocks.push(cur);
-      cur = null;
+    if (skipRe.test(line)) continue;
+    const m = txnRe.exec(line);
+    if (m) {
+      if (cur) txns.push(cur);
+      cur = { fecha: m[1] + '/' + year, concepto: m[2].trim(), importe: _parseEsNum(m[3]), saldo: _parseEsNum(m[4]) };
     } else if (cur) {
-      cur.push(line);
+      // Continuation line — append to concepto (reference/detail text)
+      cur.concepto = (cur.concepto + ' ' + line).trim();
     }
   }
-  if (cur && cur.length > 2) blocks.push(cur);
-
-  // Parsear cada bloque
-  const txns = [];
-  for (const block of blocks) {
-    const [dateLine, ...rest] = block;
-
-    // Últimas dos líneas que encajan como número español = importe + saldo
-    const numIdx = rest.reduce((acc,l,i)=>{ if(numRe.test(l)) acc.push(i); return acc; },[]);
-    if (numIdx.length < 2) continue;
-
-    const importeIdx = numIdx[numIdx.length - 2];
-    const saldoIdx   = numIdx[numIdx.length - 1];
-    const importe    = _parseEsNum(rest[importeIdx]);
-    const saldo      = _parseEsNum(rest[saldoIdx]);
-
-    // Concepto: todo antes del importe (sin las líneas de número extra)
-    const concepto = rest.slice(0, importeIdx).filter(l=>!numRe.test(l)).join(' ').trim();
-
-    // Fecha: primera fecha del dateLine + año del documento
-    const dM  = dateLine.match(/^(\d{2}\/\d{2})/);
-    const fecha = dM ? dM[1] + '/' + year : dateLine;
-
-    txns.push({ fecha, concepto, importe, saldo });
-  }
+  if (cur) txns.push(cur);
   return txns;
 }
 

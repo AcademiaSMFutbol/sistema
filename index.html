@@ -8769,7 +8769,16 @@ async function _extractPDFText(file) {
     });
   }
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const buf = await file.arrayBuffer();
+  const rawBuf = await file.arrayBuffer();
+  // BBVA PDFs come wrapped in a MIME envelope — strip any content before %PDF-
+  const bytes = new Uint8Array(rawBuf);
+  let pdfStart = 0;
+  for (let i = 0; i < Math.min(bytes.length - 4, 2048); i++) {
+    if (bytes[i]===0x25 && bytes[i+1]===0x50 && bytes[i+2]===0x44 && bytes[i+3]===0x46) {
+      pdfStart = i; break;
+    }
+  }
+  const buf = pdfStart > 0 ? rawBuf.slice(pdfStart) : rawBuf;
   const pdf = await pdfjsLib.getDocument({data:buf}).promise;
   let out = '';
   for (let i=1; i<=pdf.numPages; i++) {

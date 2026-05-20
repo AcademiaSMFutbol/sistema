@@ -8875,25 +8875,26 @@ function _normBBVADate(d) {
   return clean;
 }
 
-/* Cotejo BBVA vs PAGOS — tres pasadas:
-   1) Importe exacto + fecha ±5 días (pago individual)
-   2) Suma de hermanos del mismo clienteId + fecha ±7 días (pago familiar)
-   3) Nombre del alumno aparece en el concepto del banco          */
+/* Cotejo BBVA vs Sheets — por mes natural:
+   Filtra los pagos al mismo año-mes que cada transacción del banco.
+   Pasada 1: un solo pago con importe idéntico ese mes.
+   Pasada 2: suma de pagos del mismo clienteId ese mes (hermanos).
+   Sin búsqueda por nombre: evita falsos positivos.               */
 function _cotejarBBVA(txns, pagos) {
   const parseD = s => {
     if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y]=s.split('/').map(Number); return new Date(y,m-1,d); }
     if (/^\d{4}-\d{2}-\d{2}$/.test(s))   { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
     return new Date(s||0);
   };
-  const daysBetween = (a,b) => Math.abs((a-b)/86400000);
+  // "YYYY-MM" key for a date string
+  const ym = s => { const d=parseD(s); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); };
 
   // Solo pagos con importe recibido
   const pagosP = pagos.filter(p => parseFloat(p.totalRecibido||0) > 0);
   const usados = new Set();
   const matched=[], soloBanco=[], soloSheet=[];
 
-  // Intenta todas las combinaciones no vacías de un grupo pequeño y devuelve
-  // la que sume el importe objetivo (tolerancia 5 céntimos)
+  // Todas las combinaciones no vacías de un grupo ≤12; devuelve la que suma target ±5 céntimos
   function matchSubset(group, target) {
     const n = group.length;
     if (!n || n > 12) return null;
@@ -8905,73 +8906,42 @@ function _cotejarBBVA(txns, pagos) {
     return null;
   }
 
-  // Agrupar candidatos por clienteId y probar subconjuntos
-  function tryFamilyMatch(candidates, targetAmt) {
-    const byClient = {};
-    for (const p of candidates) (byClient[p.clienteId] = byClient[p.clienteId]||[]).push(p);
-    for (const grp of Object.values(byClient)) {
-      const hit = matchSubset(grp, targetAmt);
-      if (hit) return hit;
-    }
-    return null;
-  }
-
-  // Tokens útiles para búsqueda por nombre (descarta palabras genéricas)
-  const STOP = new Set(['RECIBIDO','TRANSFERENCIA','TRANSFERENCIAS','BIZUM','PAGO','CARGO',
-    'ADEUDO','TRASPASO','PARA','DESDE','CEIP','ESCALERITAS','ACOGIDA','TEMPRANA',
-    'MENSUAL','MENSUALIDAD','TARJETA','PROGRAMA','CUENTA','SEGURIDAD','SOCIAL',
-    'COTIZACION','REGIMEN','GENERAL','COMPRA','SUPERMERCADO','HOGAR','PELAYO']);
-  const tokenize = str => (str||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
-    .split(/[\s,:.;/()&+]+/).filter(w => w.length>=4 && !STOP.has(w));
-
   const txnsPos = txns.filter(t => t.importe > 0);
 
-  // ── PASADA 1: importe exacto + fecha ±5 días ──────────────────────────
+  // ── PASADA 1: importe exacto en el mismo mes ─────────────────────────
   for (const tx of txnsPos) {
-    const txD = parseD(tx.fecha), txA = tx.importe;
-    let best=null, bd=Infinity;
-    for (const p of pagosP) {
-      if (usados.has(p.id)) continue;
-      if (Math.abs(txA - p.totalRecibido) > 0.05) continue;
-      const d = txD ? daysBetween(txD, parseD(p.fecha)) : 999;
-      if (d<=5 && d<bd) { bd=d; best=p; }
+    const txM = ym(tx.fecha), txA = tx.importe, txD = parseD(tx.fecha);
+    const cands = pagosP.filter(p => !usados.has(p.id) && ym(p.fecha)===txM && Math.abs(p.totalRecibido-txA)<=0.05);
+    if (!cands.length) continue;
+    // Si hay varios con el mismo importe, elegir el más cercano en fecha
+    cands.sort((a,b) => Math.abs(parseD(a.fecha)-txD) - Math.abs(parseD(b.fecha)-txD));
+    usados.add(cands[0].id);
+    matched.push({tx, pagos:[cands[0]], tipo:'exacto'});
+  }
+
+  // ── PASADA 2: suma de hermanos (mismo clienteId, mismo mes) ──────────
+  for (const tx of txnsPos.filter(t => !matched.find(m=>m.tx===t))) {
+    const txM = ym(tx.fecha), txA = tx.importe;
+    const cands = pagosP.filter(p => !usados.has(p.id) && ym(p.fecha)===txM);
+    const byClient = {};
+    for (const p of cands) (byClient[p.clienteId] = byClient[p.clienteId]||[]).push(p);
+    let found = null;
+    for (const grp of Object.values(byClient)) {
+      const hit = matchSubset(grp, txA);
+      if (hit) { found = hit; break; }
     }
-    if (best) { usados.add(best.id); matched.push({tx, pagos:[best], tipo:'exacto'}); }
-  }
-
-  // ── PASADA 2: suma de hermanos (clienteId) ±7 días ───────────────────
-  for (const tx of txnsPos.filter(t => !matched.find(m=>m.tx===t))) {
-    const txD = parseD(tx.fecha), txA = tx.importe;
-    const cands = pagosP.filter(p => !usados.has(p.id) && txD && daysBetween(txD,parseD(p.fecha))<=7);
-    const hit = tryFamilyMatch(cands, txA);
-    if (hit) { for (const p of hit) usados.add(p.id); matched.push({tx, pagos:hit, tipo:'familia'}); }
-  }
-
-  // ── PASADA 3: nombre del alumno en el concepto bancario ──────────────
-  for (const tx of txnsPos.filter(t => !matched.find(m=>m.tx===t))) {
-    const txD = parseD(tx.fecha), txA = tx.importe;
-    const tokens = tokenize(tx.concepto);
-    if (!tokens.length) { soloBanco.push({tx}); continue; }
-    const alumIds = DB.alumnos
-      .filter(a => { const n=(a.nombre||'').normalize('NFD').replace(/[̀-ͯ]/g,''); return tokens.some(t=>n.includes(t)); })
-      .map(a => a.id);
-    const cands = pagosP.filter(p => !usados.has(p.id) && alumIds.includes(p.alumnoId) && txD && daysBetween(txD,parseD(p.fecha))<=7);
-    const hit = tryFamilyMatch(cands, txA);
-    if (hit) { for (const p of hit) usados.add(p.id); matched.push({tx, pagos:hit, tipo:'nombre'}); }
+    if (found) { for (const p of found) usados.add(p.id); matched.push({tx, pagos:found, tipo:'familia'}); }
     else soloBanco.push({tx});
   }
 
   // Gastos (negativos) → solo banco
   for (const tx of txns.filter(t=>t.importe<=0)) soloBanco.push({tx});
 
-  // soloSheet: pagos del período del extracto que no cuadraron
-  const txDates = txnsPos.map(t=>parseD(t.fecha).getTime()).filter(Boolean);
-  const minD = txDates.length ? new Date(Math.min(...txDates) - 7*86400000) : null;
-  const maxD = txDates.length ? new Date(Math.max(...txDates) + 7*86400000) : null;
+  // soloSheet: pagos del mismo período no cuadrados
+  const bankMonths = new Set(txnsPos.map(t=>ym(t.fecha)));
   for (const p of pagosP) {
     if (usados.has(p.id)) continue;
-    if (minD && maxD) { const d=parseD(p.fecha); if (d<minD||d>maxD) continue; }
-    soloSheet.push({pago:p});
+    if (bankMonths.has(ym(p.fecha))) soloSheet.push({pago:p});
   }
 
   return {matched, soloBanco, soloSheet};
@@ -8993,15 +8963,16 @@ function _renderCotejo({matched, soloBanco, soloSheet}) {
   function pagoLabel(ps) {
     return ps.map(p => {
       const al = getAlumno(p.alumnoId);
-      const first = (al.nombre||p.alumnoId||'').split(' ')[0];
-      const srv = p.servicio || p.modalidad || '';
-      return first + (srv ? ' (' + srv.split(' ')[0] + ')' : '');
+      // Show first two words of name to disambiguate same-first-name siblings
+      const nombre = (al.nombre||p.alumnoId||'').split(' ').slice(0,2).join(' ');
+      const srv = (p.servicio||p.modalidad||'').split(' ')[0];
+      return nombre + (srv ? ' (' + srv + ')' : '');
     }).join(' + ');
   }
 
-  const tipoBg   = {exacto:'#c8e6c9', familia:'#dcedc8', nombre:'#b3e5fc'};
-  const tipoClr  = {exacto:'#1b5e20', familia:'#33691e', nombre:'#01579b'};
-  const tipoTxt  = {exacto:'✓ Cuadrado', familia:'✓ Familia', nombre:'✓ Nombre'};
+  const tipoBg  = {exacto:'#c8e6c9', familia:'#dcedc8'};
+  const tipoClr = {exacto:'#1b5e20', familia:'#33691e'};
+  const tipoTxt = {exacto:'✓ Cuadrado', familia:'✓ Familia'};
 
   const rows = [
     ...matched.map(({tx,pagos,tipo})=>`

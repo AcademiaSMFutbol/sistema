@@ -8875,34 +8875,104 @@ function _normBBVADate(d) {
   return clean;
 }
 
-/* Cotejo BBVA vs PAGOS */
+/* Cotejo BBVA vs PAGOS — tres pasadas:
+   1) Importe exacto + fecha ±5 días (pago individual)
+   2) Suma de hermanos del mismo clienteId + fecha ±7 días (pago familiar)
+   3) Nombre del alumno aparece en el concepto del banco          */
 function _cotejarBBVA(txns, pagos) {
   const parseD = s => {
     if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y]=s.split('/').map(Number); return new Date(y,m-1,d); }
     if (/^\d{4}-\d{2}-\d{2}$/.test(s))   { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
     return new Date(s||0);
   };
+  const daysBetween = (a,b) => Math.abs((a-b)/86400000);
 
+  // Solo pagos con importe recibido
+  const pagosP = pagos.filter(p => parseFloat(p.totalRecibido||0) > 0);
   const usados = new Set();
   const matched=[], soloBanco=[], soloSheet=[];
 
-  for (const tx of txns.filter(t=>t.importe>0)) {
-    const txD = parseD(tx.fecha), txA = Math.abs(tx.importe);
-    let best=null, bestDiff=Infinity;
-    for (const p of pagos) {
-      if (usados.has(p.id)) continue;
-      const pA = parseFloat(p.totalRecibido||p.totalEsperado||0);
-      if (Math.abs(txA-pA)>0.05) continue;
-      const days = txD?Math.abs((txD-parseD(p.fecha))/86400000):999;
-      if (days<=5 && days<bestDiff) { bestDiff=days; best=p; }
+  // Intenta todas las combinaciones no vacías de un grupo pequeño y devuelve
+  // la que sume el importe objetivo (tolerancia 5 céntimos)
+  function matchSubset(group, target) {
+    const n = group.length;
+    if (!n || n > 12) return null;
+    for (let mask = 1; mask < (1<<n); mask++) {
+      let s=0; const g=[];
+      for (let i=0; i<n; i++) if (mask & (1<<i)) { s += group[i].totalRecibido; g.push(group[i]); }
+      if (Math.abs(s - target) <= 0.05) return g;
     }
-    if (best) { usados.add(best.id); matched.push({tx,pago:best}); }
+    return null;
+  }
+
+  // Agrupar candidatos por clienteId y probar subconjuntos
+  function tryFamilyMatch(candidates, targetAmt) {
+    const byClient = {};
+    for (const p of candidates) (byClient[p.clienteId] = byClient[p.clienteId]||[]).push(p);
+    for (const grp of Object.values(byClient)) {
+      const hit = matchSubset(grp, targetAmt);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  // Tokens útiles para búsqueda por nombre (descarta palabras genéricas)
+  const STOP = new Set(['RECIBIDO','TRANSFERENCIA','TRANSFERENCIAS','BIZUM','PAGO','CARGO',
+    'ADEUDO','TRASPASO','PARA','DESDE','CEIP','ESCALERITAS','ACOGIDA','TEMPRANA',
+    'MENSUAL','MENSUALIDAD','TARJETA','PROGRAMA','CUENTA','SEGURIDAD','SOCIAL',
+    'COTIZACION','REGIMEN','GENERAL','COMPRA','SUPERMERCADO','HOGAR','PELAYO']);
+  const tokenize = str => (str||'').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .split(/[\s,:.;/()&+]+/).filter(w => w.length>=4 && !STOP.has(w));
+
+  const txnsPos = txns.filter(t => t.importe > 0);
+
+  // ── PASADA 1: importe exacto + fecha ±5 días ──────────────────────────
+  for (const tx of txnsPos) {
+    const txD = parseD(tx.fecha), txA = tx.importe;
+    let best=null, bd=Infinity;
+    for (const p of pagosP) {
+      if (usados.has(p.id)) continue;
+      if (Math.abs(txA - p.totalRecibido) > 0.05) continue;
+      const d = txD ? daysBetween(txD, parseD(p.fecha)) : 999;
+      if (d<=5 && d<bd) { bd=d; best=p; }
+    }
+    if (best) { usados.add(best.id); matched.push({tx, pagos:[best], tipo:'exacto'}); }
+  }
+
+  // ── PASADA 2: suma de hermanos (clienteId) ±7 días ───────────────────
+  for (const tx of txnsPos.filter(t => !matched.find(m=>m.tx===t))) {
+    const txD = parseD(tx.fecha), txA = tx.importe;
+    const cands = pagosP.filter(p => !usados.has(p.id) && txD && daysBetween(txD,parseD(p.fecha))<=7);
+    const hit = tryFamilyMatch(cands, txA);
+    if (hit) { for (const p of hit) usados.add(p.id); matched.push({tx, pagos:hit, tipo:'familia'}); }
+  }
+
+  // ── PASADA 3: nombre del alumno en el concepto bancario ──────────────
+  for (const tx of txnsPos.filter(t => !matched.find(m=>m.tx===t))) {
+    const txD = parseD(tx.fecha), txA = tx.importe;
+    const tokens = tokenize(tx.concepto);
+    if (!tokens.length) { soloBanco.push({tx}); continue; }
+    const alumIds = DB.alumnos
+      .filter(a => { const n=(a.nombre||'').normalize('NFD').replace(/[̀-ͯ]/g,''); return tokens.some(t=>n.includes(t)); })
+      .map(a => a.id);
+    const cands = pagosP.filter(p => !usados.has(p.id) && alumIds.includes(p.alumnoId) && txD && daysBetween(txD,parseD(p.fecha))<=7);
+    const hit = tryFamilyMatch(cands, txA);
+    if (hit) { for (const p of hit) usados.add(p.id); matched.push({tx, pagos:hit, tipo:'nombre'}); }
     else soloBanco.push({tx});
   }
 
+  // Gastos (negativos) → solo banco
   for (const tx of txns.filter(t=>t.importe<=0)) soloBanco.push({tx});
 
-  for (const p of pagos.filter(p=>!usados.has(p.id)&&parseFloat(p.totalRecibido||0)>0)) soloSheet.push({pago:p});
+  // soloSheet: pagos del período del extracto que no cuadraron
+  const txDates = txnsPos.map(t=>parseD(t.fecha).getTime()).filter(Boolean);
+  const minD = txDates.length ? new Date(Math.min(...txDates) - 7*86400000) : null;
+  const maxD = txDates.length ? new Date(Math.max(...txDates) + 7*86400000) : null;
+  for (const p of pagosP) {
+    if (usados.has(p.id)) continue;
+    if (minD && maxD) { const d=parseD(p.fecha); if (d<minD||d>maxD) continue; }
+    soloSheet.push({pago:p});
+  }
 
   return {matched, soloBanco, soloSheet};
 }
@@ -8910,40 +8980,68 @@ function _cotejarBBVA(txns, pagos) {
 function _renderCotejo({matched, soloBanco, soloSheet}) {
   const res = document.getElementById('bbva-result');
   if (res) res.style.display='';
+
+  const ingrBanco   = soloBanco.filter(x=>x.tx.importe>0);
+  const gastosBanco = soloBanco.filter(x=>x.tx.importe<=0);
+
   document.getElementById('bbva-ok').textContent   = `✓ ${matched.length} cuadrados`;
-  document.getElementById('bbva-warn').textContent = `⚠ ${soloBanco.length} solo en banco`;
+  document.getElementById('bbva-warn').textContent = `⚠ ${ingrBanco.length} sin identificar · ${gastosBanco.length} gastos`;
   document.getElementById('bbva-err').textContent  = `✗ ${soloSheet.length} solo en Sheets`;
 
-  const tbody = document.getElementById('cotejo-tbody');
-  if (!tbody) return;
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;');
+
+  function pagoLabel(ps) {
+    return ps.map(p => {
+      const al = getAlumno(p.alumnoId);
+      const first = (al.nombre||p.alumnoId||'').split(' ')[0];
+      const srv = p.servicio || p.modalidad || '';
+      return first + (srv ? ' (' + srv.split(' ')[0] + ')' : '');
+    }).join(' + ');
+  }
+
+  const tipoBg   = {exacto:'#c8e6c9', familia:'#dcedc8', nombre:'#b3e5fc'};
+  const tipoClr  = {exacto:'#1b5e20', familia:'#33691e', nombre:'#01579b'};
+  const tipoTxt  = {exacto:'✓ Cuadrado', familia:'✓ Familia', nombre:'✓ Nombre'};
 
   const rows = [
-    ...matched.map(({tx,pago})=>`
+    ...matched.map(({tx,pagos,tipo})=>`
       <tr style="background:#f1f8e9">
-        <td><span class="badge" style="background:#c8e6c9;color:#1b5e20">✓ Cuadrado</span></td>
-        <td class="mono" style="font-size:12px">${tx.fecha}</td>
-        <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${tx.concepto}">${tx.concepto}</td>
-        <td style="text-align:right;font-weight:600">${fmtEur(Math.abs(tx.importe))}</td>
-        <td class="mono" style="font-size:12px">${fmtDate(pago.fecha)}</td>
-        <td style="font-size:12px">${pago.servicio||pago.modalidad||pago.id||'—'}</td>
+        <td><span class="badge" style="background:${tipoBg[tipo]||'#c8e6c9'};color:${tipoClr[tipo]||'#1b5e20'}">${tipoTxt[tipo]||'✓'}</span></td>
+        <td class="mono" style="font-size:12px">${esc(tx.fecha)}</td>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(tx.concepto)}">${esc(tx.concepto)}</td>
+        <td style="text-align:right;font-weight:600;color:var(--green)">${fmtEur(tx.importe)}</td>
+        <td class="mono" style="font-size:12px">${fmtDate(pagos[0].fecha)}</td>
+        <td style="font-size:11px;max-width:160px">${esc(pagoLabel(pagos))}</td>
       </tr>`),
-    ...soloBanco.map(({tx})=>`
+    ...ingrBanco.map(({tx})=>`
       <tr style="background:#fff8e1">
-        <td><span class="badge" style="background:#ffe0b2;color:#bf360c">⚠ Solo banco</span></td>
-        <td class="mono" style="font-size:12px">${tx.fecha}</td>
-        <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${tx.concepto}">${tx.concepto}</td>
-        <td style="text-align:right;font-weight:600;color:${tx.importe<0?'var(--red)':'var(--green)'}">${fmtEur(tx.importe)}</td>
+        <td><span class="badge" style="background:#ffe0b2;color:#bf360c">⚠ Sin ID</span></td>
+        <td class="mono" style="font-size:12px">${esc(tx.fecha)}</td>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(tx.concepto)}">${esc(tx.concepto)}</td>
+        <td style="text-align:right;font-weight:600;color:var(--green)">${fmtEur(tx.importe)}</td>
+        <td>—</td><td>—</td>
+      </tr>`),
+    ...gastosBanco.map(({tx})=>`
+      <tr style="background:#f5f5f5">
+        <td><span class="badge" style="background:#e0e0e0;color:#424242">↓ Gasto</span></td>
+        <td class="mono" style="font-size:12px">${esc(tx.fecha)}</td>
+        <td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(tx.concepto)}">${esc(tx.concepto)}</td>
+        <td style="text-align:right;font-weight:600;color:var(--red)">${fmtEur(tx.importe)}</td>
         <td>—</td><td>—</td>
       </tr>`),
     ...soloSheet.map(({pago})=>`
       <tr style="background:#fce4ec">
         <td><span class="badge" style="background:#f8bbd0;color:#880e4f">✗ Solo Sheets</span></td>
-        <td>—</td><td>—</td>
-        <td style="text-align:right;font-weight:600">${fmtEur(parseFloat(pago.totalRecibido||pago.totalEsperado||0))}</td>
+        <td>—</td>
+        <td style="font-size:12px">${esc(pagoLabel([pago]))}</td>
+        <td style="text-align:right;font-weight:600">${fmtEur(pago.totalRecibido)}</td>
         <td class="mono" style="font-size:12px">${fmtDate(pago.fecha)}</td>
-        <td style="font-size:12px">${pago.servicio||pago.modalidad||pago.id||'—'}</td>
+        <td style="font-size:11px">${esc(pago.servicio||pago.modalidad||pago.id||'—')}</td>
       </tr>`)
   ];
+
+  const tbody = document.getElementById('cotejo-tbody');
+  if (!tbody) return;
   tbody.innerHTML = rows.join('') || '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--grey-2)">Sin movimientos</td></tr>';
 }
 

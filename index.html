@@ -496,13 +496,12 @@ tbody tr:hover { background: #fafafa; }
         <option value="AMPA">AMPA (Responsables)</option>
       </select>
     </div>
-    <!-- Monitor: login con Google (se muestra al seleccionar Monitor) -->
+    <!-- Google Sign-In (Monitor, Familia, AMPA) -->
     <div id="login-monitor-google" style="display:none">
       <div style="text-align:center;padding:.5rem 0 1.25rem">
-        <div style="font-size:12px;color:#888;margin-bottom:1rem">
-          Usa tu cuenta Google de trabajo para acceder
+        <div style="font-size:12px;color:#888;margin-bottom:1rem" id="login-google-hint">
+          Accede con tu cuenta de Google
         </div>
-        <!-- Botón Google Sign-In oficial -->
         <div id="google-signin-btn" style="display:flex;justify-content:center"></div>
         <div id="login-google-error" style="font-size:12px;color:#ef5350;margin-top:.75rem;display:none"></div>
       </div>
@@ -826,6 +825,20 @@ function setPassword(role, newPass) {
   try {
     const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
     stored[role] = newPass;
+    localStorage.setItem(PASS_KEY, JSON.stringify(stored));
+    return true;
+  } catch(e) { return false; }
+}
+function getAmpaEmails() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
+    return (stored.ampa_emails || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+  } catch(e) { return []; }
+}
+function setAmpaEmails(emailsStr) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
+    stored.ampa_emails = emailsStr;
     localStorage.setItem(PASS_KEY, JSON.stringify(stored));
     return true;
   } catch(e) { return false; }
@@ -1859,21 +1872,29 @@ function loadCacheLocal() {
 document.getElementById('login-role').addEventListener('change', function() {
   const isMonitor = this.value === 'MONITOR';
   const isFamilia = this.value === 'FAMILIA';
-
-  // Google Sign-In para monitor (si hay Client ID configurado)
+  const isAmpa    = this.value === 'AMPA';
   const tieneGoogleClientId = !!GOOGLE_CLIENT_ID;
-  document.getElementById('login-monitor-google').style.display = isMonitor && tieneGoogleClientId ? '' : 'none';
-  // Fallback usuario+contraseña: monitor sin Google ID, o admin/familia
-  document.getElementById('login-monitor-wrap').style.display   = isMonitor && !tieneGoogleClientId ? '' : 'none';
-  document.getElementById('login-familia-wrap').style.display   = isFamilia ? '' : 'none';
-  // Campo contraseña: oculto para monitor con Google
-  document.getElementById('login-pass-wrap').style.display      = (isMonitor && tieneGoogleClientId) ? 'none' : '';
-  document.getElementById('btn-login').style.display            = (isMonitor && tieneGoogleClientId) ? 'none' : '';
+  const usaGoogle = (isMonitor || isFamilia || isAmpa) && tieneGoogleClientId;
 
-  // Renderizar botón de Google si aplica
-  if (isMonitor && tieneGoogleClientId) {
-    _renderGoogleBtn();
+  // Texto de ayuda según rol
+  const hint = document.getElementById('login-google-hint');
+  if (hint) {
+    if (isFamilia)   hint.textContent = 'Accede con el email de Google de la familia';
+    else if (isAmpa) hint.textContent = 'Responsables AMPA: accede con tu cuenta de Google';
+    else             hint.textContent = 'Accede con tu cuenta de Google';
   }
+
+  // Google button: visible para Monitor/Familia/AMPA con Client ID configurado
+  document.getElementById('login-monitor-google').style.display = usaGoogle ? '' : 'none';
+  // Fallback usuario+contraseña: solo monitor sin Google ID
+  document.getElementById('login-monitor-wrap').style.display   = isMonitor && !tieneGoogleClientId ? '' : 'none';
+  // Email: solo para Familia sin Google ID
+  document.getElementById('login-familia-wrap').style.display   = isFamilia && !tieneGoogleClientId ? '' : 'none';
+  // Contraseña y botón: ocultos cuando se usa Google
+  document.getElementById('login-pass-wrap').style.display      = usaGoogle ? 'none' : '';
+  document.getElementById('btn-login').style.display            = usaGoogle ? 'none' : '';
+
+  if (usaGoogle) _renderGoogleBtn();
 });
 document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
 
@@ -1905,11 +1926,10 @@ async function _onGoogleCredential(response) {
   errEl.style.display = 'none';
 
   try {
-    // Decodificar el JWT (sin verificar firma — solo para leer el email)
-    // La verificación real la haría el servidor; aquí confiamos en Google
-    const payload = JSON.parse(atob(response.credential.split('.')[1]));
-    const email   = (payload.email || '').toLowerCase().trim();
-    const name    = payload.name || payload.given_name || email;
+    const payload      = JSON.parse(atob(response.credential.split('.')[1]));
+    const email        = (payload.email || '').toLowerCase().trim();
+    const googleName   = payload.name || payload.given_name || email;
+    const selectedRole = document.getElementById('login-role').value;
 
     if (!email) {
       errEl.textContent = 'No se pudo obtener el email de Google.';
@@ -1917,53 +1937,89 @@ async function _onGoogleCredential(response) {
       return;
     }
 
-    // Esperar a que DB.personal esté cargado
-    if (!DB.personal.length) {
+    // Cargar datos si aún no están disponibles
+    if (!DB.personal.length && !DB.clientes.length) {
       errEl.textContent = '⏳ Cargando datos… espera un momento.';
       errEl.style.display = 'block';
       try { await syncAll(); } catch(e) {}
       errEl.style.display = 'none';
     }
 
-    if (!DB.personal.length) {
-      errEl.textContent = 'Sin conexión al sistema. Verifica tu internet e inténtalo de nuevo.';
-      errEl.style.display = 'block';
-      return;
+    if (selectedRole === 'FAMILIA') {
+      if (!DB.clientes.length) {
+        errEl.textContent = 'Sin conexión al sistema. Verifica tu internet e inténtalo de nuevo.';
+        errEl.style.display = 'block';
+        return;
+      }
+      const cliente = DB.clientes.find(c => (c.email||'').toLowerCase().trim() === email);
+      if (!cliente) {
+        errEl.textContent = `El email ${email} no está registrado en el sistema. Contacta con SM Academia.`;
+        errEl.style.display = 'block';
+        return;
+      }
+      currentUser = {
+        role:      'FAMILIA',
+        name:      cliente.nombre,
+        email,
+        clienteId: cliente.id,
+        initials:  cliente.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase(),
+        ts:        Date.now()
+      };
+
+    } else if (selectedRole === 'AMPA') {
+      const ampaEmails = getAmpaEmails();
+      if (!ampaEmails.length) {
+        errEl.textContent = 'Acceso AMPA no configurado. Contacta con Samy para autorizar tu email.';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (!ampaEmails.includes(email)) {
+        errEl.textContent = `El email ${email} no está autorizado para AMPA. Contacta con SM Academia.`;
+        errEl.style.display = 'block';
+        return;
+      }
+      currentUser = {
+        role:     'AMPA',
+        name:     'AMPA Escaleritas',
+        email,
+        initials: 'AM',
+        ts:       Date.now()
+      };
+
+    } else {
+      // MONITOR
+      if (!DB.personal.length) {
+        errEl.textContent = 'Sin conexión al sistema. Verifica tu internet e inténtalo de nuevo.';
+        errEl.style.display = 'block';
+        return;
+      }
+      const mon = DB.personal.find(p =>
+        p.email && p.email.toLowerCase().trim() === email
+      );
+      if (!mon) {
+        errEl.textContent = `Email ${email} no encontrado en el sistema. Contacta con Samy.`;
+        errEl.style.display = 'block';
+        return;
+      }
+      if (!mon.activo) {
+        errEl.textContent = 'Tu cuenta está inactiva. Contacta con el administrador.';
+        errEl.style.display = 'block';
+        return;
+      }
+      currentUser = {
+        role:     'MONITOR',
+        name:     mon.nombre,
+        email,
+        initials: mon.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase(),
+        ts:       Date.now()
+      };
+      if (mon.certVence) {
+        const dias = daysBetween(new Date(), new Date(mon.certVence));
+        if (dias < 30) showToast(`⚠️ Certificado de delitos vence en ${dias} días`, 'warning');
+      }
     }
 
-    // Buscar la monitora por email en PERSONAL
-    const mon = DB.personal.find(p =>
-      p.email && p.email.toLowerCase().trim() === email
-    );
-
-    if (!mon) {
-      errEl.textContent = `Email ${email} no encontrado en el sistema. Contacta con Samy.`;
-      errEl.style.display = 'block';
-      return;
-    }
-
-    if (!mon.activo) {
-      errEl.textContent = 'Tu cuenta está inactiva. Contacta con el administrador.';
-      errEl.style.display = 'block';
-      return;
-    }
-
-    // ✅ Login correcto — crear sesión
-    currentUser = {
-      role:     'MONITOR',
-      name:     mon.nombre,
-      email,
-      initials: mon.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase(),
-      ts:       Date.now()
-    };
     localStorage.setItem(SESSION_KEY, JSON.stringify(currentUser));
-
-    if (mon.certVence) {
-      const dias = daysBetween(new Date(), new Date(mon.certVence));
-      if (dias < 30) showToast(`⚠️ Certificado de delitos vence en ${dias} días`, 'warning');
-    }
-
-    // Mostrar pantalla de carga y sincronizar
     lsShow();
     syncAllWithProgress().catch(() => {
       lsError('Error de conexión — entrando con datos anteriores.');
@@ -2053,6 +2109,13 @@ async function doLogin() {
     }
 
   } else if (role === 'FAMILIA') {
+    // Con Google configurado nunca se llega aquí (btn-login está oculto)
+    // Fallback sin Google: email + contraseña compartida (legado)
+    if (GOOGLE_CLIENT_ID) {
+      err.style.display = 'block';
+      err.textContent = 'Usa el botón de Google para acceder como Familia.';
+      return;
+    }
     const familiaPass = getFamiliaPass();
     if (!familiaPass) {
       err.style.display = 'block';
@@ -2080,6 +2143,12 @@ async function doLogin() {
     return;
 
   } else if (role === 'AMPA') {
+    // Con Google configurado nunca se llega aquí (btn-login está oculto)
+    if (GOOGLE_CLIENT_ID) {
+      err.style.display = 'block';
+      err.textContent = 'Usa el botón de Google para acceder como AMPA.';
+      return;
+    }
     const ampaPass = getAmpaPass();
     if (!ampaPass) {
       err.style.display = 'block';
@@ -2168,19 +2237,19 @@ function modalCambiarPassword() {
         <input type="password" class="field-input" id="cp-confirm" placeholder="Repite la contraseña">
       </div>
       <hr style="margin:1rem 0;border:none;border-top:1px solid #eee">
-      <div style="font-size:12px;font-weight:600;color:var(--grey-2);margin-bottom:.5rem">CONTRASEÑA COMPARTIDA FAMILIAS</div>
-      <div class="field-group">
-        <label class="field-label">Nueva contraseña para todas las familias</label>
-        <input type="password" class="field-input" id="cp-familia" placeholder="Dejar vacío para no cambiar">
+      <div style="font-size:12px;font-weight:600;color:var(--grey-2);margin-bottom:.5rem">ACCESO FAMILIAS</div>
+      <div style="padding:.75rem;background:var(--green-bg);border-radius:8px;font-size:12px;color:var(--grey-2)">
+        Las familias acceden con su cuenta de Google. El email debe coincidir con el registrado en la hoja CLIENTES.
       </div>
-      <div style="font-size:11px;color:var(--grey-2);margin-top:.25rem">Esta contraseña la usan todas las familias para entrar al sistema.</div>
       <hr style="margin:1rem 0;border:none;border-top:1px solid #eee">
-      <div style="font-size:12px;font-weight:600;color:var(--grey-2);margin-bottom:.5rem">CONTRASEÑA RESPONSABLES AMPA</div>
+      <div style="font-size:12px;font-weight:600;color:var(--grey-2);margin-bottom:.5rem">EMAILS AUTORIZADOS AMPA</div>
       <div class="field-group">
-        <label class="field-label">Nueva contraseña para las responsables del AMPA</label>
-        <input type="password" class="field-input" id="cp-ampa" placeholder="Dejar vacío para no cambiar">
+        <label class="field-label">Emails de las responsables AMPA (separados por comas)</label>
+        <input type="text" class="field-input" id="cp-ampa-emails"
+               placeholder="responsable1@gmail.com, responsable2@gmail.com"
+               value="${getAmpaEmails().join(', ')}">
       </div>
-      <div style="font-size:11px;color:var(--grey-2);margin-top:.25rem">Permite a las directivas del AMPA descargar el informe mensual de asistencia.</div>`;
+      <div style="font-size:11px;color:var(--grey-2);margin-top:.25rem">Accederán con estas cuentas de Google. Añade o elimina emails según sea necesario.</div>`;
   } else if (role === 'MONITOR') {
     campos = `
       <div style="padding:1rem;background:var(--green-bg);border-radius:8px;font-size:13px">
@@ -2206,11 +2275,10 @@ function modalCambiarPassword() {
 }
 
 function confirmarCambioPassword() {
-  const actual  = document.getElementById('cp-actual')?.value || '';
-  const nueva   = document.getElementById('cp-nueva')?.value || '';
-  const confirm = document.getElementById('cp-confirm')?.value || '';
-  const familia = document.getElementById('cp-familia')?.value || '';
-  const ampa    = document.getElementById('cp-ampa')?.value   || '';
+  const actual     = document.getElementById('cp-actual')?.value || '';
+  const nueva      = document.getElementById('cp-nueva')?.value || '';
+  const confirm    = document.getElementById('cp-confirm')?.value || '';
+  const ampaEmails = document.getElementById('cp-ampa-emails')?.value ?? null;
 
   if (actual !== getAdminPass()) {
     showToast('Contraseña actual incorrecta', 'error'); return;
@@ -2222,11 +2290,10 @@ function confirmarCambioPassword() {
     showToast('Las contraseñas no coinciden', 'error'); return;
   }
   let cambios = 0;
-  if (nueva)   { setPassword('admin',   nueva);   cambios++; }
-  if (familia) { setPassword('familia', familia);  cambios++; }
-  if (ampa)    { setPassword('ampa',    ampa);     cambios++; }
+  if (nueva)               { setPassword('admin', nueva); cambios++; }
+  if (ampaEmails !== null) { setAmpaEmails(ampaEmails);   cambios++; }
   closeModal();
-  if (cambios > 0) showToast(`${cambios} contraseña(s) actualizada(s) ✓`, 'success');
+  if (cambios > 0) showToast(`Configuración guardada ✓`, 'success');
   else showToast('Sin cambios', 'info');
 }
 

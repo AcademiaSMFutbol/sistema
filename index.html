@@ -264,6 +264,14 @@ a { text-decoration: none; color: inherit; }
 .kpi-delta.up { color: var(--green); }
 .kpi-delta.down { color: var(--red); }
 
+/* Tabs (Contabilidad y otros) */
+.tab-bar { display:flex; gap:4px; margin-bottom:1.5rem; border-bottom:2px solid #f0f0f0; }
+.tab-btn { background:none; border:none; padding:.6rem 1.25rem; font-size:13px; font-weight:500; color:var(--grey-2); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; border-radius:0; transition:color .15s; }
+.tab-btn:hover { color:var(--black); }
+.tab-btn.active { color:var(--green); border-bottom-color:var(--green); font-weight:600; }
+.bbva-drop { background:#f8f9fa; border:2px dashed #e0e0e0; border-radius:12px; padding:2rem; text-align:center; margin-bottom:1.5rem; transition:border-color .15s; }
+.bbva-drop.over { border-color:var(--green); background:#f1f8e9; }
+
 /* Tables */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -628,6 +636,9 @@ tbody tr:hover { background: #fafafa; }
         </div>
         <div class="nav-item" onclick="navigate('facturas')" data-page="facturas">
           <span class="nav-icon">🧾</span><span>Facturas</span>
+        </div>
+        <div class="nav-item" onclick="navigate('contabilidad')" data-page="contabilidad">
+          <span class="nav-icon">💰</span><span>Contabilidad</span>
         </div>
       </div>
 
@@ -2467,6 +2478,7 @@ const PAGE_META = {
   nominas:        { title: 'Nóminas', sub: 'Generación y archivo de recibos de salario' },
   pagos:          { title: 'Pagos', sub: 'Control de cobros y morosidad' },
   facturas:       { title: 'Facturas', sub: 'Emisión y archivo VeriFactu' },
+  contabilidad:   { title: 'Contabilidad', sub: 'Gastos, cotejo bancario BBVA y tickets' },
   futbol:         { title: 'SM Fútbol', sub: 'Sesiones, evaluaciones y Camino SM' },
   extraescolares: { title: 'SM Extraescolares', sub: 'CEIP Escaleritas · Actividades y asistencia' },
   // asistencia eliminada — se registra desde SM Fútbol y SM Extraescolares
@@ -2521,6 +2533,7 @@ function renderCurrentPage() {
   const pages = {
     dashboard, clientes, alumnos, inscripciones, pagos, facturas,
     futbol, extraescolares, personal, incidencias, informes, configuracion,
+    contabilidad,
     'registro-horario': registroHorario,
     pitusa: pitusaEventos,
     nominas: nominas
@@ -8484,6 +8497,406 @@ function informes() {
       </div>`,
       `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`);
   };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PAGE: CONTABILIDAD
+═══════════════════════════════════════════════════════════ */
+
+const CATEGORIAS_GASTO = [
+  'Personal / Nóminas','Seguridad Social','Material deportivo',
+  'Alquiler instalaciones','Servicios / Suministros','Seguros',
+  'Marketing / Publicidad','Gastos bancarios','Gestoría / Asesoría','Otros'
+];
+const METODOS_PAGO_GASTO = ['Efectivo','Transferencia','Tarjeta','Domiciliación','Bizum','Cheque'];
+
+function newGastoId() {
+  const d = new Date().toISOString().slice(0,10).replace(/-/g,'');
+  return `G-${d}-${Math.floor(Math.random()*900)+100}`;
+}
+
+function contabilidad() {
+  const tab = window._contabTab || 'gastos';
+  addTopbarBtn('+ Añadir gasto', () => modalNuevoGasto(), 'btn-primary');
+  addTopbarBtn('🔄 Actualizar', async () => {
+    showToast('Actualizando…','info');
+    try { await syncAll(); contabilidad(); } catch(e) { showToast('Error al actualizar','error'); }
+  }, 'btn-secondary');
+
+  document.getElementById('page-content').innerHTML = `
+    <div class="tab-bar">
+      <button class="tab-btn ${tab==='gastos'?'active':''}" onclick="window._contabTab='gastos';contabilidad()">💰 Gastos</button>
+      <button class="tab-btn ${tab==='cotejo'?'active':''}" onclick="window._contabTab='cotejo';contabilidad()">🏦 Cotejo BBVA</button>
+    </div>
+    <div id="contab-body"></div>
+  `;
+
+  if (tab === 'cotejo') _renderContabCotejo();
+  else _renderContabGastos();
+}
+
+/* ── Tab Gastos ── */
+function _renderContabGastos() {
+  const gastos = [...DB.gastos].sort((a,b) => {
+    const parseD = s => {
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y]=s.split('/').map(Number); return new Date(y,m-1,d).getTime(); }
+      return new Date(s||0).getTime();
+    };
+    return parseD(b.fecha) - parseD(a.fecha);
+  });
+
+  const total     = gastos.reduce((s,g)=>s+g.importe,0);
+  const efectivo  = gastos.filter(g=>g.metodo==='Efectivo').reduce((s,g)=>s+g.importe,0);
+  const meses     = [...new Set(gastos.map(g=>g.mes).filter(Boolean))].sort().reverse();
+  const cats      = [...new Set(gastos.map(g=>g.categoria).filter(Boolean))].sort();
+
+  document.getElementById('contab-body').innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1.5rem">
+      <div class="kpi-card"><div class="kpi-label">Total gastos</div><div class="kpi-value red">${fmtEur(total)}</div><div class="kpi-delta">${gastos.length} registros</div></div>
+      <div class="kpi-card"><div class="kpi-label">En efectivo</div><div class="kpi-value">${fmtEur(efectivo)}</div><div class="kpi-delta">${gastos.filter(g=>g.metodo==='Efectivo').length} registros</div></div>
+      <div class="kpi-card"><div class="kpi-label">Categorías</div><div class="kpi-value">${cats.length}</div><div class="kpi-delta">distintas</div></div>
+    </div>
+    <div style="display:flex;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap;align-items:center">
+      <select id="fg-mes" style="padding:.5rem .75rem;border:1px solid #e0e0e0;border-radius:8px;font-size:13px;background:#fff">
+        <option value="">Todos los meses</option>
+        ${meses.map(m=>`<option value="${m}">${fmtMonth(m)}</option>`).join('')}
+      </select>
+      <select id="fg-cat" style="padding:.5rem .75rem;border:1px solid #e0e0e0;border-radius:8px;font-size:13px;background:#fff">
+        <option value="">Todas las categorías</option>
+        ${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}
+      </select>
+      <select id="fg-met" style="padding:.5rem .75rem;border:1px solid #e0e0e0;border-radius:8px;font-size:13px;background:#fff">
+        <option value="">Todos los métodos</option>
+        ${METODOS_PAGO_GASTO.map(m=>`<option value="${m}">${m}</option>`).join('')}
+      </select>
+      <span id="fg-count" style="font-size:12px;color:var(--grey-2);margin-left:auto"></span>
+    </div>
+    <div class="table-wrap">
+      <table class="table"><thead><tr>
+        <th>Fecha</th><th>Proveedor / Concepto</th><th>Categoría</th><th>Método</th><th style="text-align:right">Importe</th><th>Ticket</th>
+      </tr></thead><tbody id="fg-tbody"></tbody></table>
+    </div>
+  `;
+
+  const render = () => {
+    const mes = document.getElementById('fg-mes')?.value||'';
+    const cat = document.getElementById('fg-cat')?.value||'';
+    const met = document.getElementById('fg-met')?.value||'';
+    const f   = gastos.filter(g=>(!mes||g.mes===mes)&&(!cat||g.categoria===cat)&&(!met||g.metodo===met));
+    const tot = f.reduce((s,g)=>s+g.importe,0);
+    const cnt = document.getElementById('fg-count');
+    if (cnt) cnt.textContent = `${f.length} gastos · ${fmtEur(tot)}`;
+    const tbody = document.getElementById('fg-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = f.length ? f.map(g=>`
+      <tr>
+        <td class="mono" style="font-size:12px;white-space:nowrap">${g.fecha||'—'}</td>
+        <td>
+          <div style="font-weight:500;font-size:13px">${g.proveedor||g.concepto||'—'}</div>
+          ${g.proveedor?`<div style="font-size:11px;color:var(--grey-2)">${g.concepto}</div>`:''}
+        </td>
+        <td><span class="badge badge-grey" style="font-size:11px">${g.categoria||'—'}</span></td>
+        <td style="font-size:12px">${g.metodo||'—'}</td>
+        <td style="text-align:right;font-weight:600;color:var(--red)">${fmtEur(g.importe)}</td>
+        <td style="font-size:11px">${g.observaciones&&(g.observaciones.startsWith('http')||g.observaciones.startsWith('drive'))?`<a href="${g.observaciones}" target="_blank" style="color:var(--green);text-decoration:none">📎 ver</a>`:(g.observaciones?'📝':'')}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">💰</div><div class="empty-title">Sin gastos registrados</div><div class="empty-sub" style="font-size:12px;color:var(--grey-2)">Usa el botón + Añadir gasto o revisa los filtros</div></div></td></tr>`;
+  };
+  render();
+  ['fg-mes','fg-cat','fg-met'].forEach(id=>document.getElementById(id)?.addEventListener('change',render));
+}
+
+/* ── Modal nuevo gasto ── */
+function modalNuevoGasto(prefill={}) {
+  const d   = new Date();
+  const hoy = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+  openModal('💰 Nuevo gasto', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+      <div class="field-group">
+        <label class="field-label">Fecha <span class="req">*</span></label>
+        <input type="text" class="field-input" id="ng-fecha" placeholder="DD/MM/YYYY" value="${prefill.fecha||hoy}">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Importe € <span class="req">*</span></label>
+        <input type="number" class="field-input" id="ng-importe" placeholder="0.00" step="0.01" min="0" value="${prefill.importe||''}">
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Proveedor / comercio</label>
+      <input type="text" class="field-input" id="ng-proveedor" placeholder="Nombre del proveedor" value="${prefill.proveedor||''}">
+    </div>
+    <div class="field-group">
+      <label class="field-label">Concepto <span class="req">*</span></label>
+      <input type="text" class="field-input" id="ng-concepto" placeholder="Descripción del gasto" value="${prefill.concepto||''}">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
+      <div class="field-group">
+        <label class="field-label">Categoría <span class="req">*</span></label>
+        <select class="field-input" id="ng-cat">
+          <option value="">— Selecciona —</option>
+          ${CATEGORIAS_GASTO.map(c=>`<option value="${c}"${prefill.categoria===c?' selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Método pago</label>
+        <select class="field-input" id="ng-metodo">
+          ${METODOS_PAGO_GASTO.map(m=>`<option value="${m}"${(prefill.metodo||'Efectivo')===m?' selected':''}>${m}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="field-group">
+      <label class="field-label">Asociado a (proyecto, inscripción…)</label>
+      <input type="text" class="field-input" id="ng-asociado" placeholder="Opcional" value="${prefill.asociadoA||''}">
+    </div>
+    <div class="field-group">
+      <label class="field-label">Ticket / foto</label>
+      <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+        <input type="file" id="ng-ticket" accept="image/*" capture="environment" style="display:none" onchange="_previewTicket(this)">
+        <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('ng-ticket').click()">📷 Foto ticket</button>
+        <input type="url" class="field-input" id="ng-obs" placeholder="o pega URL de Google Drive" style="flex:1;min-width:180px" value="${prefill.observaciones||''}">
+      </div>
+      <div id="ng-ticket-prev" style="margin-top:.5rem"></div>
+    </div>
+  `,`<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" id="ng-save" onclick="guardarNuevoGasto()">💾 Guardar gasto</button>`);
+}
+
+function _previewTicket(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const prev = document.getElementById('ng-ticket-prev');
+    if (prev) prev.innerHTML = `<img src="${e.target.result}" style="max-width:100%;max-height:180px;border-radius:8px;border:1px solid #e0e0e0">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+async function guardarNuevoGasto() {
+  const fecha     = (document.getElementById('ng-fecha')?.value||'').trim();
+  const concepto  = (document.getElementById('ng-concepto')?.value||'').trim();
+  const cat       = document.getElementById('ng-cat')?.value||'';
+  const importeRaw = document.getElementById('ng-importe')?.value||'';
+  if (!fecha||!concepto||!cat||!importeRaw) { showToast('Rellena los campos obligatorios','error'); return; }
+  const importe = parseFloat(importeRaw);
+  if (isNaN(importe)||importe<0) { showToast('Importe no válido','error'); return; }
+
+  const m = fecha.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const mes = m ? ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][parseInt(m[2])-1]||'' : '';
+
+  const proveedor  = (document.getElementById('ng-proveedor')?.value||'').trim();
+  const metodo     = document.getElementById('ng-metodo')?.value||'Efectivo';
+  const asociadoA  = (document.getElementById('ng-asociado')?.value||'').trim();
+  const obs        = (document.getElementById('ng-obs')?.value||'').trim();
+  const id         = newGastoId();
+
+  const btn = document.getElementById('ng-save');
+  if (btn) { btn.disabled=true; btn.textContent='Guardando…'; }
+
+  await writeToSheet('GASTOS', [id, fecha, mes, proveedor, concepto, cat, importe.toFixed(2), metodo, asociadoA, obs]);
+
+  DB.gastos.unshift({ id, fecha, mes, proveedor, concepto, categoria:cat, importe, metodo, asociadoA, observaciones:obs, _raw:{} });
+  closeModal();
+  showToast('✅ Gasto registrado','success');
+  window._contabTab = 'gastos';
+  contabilidad();
+}
+
+/* ── Tab Cotejo BBVA ── */
+function _renderContabCotejo() {
+  document.getElementById('contab-body').innerHTML = `
+    <div style="max-width:860px">
+      <div class="bbva-drop" id="bbva-drop">
+        <div style="font-size:2.5rem;margin-bottom:.75rem">🏦</div>
+        <div style="font-weight:600;font-size:15px;margin-bottom:.35rem">Sube el extracto BBVA en PDF</div>
+        <div style="font-size:12px;color:var(--grey-2);margin-bottom:1.25rem">El PDF debe tener texto seleccionable (no escaneado). Columnas: Fecha · Concepto · Importe · Saldo.</div>
+        <input type="file" id="bbva-file" accept=".pdf" style="display:none" onchange="procesarBBVA(this.files[0])">
+        <button class="btn btn-primary" onclick="document.getElementById('bbva-file').click()">📂 Seleccionar PDF</button>
+      </div>
+      <div id="bbva-msg" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;border-radius:8px;font-size:13px"></div>
+      <div id="bbva-result" style="display:none">
+        <div style="display:flex;gap:.5rem;margin-bottom:1rem;flex-wrap:wrap">
+          <span id="bbva-ok"  style="padding:.35rem .9rem;border-radius:20px;font-size:12px;font-weight:600;background:#e8f5e9;color:#2e7d32"></span>
+          <span id="bbva-warn" style="padding:.35rem .9rem;border-radius:20px;font-size:12px;font-weight:600;background:#fff3e0;color:#e65100"></span>
+          <span id="bbva-err"  style="padding:.35rem .9rem;border-radius:20px;font-size:12px;font-weight:600;background:#fce4ec;color:#c62828"></span>
+        </div>
+        <div class="table-wrap">
+          <table class="table"><thead><tr>
+            <th>Estado</th><th>Fecha banco</th><th>Concepto banco</th><th style="text-align:right">Importe</th><th>Fecha Sheets</th><th>Referencia Sheets</th>
+          </tr></thead><tbody id="cotejo-tbody"></tbody></table>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const drop = document.getElementById('bbva-drop');
+  if (drop) {
+    drop.addEventListener('dragover', e=>{ e.preventDefault(); drop.classList.add('over'); });
+    drop.addEventListener('dragleave', ()=>drop.classList.remove('over'));
+    drop.addEventListener('drop', e=>{
+      e.preventDefault(); drop.classList.remove('over');
+      const f = e.dataTransfer.files[0];
+      if (f && f.type==='application/pdf') procesarBBVA(f);
+    });
+  }
+}
+
+async function procesarBBVA(file) {
+  const msg = document.getElementById('bbva-msg');
+  const setMsg = (txt, bg='#e8f5e9') => { if(msg){msg.style.display='';msg.style.background=bg;msg.textContent=txt;} };
+  setMsg('⏳ Extrayendo texto del PDF…','#e3f2fd');
+  try {
+    const text = await _extractPDFText(file);
+    const txns = _parseBBVAText(text);
+    if (!txns.length) { setMsg('⚠️ No se encontraron transacciones. Comprueba que el PDF es un extracto BBVA con texto seleccionable.','#fff3e0'); return; }
+    setMsg(`✅ ${txns.length} movimientos extraídos. Cotejando con ${DB.pagos.length} pagos en Sheets…`);
+    const r = _cotejarBBVA(txns, DB.pagos);
+    _renderCotejo(r);
+  } catch(e) {
+    setMsg('❌ Error: ' + e.message,'#fce4ec');
+    console.error('[BBVA]', e);
+  }
+}
+
+/* Lazy-load PDF.js y extraer texto */
+async function _extractPDFText(file) {
+  if (!window.pdfjsLib) {
+    await new Promise((res,rej)=>{
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      s.onload = res; s.onerror = ()=>rej(new Error('No se pudo cargar PDF.js'));
+      document.head.appendChild(s);
+    });
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  let out = '';
+  for (let i=1; i<=pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    out += tc.items.map(it=>it.str).join(' ') + '\n';
+  }
+  return out;
+}
+
+/* Parser BBVA: DD/MM/YYYY concepto importe saldo */
+function _parseBBVAText(text) {
+  const lines = text.split(/[\n\r]+/).map(l=>l.trim()).filter(Boolean);
+  const dateRe = /^(\d{2}[\/\-]\d{2}(?:[\/\-]\d{4})?)\s+(.+)/;
+  const numRe  = /([+-]?\d{1,3}(?:\.\d{3})*,\d{2})/g;
+  const txns   = [];
+  let cur = null;
+
+  for (const line of lines) {
+    const m = line.match(dateRe);
+    if (m) {
+      if (cur) txns.push(cur);
+      const rest = m[2];
+      const nums = [...rest.matchAll(numRe)].map(n=>_parseEsNum(n[1]));
+      const importe = nums.length>=2 ? nums[nums.length-2] : (nums[0]??null);
+      const saldo   = nums.length>=2 ? nums[nums.length-1] : null;
+      const concepto = rest.replace(numRe,'').replace(/\s+/g,' ').trim();
+      cur = { fecha:_normBBVADate(m[1]), concepto, importe, saldo };
+    } else if (cur && line.length>3 && !/^(Fecha|Saldo|SALDO|Concepto)/i.test(line) && !/^\d{1,3}(?:\.\d{3})*,\d{2}$/.test(line)) {
+      cur.concepto += ' ' + line;
+    }
+  }
+  if (cur) txns.push(cur);
+
+  // Inferir signo por diferencia de saldos
+  for (let i=1; i<txns.length; i++) {
+    if (txns[i].saldo!==null && txns[i-1].saldo!==null && txns[i].importe!==null) {
+      const diff = txns[i].saldo - txns[i-1].saldo;
+      if (Math.abs(diff)>0.005) txns[i].importe = diff<0 ? -Math.abs(txns[i].importe) : Math.abs(txns[i].importe);
+    }
+  }
+  return txns.filter(t=>t.importe!==null);
+}
+
+function _parseEsNum(s) {
+  if (!s) return 0;
+  const sign = s.startsWith('-')?-1:1;
+  return sign * parseFloat(s.replace(/[+-]/g,'').replace(/\./g,'').replace(',','.'));
+}
+
+function _normBBVADate(d) {
+  const clean = d.replace(/-/g,'/');
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(clean)) return clean;
+  if (/^\d{2}\/\d{2}$/.test(clean)) return clean+'/'+new Date().getFullYear();
+  return clean;
+}
+
+/* Cotejo BBVA vs PAGOS */
+function _cotejarBBVA(txns, pagos) {
+  const parseD = s => {
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) { const [d,m,y]=s.split('/').map(Number); return new Date(y,m-1,d); }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s))   { const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
+    return new Date(s||0);
+  };
+
+  const usados = new Set();
+  const matched=[], soloBanco=[], soloSheet=[];
+
+  for (const tx of txns.filter(t=>t.importe>0)) {
+    const txD = parseD(tx.fecha), txA = Math.abs(tx.importe);
+    let best=null, bestDiff=Infinity;
+    for (const p of pagos) {
+      if (usados.has(p.id)) continue;
+      const pA = parseFloat(p.totalRecibido||p.totalEsperado||0);
+      if (Math.abs(txA-pA)>0.05) continue;
+      const days = txD?Math.abs((txD-parseD(p.fecha))/86400000):999;
+      if (days<=5 && days<bestDiff) { bestDiff=days; best=p; }
+    }
+    if (best) { usados.add(best.id); matched.push({tx,pago:best}); }
+    else soloBanco.push({tx});
+  }
+
+  for (const tx of txns.filter(t=>t.importe<=0)) soloBanco.push({tx});
+
+  for (const p of pagos.filter(p=>!usados.has(p.id)&&parseFloat(p.totalRecibido||0)>0)) soloSheet.push({pago:p});
+
+  return {matched, soloBanco, soloSheet};
+}
+
+function _renderCotejo({matched, soloBanco, soloSheet}) {
+  const res = document.getElementById('bbva-result');
+  if (res) res.style.display='';
+  document.getElementById('bbva-ok').textContent   = `✓ ${matched.length} cuadrados`;
+  document.getElementById('bbva-warn').textContent = `⚠ ${soloBanco.length} solo en banco`;
+  document.getElementById('bbva-err').textContent  = `✗ ${soloSheet.length} solo en Sheets`;
+
+  const tbody = document.getElementById('cotejo-tbody');
+  if (!tbody) return;
+
+  const rows = [
+    ...matched.map(({tx,pago})=>`
+      <tr style="background:#f1f8e9">
+        <td><span class="badge" style="background:#c8e6c9;color:#1b5e20">✓ Cuadrado</span></td>
+        <td class="mono" style="font-size:12px">${tx.fecha}</td>
+        <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${tx.concepto}">${tx.concepto}</td>
+        <td style="text-align:right;font-weight:600">${fmtEur(Math.abs(tx.importe))}</td>
+        <td class="mono" style="font-size:12px">${fmtDate(pago.fecha)}</td>
+        <td style="font-size:12px">${pago.servicio||pago.modalidad||pago.id||'—'}</td>
+      </tr>`),
+    ...soloBanco.map(({tx})=>`
+      <tr style="background:#fff8e1">
+        <td><span class="badge" style="background:#ffe0b2;color:#bf360c">⚠ Solo banco</span></td>
+        <td class="mono" style="font-size:12px">${tx.fecha}</td>
+        <td style="font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${tx.concepto}">${tx.concepto}</td>
+        <td style="text-align:right;font-weight:600;color:${tx.importe<0?'var(--red)':'var(--green)'}">${fmtEur(tx.importe)}</td>
+        <td>—</td><td>—</td>
+      </tr>`),
+    ...soloSheet.map(({pago})=>`
+      <tr style="background:#fce4ec">
+        <td><span class="badge" style="background:#f8bbd0;color:#880e4f">✗ Solo Sheets</span></td>
+        <td>—</td><td>—</td>
+        <td style="text-align:right;font-weight:600">${fmtEur(parseFloat(pago.totalRecibido||pago.totalEsperado||0))}</td>
+        <td class="mono" style="font-size:12px">${fmtDate(pago.fecha)}</td>
+        <td style="font-size:12px">${pago.servicio||pago.modalidad||pago.id||'—'}</td>
+      </tr>`)
+  ];
+  tbody.innerHTML = rows.join('') || '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--grey-2)">Sin movimientos</td></tr>';
 }
 
 /* ═══════════════════════════════════════════════════════════

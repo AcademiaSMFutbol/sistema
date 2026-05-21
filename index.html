@@ -1756,18 +1756,7 @@ async function writeToSheet(sheet, rowData) {
   }
 }
 
-// ── Helpers para escritura paralela y deduplicación de asistencia ──────────
-
-// Ejecuta fn sobre cada item con un máximo de `concurrency` llamadas simultáneas.
-// Devuelve array de PromiseSettledResult (igual que Promise.allSettled).
-async function asyncPool(concurrency, items, fn) {
-  const results = [];
-  for (let i = 0; i < items.length; i += concurrency) {
-    const batch = items.slice(i, i + concurrency);
-    results.push(...await Promise.allSettled(batch.map(item => fn(item))));
-  }
-  return results;
-}
+// ── Helpers para deduplicación de asistencia ────────────────────────────────
 
 // Comprueba si ya existe un registro de asistencia para (fecha, actividad, alumno).
 // Evita escribir duplicados cuando el monitor reenvía el pase de lista.
@@ -5849,20 +5838,22 @@ async function confirmarPaseListaMonitor(actividad, fecha, centro) {
     _paseListaLock = false; return;
   }
 
-  showToast(`⏳ Guardando ${pendientes.length} registros…`, 'info');
+  showToast(`⏳ Guardando (0/${pendientes.length})…`, 'info');
 
-  // Paralelo (máx. 5 simultáneas) — ~5× más rápido que secuencial
-  const res = await asyncPool(5, pendientes, aid => {
+  // Secuencial: cada confirmación de Sheets actúa como barrera de escritura
+  let errores = 0, guardados = 0;
+  for (const aid of pendientes) {
     const a = getAlumno(aid);
-    return writeToSheet('ASISTENCIAS_EXTRA', {
+    const res = await writeToSheet('ASISTENCIAS_EXTRA', {
       'Fecha':        fecha, 'Centro': centroFinal, 'Servicio': actividad,
       'Alumno':       a.nombre || aid, 'Presente': presentes.has(aid),
       'Guardado por': currentUser.name
     });
-  });
+    if (res && (res.ok || res.demo)) { guardados++; showToast(`⏳ Guardando (${guardados}/${pendientes.length})…`, 'info'); }
+    else errores++;
+  }
 
   _paseListaLock = false;
-  const errores = res.filter(r => r.status === 'rejected' || (r.value && !r.value.ok && !r.value.demo)).length;
   const extra = yaReg > 0 ? ` · ${yaReg} ya registrados` : '';
   if (errores > 0) showToast(`⚠️ ${errores} registros no guardados — revisa conexión`, 'error');
   else showToast(`✅ Pase guardado: ${presentes.size}/${todos.length} presentes${extra}`, 'success');
@@ -5952,21 +5943,25 @@ async function guardarPaseListaMonitor(fecha, esFutbol) {
     _paseListaLock = false; return;
   }
 
-  showToast(`⏳ Guardando ${pendientes.length} registros…`, 'info');
+  showToast(`⏳ Guardando (0/${pendientes.length})…`, 'info');
 
-  // Paralelo (máx. 5 simultáneas) — sustituye el bucle secuencial
-  const res = await asyncPool(5, pendientes, aid => {
+  // Secuencial: cada confirmación de Sheets actúa como barrera de escritura
+  let errores = 0, guardados = 0;
+  for (const aid of pendientes) {
     const a = getAlumno(aid);
-    return writeToSheet('ASISTENCIAS_EXTRA', {
-      'Fecha':        fecha, 'Centro': 'CEIP ESCALERITAS', 'Servicio': actividad,
-      'Alumno':       a.nombre || aid,
-      'Presente':     presentes.includes(aid) ? 'TRUE' : 'FALSE',
-      'Guardado por': currentUser.name
-    });
-  });
+    try {
+      const res = await writeToSheet('ASISTENCIAS_EXTRA', {
+        'Fecha':        fecha, 'Centro': 'CEIP ESCALERITAS', 'Servicio': actividad,
+        'Alumno':       a.nombre || aid,
+        'Presente':     presentes.includes(aid) ? 'TRUE' : 'FALSE',
+        'Guardado por': currentUser.name
+      });
+      if (res && (res.ok || res.demo)) { guardados++; showToast(`⏳ Guardando (${guardados}/${pendientes.length})…`, 'info'); }
+      else errores++;
+    } catch(e) { errores++; }
+  }
 
   _paseListaLock = false;
-  const errores = res.filter(r => r.status === 'rejected' || (r.value && !r.value.ok && !r.value.demo)).length;
   const extra = yaReg > 0 ? ` · ${yaReg} ya registrados` : '';
   if (errores > 0) showToast(`⚠️ ${errores} registros no guardados — revisa conexión`, 'error', 6000);
   else showToast(`✅ Pase guardado: ${presentes.length} presentes · ${ausentes.length} ausentes${extra}`, 'success', 5000);
@@ -6104,20 +6099,22 @@ async function guardarAsistenciaExtra() {
     _paseListaLock = false; extraescolares(); return;
   }
 
-  showToast(`⏳ Guardando ${pendientes.length} registros…`, 'info');
+  showToast(`⏳ Guardando (0/${pendientes.length})…`, 'info');
 
-  // Paralelo (máx. 5 simultáneas)
-  const res = await asyncPool(5, pendientes, c => {
+  // Secuencial: cada confirmación de Sheets actúa como barrera de escritura
+  let errores = 0, guardados = 0;
+  for (const c of pendientes) {
     const al = getAlumno(c.value);
-    return writeToSheet('ASISTENCIAS_EXTRA', {
+    const res = await writeToSheet('ASISTENCIAS_EXTRA', {
       'Fecha':        fecha, 'Centro': 'CEIP ESCALERITAS', 'Servicio': servicio,
       'Alumno':       al.nombre || c.value, 'Presente': c.checked,
       'Guardado por': currentUser.name
     });
-  });
+    if (res && (res.ok || res.demo)) { guardados++; showToast(`⏳ Guardando (${guardados}/${pendientes.length})…`, 'info'); }
+    else errores++;
+  }
 
   _paseListaLock = false;
-  const errores = res.filter(r => r.status === 'rejected' || (r.value && !r.value.ok && !r.value.demo)).length;
   const extra = yaReg > 0 ? ` · ${yaReg} ya registrados` : '';
   if (errores > 0) showToast(`⚠️ ${errores} registros no guardados`, 'error');
   else showToast(`✅ Asistencia guardada${extra}`, 'success');

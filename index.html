@@ -1512,9 +1512,16 @@ function normalizarDB(raw) {
     DB.asistencias_extra = deduped
       .filter(a => a.Fecha || a.FECHA)
       .map((a, idx) => {
-        const fecha = String(a.Fecha || a.FECHA || '').split('T')[0];
-        const d     = new Date(fecha + 'T12:00:00');
-        const mes   = isNaN(d) ? '' : MESES_IDX[d.getMonth()];
+        // Normalizar fecha a ISO "YYYY-MM-DD" sea cual sea el formato del GAS
+        const rawFecha = String(a.Fecha || a.FECHA || '').trim().split('T')[0];
+        let fecha = rawFecha;
+        if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(rawFecha)) {
+          // DD/MM/YYYY → YYYY-MM-DD
+          const [dd, mm, yyyy] = rawFecha.split('/');
+          fecha = `${yyyy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+        }
+        const d   = new Date(fecha + 'T12:00:00');
+        const mes = isNaN(d) ? '' : MESES_IDX[d.getMonth()];
         // Actividad: normalizar a mayúsculas para comparar con INSCRIPCIONES
         const actividad = String(a.Servicio || a.SERVICIO || a.ACTIVIDAD || '').trim().toUpperCase()
           .replace('_', ' ');  // multideporte_adaptado → MULTIDEPORTE ADAPTADO
@@ -5599,28 +5606,53 @@ function calcDiasLectivos(mesNombre, anyo, grupoDia) {
   return count;
 }
 
-function generarInformeAMPA(mesParam, anyoParam) {
-  // Si no se pasan parámetros, mostrar modal selector de mes
+async function generarInformeAMPA(mesParam, anyoParam) {
+  // Sin parámetros → mostrar selector de mes (con refresco previo de asistencias)
   if (!mesParam) {
     const MESES = ['enero','febrero','marzo','abril','mayo','junio',
                    'julio','agosto','septiembre','octubre','noviembre','diciembre'];
     const hoy = new Date();
     const mesActualIdx = hoy.getMonth();
-    const anyoActual = hoy.getFullYear();
+    const anyoActual   = hoy.getFullYear();
     const opts = MESES.map((m,i) =>
       `<option value="${m}" ${i===mesActualIdx?'selected':''}>${m.charAt(0).toUpperCase()+m.slice(1)} ${anyoActual}</option>`
     ).join('');
-    openModal('Informe AMPA — Seleccionar mes',
-      `<div class="field-group">
-        <label class="field-label">Mes del informe</label>
-        <select id="ampa-mes-sel" class="field-input">${opts}</select>
-      </div>
-      <div style="margin-top:.5rem;font-size:12px;color:var(--grey-2)">
-        Asistencias cargadas: <strong>${(DB.asistencias_extra||[]).length}</strong> registros ·
-        Inscritos ESCALERITAS: <strong>${DB.inscripciones.filter(i=>String(i.centro||'').toUpperCase().includes('ESCALERITAS')&&i.estado==='ACTIVA').length}</strong> alumnos
-      </div>`,
-      `<button class="btn btn-primary" onclick="closeModal();generarInformeAMPA(document.getElementById('ampa-mes-sel').value,${anyoActual})">📄 Generar PDF</button>`
-    );
+
+    // Mostrar modal inmediatamente con datos actuales
+    const _renderSelector = () => {
+      const nAsist  = (DB.asistencias_extra||[]).length;
+      const nInscrE = DB.inscripciones.filter(i=>String(i.centro||'').toUpperCase().includes('ESCALERITAS')&&i.estado==='ACTIVA').length;
+      openModal('Informe AMPA — Seleccionar mes',
+        `<div class="field-group">
+          <label class="field-label">Mes del informe</label>
+          <select id="ampa-mes-sel" class="field-input">${opts}</select>
+        </div>
+        <div style="margin-top:.75rem;font-size:12px;color:var(--grey-2)">
+          Asistencias: <strong id="ampa-asist-n">${nAsist}</strong> registros ·
+          Inscritos ESCALERITAS: <strong>${nInscrE}</strong> alumnos
+          ${nAsist===0?'<br><span style="color:var(--red)">⚠️ Sin asistencias — espera la actualización o comprueba la conexión</span>':''}
+        </div>`,
+        `<button class="btn btn-primary" onclick="closeModal();generarInformeAMPA(document.getElementById('ampa-mes-sel').value,${anyoActual})">📄 Generar PDF</button>`
+      );
+    };
+    _renderSelector();
+
+    // Refrescar asistencias en segundo plano y actualizar contador
+    try {
+      const resAE = await gasRequest('GET_ASISTENCIAS_EXTRA');
+      if (resAE.ok && Array.isArray(resAE.asistencias)) {
+        normalizarDB({ asistencias_extra: resAE.asistencias });
+        const el = document.getElementById('ampa-asist-n');
+        if (el) {
+          el.textContent = DB.asistencias_extra.length;
+          // Quitar aviso de error si ahora hay datos
+          if (DB.asistencias_extra.length > 0 && el.parentElement) {
+            const warn = el.parentElement.querySelector('span[style*="red"]');
+            if (warn) warn.remove();
+          }
+        }
+      }
+    } catch(e) { /* silencioso — el usuario ya ve los datos en caché */ }
     return;
   }
 

@@ -3521,7 +3521,8 @@ async function actualizarAlumno(id) {
    PAGE: INSCRIPCIONES
 ═══════════════════════════════════════════════════════════ */
 function inscripciones() {
-  addTopbarBtn('+ Nueva inscripción', () => modalNuevaInscripcion(), 'btn-primary');
+  addTopbarBtn('👤 Nueva familia', () => modalNuevaFamilia(), 'btn-primary');
+  addTopbarBtn('+ Añadir inscripción', () => modalNuevaInscripcion(), 'btn-secondary');
   document.getElementById('page-content').innerHTML = `
     <div class="filters-bar">
       <input class="filter-input search" placeholder="Buscar…" oninput="filtrarInscripciones(this.value)">
@@ -3623,6 +3624,112 @@ async function guardarInscripcion() {
   closeModal();
   inscripciones();
   showToast('Inscripción registrada ✓', 'success');
+}
+
+// ── Nueva familia completa (cliente + alumno + inscripción en un paso) ───────
+function modalNuevaFamilia() {
+  const SERVICIOS_OPTS = DB.servicios.length
+    ? DB.servicios.map(s => `<option value="${s.nombre}">${s.nombre}</option>`).join('')
+    : ['TECNIFICACIÓN','RECOGIDA TEMPRANA','MULTIDEPORTE','MULTIDEPORTE ADAPTADO','INGLÉS','BAILE']
+        .map(s => `<option value="${s}">${s}</option>`).join('');
+
+  openModal('👤 Nueva familia', `
+    <div style="font-size:12px;color:var(--grey-2);margin-bottom:.75rem">
+      Crea cliente, alumno e inscripción en un solo paso. Los datos se guardan directamente en Sheets.
+    </div>
+    <div class="form-grid">
+      <div class="field-group full" style="border-bottom:1px solid var(--border);padding-bottom:.5rem">
+        <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--grey-2)">Jugador/a</span>
+      </div>
+      <div class="field-group"><label class="field-label">Nombre<span class="req">*</span></label>
+        <input class="field-input" id="nf-nom-alu" placeholder="Nombre"></div>
+      <div class="field-group"><label class="field-label">Apellidos<span class="req">*</span></label>
+        <input class="field-input" id="nf-ape-alu" placeholder="Apellidos"></div>
+      <div class="field-group"><label class="field-label">Fecha nacimiento</label>
+        <input class="field-input" id="nf-fnac" type="date"></div>
+      <div class="field-group"><label class="field-label">Colegio</label>
+        <input class="field-input" id="nf-colegio" placeholder="Colegio"></div>
+      <div class="field-group full" style="border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-top:.5rem">
+        <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--grey-2)">Familia</span>
+      </div>
+      <div class="field-group"><label class="field-label">Nombre tutor/a<span class="req">*</span></label>
+        <input class="field-input" id="nf-nom-tut" placeholder="Nombre"></div>
+      <div class="field-group"><label class="field-label">Apellidos tutor/a</label>
+        <input class="field-input" id="nf-ape-tut" placeholder="Apellidos"></div>
+      <div class="field-group"><label class="field-label">Email<span class="req">*</span></label>
+        <input class="field-input" id="nf-email" type="email" placeholder="email@ejemplo.com"></div>
+      <div class="field-group"><label class="field-label">Teléfono</label>
+        <input class="field-input" id="nf-tel" placeholder="+34 600 000 000"></div>
+      <div class="field-group full" style="border-bottom:1px solid var(--border);padding-bottom:.5rem;margin-top:.5rem">
+        <span style="font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--grey-2)">Inscripción</span>
+      </div>
+      <div class="field-group"><label class="field-label">Servicio<span class="req">*</span></label>
+        <select class="field-select" id="nf-servicio">${SERVICIOS_OPTS}</select></div>
+      <div class="field-group"><label class="field-label">Modalidad</label>
+        <select class="field-select" id="nf-modalidad">
+          <option>1 sesión / semana</option>
+          <option>2 sesiones / semana</option>
+          <option>3 sesiones / semana</option>
+          <option>Mensualidad</option>
+        </select></div>
+      <div class="field-group"><label class="field-label">Centro preferido</label>
+        <select class="field-select" id="nf-centro">
+          <option>Cuevas Torres</option>
+          <option>La Atalaya</option>
+          <option>Otro</option>
+        </select></div>
+      <div class="field-group"><label class="field-label">Días preferidos</label>
+        <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.25rem">
+          ${['Lunes','Martes','Miércoles','Jueves','Viernes'].map(d =>
+            `<label style="display:flex;align-items:center;gap:.3rem;font-size:13px;cursor:pointer">
+              <input type="checkbox" class="nf-dia" value="${d}"> ${d}
+            </label>`).join('')}
+        </div></div>
+      <div class="field-group full"><label class="field-label">Observaciones</label>
+        <textarea class="field-input" id="nf-obs" rows="2" placeholder="Notas internas"></textarea></div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" id="nf-btn" onclick="guardarNuevaFamilia()">💾 Registrar en Sheets</button>`
+  );
+}
+
+async function guardarNuevaFamilia() {
+  const nomAlu = document.getElementById('nf-nom-alu').value.trim();
+  const nomTut = document.getElementById('nf-nom-tut').value.trim();
+  const email  = document.getElementById('nf-email').value.trim();
+  if (!nomAlu || !nomTut || !email) {
+    showToast('Nombre del alumno, tutor y email son obligatorios', 'error'); return;
+  }
+  const dias = [...document.querySelectorAll('.nf-dia:checked')].map(c => c.value).join(', ');
+  const btn  = document.getElementById('nf-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+
+  const res = await gasPost('NUEVA_INSCRIPCION', {
+    nombre_alumno:      nomAlu,
+    apellidos_alumno:   document.getElementById('nf-ape-alu').value.trim(),
+    fecha_nac:          document.getElementById('nf-fnac').value,
+    colegio:            document.getElementById('nf-colegio').value.trim(),
+    observaciones:      document.getElementById('nf-obs').value.trim(),
+    nombre_tutor:       nomTut,
+    apellidos_tutor:    document.getElementById('nf-ape-tut').value.trim(),
+    email,
+    telefono:           document.getElementById('nf-tel').value.trim(),
+    servicio:           document.getElementById('nf-servicio').value,
+    modalidad:          document.getElementById('nf-modalidad').value,
+    preferencia_centro: document.getElementById('nf-centro').value,
+    dias,
+    autoriza_imagen:    'Sí',
+  });
+
+  if (res && res.ok) {
+    closeModal();
+    showToast(`✅ Familia registrada — ${nomAlu.toUpperCase()} (${res.inscrId})`, 'success', 5000);
+    await syncAll();
+    inscripciones();
+  } else {
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Registrar en Sheets'; }
+    showToast('Error: ' + (res?.error || 'GAS no disponible aún — añade NUEVA_INSCRIPCION al script'), 'error', 6000);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════

@@ -3704,7 +3704,7 @@ async function guardarNuevaFamilia() {
   const btn  = document.getElementById('nf-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
 
-  const res = await gasPost('NUEVA_INSCRIPCION', {
+  const res = await gasPost('NUEVA_INSCRIPCION', { row: {
     nombre_alumno:      nomAlu,
     apellidos_alumno:   document.getElementById('nf-ape-alu').value.trim(),
     fecha_nac:          document.getElementById('nf-fnac').value,
@@ -3719,7 +3719,7 @@ async function guardarNuevaFamilia() {
     preferencia_centro: document.getElementById('nf-centro').value,
     dias,
     autoriza_imagen:    'Sí',
-  });
+  }});
 
   if (res && res.ok) {
     closeModal();

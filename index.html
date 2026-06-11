@@ -767,6 +767,65 @@ const SYNC_KEY = 'sm_last_sync';
 
 // URL del GAS hardcodeada como fallback para incógnito/móvil/dispositivos nuevos
 // Si existe en localStorage (guardada desde Configuración) tiene prioridad
+/* ═══════════════════════════════════════════════════════════
+   [E] CryptoSM — AES-256-GCM para datos de salud de menores
+   Cifra el campo OBSERVACIONES (alergias, lesiones) antes de
+   enviarlo a Google Sheets. Sólo el admin (con su contraseña)
+   puede descifrar. Usa Web Crypto API nativo del navegador.
+═══════════════════════════════════════════════════════════ */
+const CryptoSM = (() => {
+  const SALT_KEY  = 'sm_crypto_salt';
+  const PREFIX    = 'enc:';
+  const enc       = new TextEncoder();
+  const dec       = new TextDecoder();
+
+  function getSalt() {
+    let s = localStorage.getItem(SALT_KEY);
+    if (!s) {
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      s = btoa(String.fromCharCode(...bytes));
+      localStorage.setItem(SALT_KEY, s);
+    }
+    return Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  }
+
+  async function deriveKey(password) {
+    const raw = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: getSalt(), iterations: 100000, hash: 'SHA-256' },
+      raw, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
+    );
+  }
+
+  async function encrypt(plaintext, password) {
+    if (!plaintext || !password) return plaintext;
+    try {
+      const key = await deriveKey(password);
+      const iv  = crypto.getRandomValues(new Uint8Array(12));
+      const ct  = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plaintext));
+      const buf = new Uint8Array(iv.byteLength + ct.byteLength);
+      buf.set(iv); buf.set(new Uint8Array(ct), iv.byteLength);
+      return PREFIX + btoa(String.fromCharCode(...buf));
+    } catch(e) { return plaintext; }
+  }
+
+  async function decrypt(ciphertext, password) {
+    if (!ciphertext || !password || !String(ciphertext).startsWith(PREFIX)) return ciphertext;
+    try {
+      const buf = Uint8Array.from(atob(ciphertext.slice(PREFIX.length)), c => c.charCodeAt(0));
+      const iv  = buf.slice(0, 12);
+      const ct  = buf.slice(12);
+      const key = await deriveKey(password);
+      const pt  = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
+      return dec.decode(pt);
+    } catch(e) { return '[cifrado — verifica contraseña]'; }
+  }
+
+  const isEncrypted = s => String(s || '').startsWith(PREFIX);
+
+  return { encrypt, decrypt, isEncrypted };
+})();
+
 const GAS_URL_DEFAULT = 'https://script.google.com/macros/s/AKfycbwZOhEUs3dbIGGWLEdx5gMMFD7L85B5yyIdxwRqdZkZcikYNwC7cH3bPiGGudOfBko7zQ/exec';
 const GAS_URL_OLD = 'https://script.google.com/macros/s/AKfycbzOBn9pwpWRYL8MDm_xS-vYJNk2WGcJ2WluO24fgBmjtdUBHPkJ7G349fPR22cPSI8Qfg/exec';
 // Si el dispositivo tiene guardada la URL vieja → reemplazar por la nueva automáticamente
@@ -3468,7 +3527,7 @@ async function guardarAlumno() {
   showToast(`Alumno ${nuevo.nombre} registrado ✓`, 'success');
 }
 
-function modalEditarAlumno(id) {
+async function modalEditarAlumno(id) {
   const a = getAlumno(id);
   openModal(`Editar: ${a.nombre}`, `
     <div class="form-grid">
@@ -3495,10 +3554,21 @@ function modalEditarAlumno(id) {
           <option value="false" ${!a.activo?'selected':''}>Baja</option>
         </select>
       </div>
-      <div class="field-group full"><label class="field-label">Observaciones</label><textarea class="field-textarea" id="eal-obs">${a.observaciones||''}</textarea></div>
+      <div class="field-group full"><label class="field-label">Observaciones <span style="font-size:10px;color:var(--grey-2)">${CryptoSM.isEncrypted(a.observaciones)?'🔒 cifrado':'📝 texto plano'}</span></label><textarea class="field-textarea" id="eal-obs" placeholder="Cargando…"></textarea></div>
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" onclick="actualizarAlumno('${id}')">Guardar</button>`);
+  // Descifrar observaciones de forma asíncrona tras renderizar el modal
+  const adminPass = getAdminPass();
+  if (a.observaciones) {
+    CryptoSM.decrypt(a.observaciones, adminPass || '').then(txt => {
+      const el = document.getElementById('eal-obs');
+      if (el) el.value = txt;
+    });
+  } else {
+    const el = document.getElementById('eal-obs');
+    if (el) el.value = '';
+  }
 }
 
 async function actualizarAlumno(id) {
@@ -3510,7 +3580,12 @@ async function actualizarAlumno(id) {
   a.modalidad = document.getElementById('eal-modalidad').value;
   a.grupo = document.getElementById('eal-grupo').value;
   a.activo = document.getElementById('eal-activo').value === 'true';
-  a.observaciones = document.getElementById('eal-obs').value.trim();
+  // [E] Cifrar observaciones (datos de salud del menor) antes de guardar
+  const obsTexto  = document.getElementById('eal-obs').value.trim();
+  const adminPass = getAdminPass();
+  a.observaciones = adminPass && obsTexto
+    ? await CryptoSM.encrypt(obsTexto, adminPass)
+    : obsTexto;
   saveCacheLocal();
   showToast('Cambio guardado en memoria. Para que persista, edita en Google Sheets → hoja ALUMNOS.', 'warning');
   closeModal();
@@ -3704,12 +3779,19 @@ async function guardarNuevaFamilia() {
   const btn  = document.getElementById('nf-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
 
+  // [E] Cifrar OBSERVACIONES (alergias, lesiones) con AES-256-GCM
+  const obsRaw    = document.getElementById('nf-obs').value.trim();
+  const adminPass = getAdminPass();
+  const obsCifrado = adminPass && obsRaw
+    ? await CryptoSM.encrypt(obsRaw, adminPass)
+    : obsRaw;
+
   const res = await gasPost('NUEVA_INSCRIPCION', { row: {
     nombre_alumno:      nomAlu,
     apellidos_alumno:   document.getElementById('nf-ape-alu').value.trim(),
     fecha_nac:          document.getElementById('nf-fnac').value,
     colegio:            document.getElementById('nf-colegio').value.trim(),
-    observaciones:      document.getElementById('nf-obs').value.trim(),
+    observaciones:      obsCifrado,
     nombre_tutor:       nomTut,
     apellidos_tutor:    document.getElementById('nf-ape-tut').value.trim(),
     email,
@@ -3724,11 +3806,100 @@ async function guardarNuevaFamilia() {
   if (res && res.ok) {
     closeModal();
     showToast(`✅ Familia registrada — ${nomAlu.toUpperCase()} (${res.inscrId})`, 'success', 5000);
+    // [B] Generar documento RGPD/LOPIVI descargable tras la inscripción
+    generarDocumentoRGPD({
+      nomAlu:      nomAlu + ' ' + document.getElementById('nf-ape-alu').value.trim(),
+      nomTutor:    nomTut + ' ' + document.getElementById('nf-ape-tut').value.trim(),
+      email,
+      servicio:    document.getElementById('nf-servicio').value,
+      inscrId:     res.inscrId,
+      fecha:       new Date().toLocaleDateString('es-ES'),
+    });
     await syncAll();
     inscripciones();
   } else {
     if (btn) { btn.disabled = false; btn.textContent = '💾 Registrar en Sheets'; }
     showToast('Error: ' + (res?.error || 'GAS no disponible aún — añade NUEVA_INSCRIPCION al script'), 'error', 6000);
+  }
+}
+
+// ── [B] Documento RGPD/LOPIVI descargable ─────────────────────────────────
+function generarDocumentoRGPD(datos) {
+  const { nomAlu, nomTutor, email, servicio, inscrId, fecha } = datos;
+  const codigoRef = inscrId || ('RGPD-' + Date.now().toString(36).toUpperCase());
+
+  const html = `<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8">
+<title>Autorización RGPD/LOPIVI — ${nomAlu}</title>
+<style>
+  body{font-family:Arial,sans-serif;font-size:12px;color:#000;margin:40px;line-height:1.6}
+  h1{font-size:16px;text-align:center;margin-bottom:4px}
+  h2{font-size:13px;margin-top:20px;margin-bottom:6px;border-bottom:1px solid #999;padding-bottom:2px}
+  .ref{font-size:11px;color:#555;text-align:right;margin-bottom:20px}
+  table{width:100%;border-collapse:collapse;margin-bottom:16px}
+  td{padding:4px 8px;vertical-align:top}
+  td:first-child{font-weight:bold;width:40%}
+  .firma{margin-top:40px;display:flex;gap:60px}
+  .firma-box{flex:1;border-top:1px solid #000;padding-top:6px;font-size:11px}
+  p{margin:6px 0}
+  @media print{@page{margin:20mm}body{margin:0}}
+</style>
+</head><body>
+<h1>SM ACADEMIA — AUTORIZACIÓN PROTECCIÓN DE DATOS Y LOPIVI</h1>
+<div class="ref">Ref: ${codigoRef} · Fecha: ${fecha}</div>
+
+<h2>1. Datos de la inscripción</h2>
+<table>
+  <tr><td>Alumno/a:</td><td>${nomAlu.toUpperCase()}</td></tr>
+  <tr><td>Tutor/a legal:</td><td>${nomTutor.toUpperCase()}</td></tr>
+  <tr><td>Email de contacto:</td><td>${email}</td></tr>
+  <tr><td>Servicio contratado:</td><td>${servicio}</td></tr>
+  <tr><td>Fecha de inscripción:</td><td>${fecha}</td></tr>
+  <tr><td>Código de referencia:</td><td>${codigoRef}</td></tr>
+</table>
+
+<h2>2. Responsable del tratamiento</h2>
+<p><strong>Antonio Samuel Martín Rivera (SM Academia)</strong><br>
+NIF: 45766626F · academiasmfutbol.com · Las Palmas de Gran Canaria</p>
+
+<h2>3. Finalidad del tratamiento</h2>
+<p>Los datos personales recabados se utilizarán exclusivamente para: (a) gestión administrativa de la inscripción y actividades deportivas; (b) comunicación con la familia sobre el desarrollo del alumno/a; (c) facturación y control de pagos; (d) cumplimiento de obligaciones legales.</p>
+
+<h2>4. Base legal (RGPD art. 6 / LOPDGDD)</h2>
+<p>Ejecución del contrato de prestación de servicios (art. 6.1.b RGPD). Para menores de 14 años, el tratamiento requiere consentimiento del titular de la patria potestad o tutela (LOPDGDD art. 7).</p>
+
+<h2>5. Derechos del interesado</h2>
+<p>Puede ejercer los derechos de acceso, rectificación, supresión, limitación, portabilidad y oposición dirigiéndose a <strong>academiasmfutbol@gmail.com</strong> indicando "Protección de datos" en el asunto. Tiene derecho a presentar reclamación ante la AEPD (www.aepd.es).</p>
+
+<h2>6. Cesión de imagen (LOPIVI / LO 1/1982)</h2>
+<p>SM Academia podrá capturar y publicar imágenes/vídeos del alumno/a con fines informativos y de difusión de la actividad deportiva en redes sociales y materiales propios, siempre que no sean lesivos para su dignidad. Esta autorización puede revocarse en cualquier momento.</p>
+<p>☑ <strong>El/la tutor/a autoriza expresamente la cesión de imagen del menor</strong> en el contexto de las actividades de SM Academia.</p>
+
+<h2>7. Consentimiento informado</h2>
+<p>El/la tutor/a declara haber leído y comprendido la presente información, prestando su consentimiento libre, específico, informado e inequívoco para el tratamiento de los datos personales del menor a su cargo, conforme al Reglamento (UE) 2016/679 (RGPD), la Ley Orgánica 3/2018 (LOPDGDD) y la Ley Orgánica 8/2021 (LOPIVI).</p>
+
+<div class="firma">
+  <div class="firma-box">
+    Firma del/la tutor/a legal<br><br><br>
+    Nombre: ${nomTutor.toUpperCase()}
+  </div>
+  <div class="firma-box">
+    Lugar y fecha<br><br><br>
+    Las Palmas de Gran Canaria, ${fecha}
+  </div>
+</div>
+
+<script>window.onload=function(){window.print();}<\/script>
+</body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const win  = window.open(url, '_blank');
+  if (!win) {
+    showToast('Activa los pop-ups para descargar el documento RGPD', 'warning', 5000);
+  } else {
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    showToast('📄 Documento RGPD generado — usa "Guardar como PDF" al imprimir', 'info', 5000);
   }
 }
 
@@ -3993,9 +4164,9 @@ function _renderImpagos(mes, anyo) {
   }).join('');
 
   document.getElementById('page-content').innerHTML = `
-    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem;flex-wrap:wrap">
       <button class="btn btn-secondary btn-sm" onclick="pagos()">← Volver</button>
-      <div>
+      <div style="flex:1;min-width:150px">
         <div style="font-size:16px;font-weight:700">Impagos · ${mesLabel} ${anyo}</div>
         <div style="font-size:12px;color:var(--grey-2)">${impagos.length} alumno${impagos.length!==1?'s':''} sin pago registrado</div>
       </div>
@@ -4003,6 +4174,8 @@ function _renderImpagos(mes, anyo) {
         <div class="kpi-label">Importe pendiente</div>
         <div class="kpi-value red" style="font-size:20px">${fmtEur(impagos.reduce((s,i)=>s+(parseFloat(i.precio)||0),0))}</div>
       </div>
+      <button class="btn btn-secondary btn-sm" id="btn-alertas-email"
+        onclick="enviarAlertasImpagos('${mes}', ${anyo})">📧 Enviar alertas email</button>
     </div>
     <div class="card">
       <div class="card-header">
@@ -4020,6 +4193,29 @@ function _renderImpagos(mes, anyo) {
         </table>
       </div>
     </div>`;
+}
+
+// ── [D] Enviar alertas de impago por email via GAS ───────────────────────
+async function enviarAlertasImpagos(mes, anyo) {
+  const btn = document.getElementById('btn-alertas-email');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Enviando…'; }
+  showToast('Enviando alertas de impago…', 'info', 3000);
+  try {
+    const res = await gasRequest('SEND_ALERTS_IMPAGOS', { row: { mes, anyo } });
+    if (res && res.ok) {
+      showToast(`📧 ${res.enviados} email${res.enviados !== 1 ? 's' : ''} enviado${res.enviados !== 1 ? 's' : ''} correctamente`, 'success', 6000);
+      if (res.errores && res.errores.length) {
+        console.warn('[IMPAGOS] Errores al enviar:', res.errores);
+        showToast(`⚠️ ${res.errores.length} error(es) al enviar. Revisa la consola.`, 'warning', 6000);
+      }
+    } else {
+      showToast('Error al enviar alertas: ' + (res?.error || 'sin respuesta del GAS'), 'error', 6000);
+    }
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📧 Enviar alertas email'; }
+  }
 }
 
 function modalNuevoPago() {
@@ -4454,6 +4650,62 @@ async function generarXMLVeriFactu(facturaId) {
   await emitirYGuardarFactura(DB.pagos.filter(p=>p.facturaId===facturaId), facturaId);
 }
 
+// ── [C] Enviar factura directamente a AEAT via GAS/VeriFactu ──────────────
+async function enviarFacturaAEAT(facturaId) {
+  showToast('Conectando con AEAT…', 'info', 3000);
+  const resultado = await construirXMLVeriFactu(facturaId);
+  if (!resultado) { showToast('Factura no encontrada', 'error'); return; }
+
+  // Localizar datos de la factura en DB.facturas
+  const fDb = DB.facturas ? DB.facturas.find(f => f.idFactura === facturaId) : null;
+  const pagosF = DB.pagos.filter(p => p.facturaId === facturaId);
+  const facturaData = {
+    'Id Factura':          facturaId,
+    'Fecha expedición':    resultado.fechaExp,
+    'Hora expedición':     resultado.horaExp || new Date().toTimeString().slice(0,8),
+    'NIF Emisor':          '45766626F',
+    'Nombre emisor':       'Antonio Samuel Martín Rivera',
+    'Total factura':       resultado.total,
+    'Hash VeriFactu':      resultado.hashActual,
+    'Descripción operación': resultado.periodo || '',
+  };
+
+  try {
+    const res = await gasRequest('SUBMIT_VERIFACTU', {
+      row: { factura: facturaData, xmlBody: resultado.xml }
+    });
+
+    if (res && res.ok) {
+      showToast(`✅ Factura ${facturaId} enviada a AEAT (${res.entorno}) — ${res.estado}`, 'success', 8000);
+      if (fDb) { fDb.estadoAeat = res.estado; saveCacheLocal(); }
+    } else if (res && res.error && res.error.includes('Certificado no configurado')) {
+      openModal('Configurar certificado AEAT', `
+        <div style="font-size:13px;line-height:1.6">
+          <p>Para enviar facturas directamente a AEAT necesitas configurar tu <strong>certificado digital</strong> en el GAS.</p>
+          <ol style="margin:.75rem 0;padding-left:1.25rem;font-size:12px">
+            <li>Abre <strong>Google Apps Script</strong> → tu proyecto SM Academia</li>
+            <li>Menú → <strong>Proyecto → Configuración del proyecto</strong></li>
+            <li>Sección <em>Propiedades de script</em>, añade:
+              <ul style="margin:.5rem 0;padding-left:1.25rem">
+                <li><code>VF_PRIVATE_KEY_PEM</code> → tu clave privada RSA (exportada de tu certificado)</li>
+                <li><code>VF_CERT_B64</code> → tu certificado X.509 en Base64 (sin cabeceras)</li>
+                <li><code>VF_ENTORNO</code> → <code>TEST</code> para pruebas, <code>PROD</code> para producción</li>
+              </ul>
+            </li>
+          </ol>
+          <p style="font-size:12px;color:var(--grey-2)">Mientras tanto, puedes descargar el XML y firmarlo con <strong>Autofirma</strong> para subirlo manualmente al portal de la AEAT.</p>
+        </div>`,
+        `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+         <button class="btn btn-primary" onclick="closeModal();generarXMLVeriFactu('${facturaId}')">⬇️ Descargar XML</button>`
+      );
+    } else {
+      showToast('Error AEAT: ' + (res?.error || 'respuesta desconocida'), 'error', 6000);
+    }
+  } catch(e) {
+    showToast('Error al conectar con GAS: ' + e.message, 'error');
+  }
+}
+
 function facturas() {
   const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
   addTopbarBtn('Generar pendientes', () => generarTodasFacturas(), 'btn-primary');
@@ -4487,7 +4739,11 @@ function facturas() {
             <td><span class="badge badge-grey">${f.pagos.length} pago(s)</span></td>
             <td><strong>${fmtEur(f.total)}</strong></td>
             <td><span class="badge badge-green">Emitida</span></td>
-            <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button> <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();generarXMLVeriFactu('${f.id}')">XML</button></td>
+            <td style="display:flex;gap:4px;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button>
+              <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();generarXMLVeriFactu('${f.id}')">XML</button>
+              <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();enviarFacturaAEAT('${f.id}')" title="Enviar a VeriFactu AEAT">AEAT</button>
+            </td>
           </tr>`).join('') || `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">Sin facturas emitidas</div></div></td></tr>`}
         </tbody>
       </table></div>
@@ -6521,7 +6777,7 @@ function modalVistaPreviaNomina(pid) {
   const p = DB.personal.find(m => m.id === pid);
   if (!p) return;
   const hoy = new Date();
-  const mesVal = hoy.getFullYear() + '-' + String(hoy.getMonth()).padStart(2,'0');
+  const mesActualNomina = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0');
   const nroActual = (parseInt(getCfgNomina('ULTIMO_NRO_NOMINA')) || 0) + 1;
 
   openModal('Vista previa — ' + p.nombre,
@@ -6531,17 +6787,14 @@ function modalVistaPreviaNomina(pid) {
     <div id="nomina-preview-wrap"></div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
      <button class="btn btn-primary" onclick="generarPDFNomina(
-       DB.personal.find(m=>m.id==='${pid}'),
-       '${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}',
-       ${nroActual}
+       DB.personal.find(m=>m.id==='${pid}'),'${mesActualNomina}',${nroActual}
      )">Descargar PDF</button>`
   );
 
-  // Renderizar preview
   setTimeout(() => {
     const wrap = document.getElementById('nomina-preview-wrap');
     if (wrap) wrap.innerHTML = buildNominaHTML(p,
-      hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0'),
+      mesActualNomina,
       nroActual, true);
   }, 50);
 }

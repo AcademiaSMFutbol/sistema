@@ -6,6 +6,10 @@
 //    Ejecutar como:  Yo (la cuenta del propietario)
 //    Acceso:         Cualquiera (Anyone, even anonymous)
 //    → Copia la URL /exec resultante y pégala en la app de admin
+//
+//  Script Properties requeridas (para VeriFactu AEAT):
+//    VF_PRIVATE_KEY_PEM  — clave privada RSA en formato PEM (opcional)
+//    VF_CERT_B64         — certificado X.509 en Base64 sin cabeceras (opcional)
 // ══════════════════════════════════════════════════════════════════════════
 
 // ─── doGet ─ todas las peticiones de la admin-app (JSONP) ─────────────────
@@ -31,6 +35,8 @@ function doGet(e) {
       case 'APPEND':                result = appendRow(sheetP, rowP);          break;
       case 'UPDATE':                result = updateRow(sheetP, idP, rowP);     break;
       case 'NUEVA_INSCRIPCION':     result = nuevaInscripcion(rowP);           break;
+      case 'SEND_ALERTS_IMPAGOS':   result = sendAlertsImpagos(rowP);          break;
+      case 'SUBMIT_VERIFACTU':      result = submitVerifactu(rowP);            break;
       default:
         result = { ok: false, error: 'Acción desconocida: ' + action };
     }
@@ -280,19 +286,34 @@ function updateRow(sheetName, id, rowObj) {
 
 
 // ══════════════════════════════════════════════════════════════════════════
-//  NUEVA INSCRIPCIÓN  (admin-app + Make.com webhook)
+//  NUEVA INSCRIPCIÓN  (admin-app + Make.com mailhook)
 // ══════════════════════════════════════════════════════════════════════════
 
 /**
  * Registra un nuevo alumno en CLIENTES + ALUMNOS + INSCRIPCIONES.
  *
- * Acepta dos formatos en `body`:
+ * Acepta tres formatos en `body`:
  *   • Plano (admin-app):  { nombre_alumno, apellidos_alumno, email, ... }
  *   • Labels Jetpack (Make.com): { "Nombre del jugador/a", "Correo electrónico", ... }
+ *   • Email body (Make.com mailhook): { raw_text: "Campo: Valor\nCampo2: Valor2\n..." }
  *
  * Devuelve { ok: true, inscrId: 'INSC-XXX' }
  */
 function nuevaInscripcion(body) {
+  // ── [A] Parsear email body de Jetpack (Make.com mailhook) ─────────────
+  // Make.com envía el cuerpo del email como raw_text / body_text / text
+  const rawEmail = body.raw_text || body.body_text || body.body_plain || body.text || '';
+  if (rawEmail) {
+    rawEmail.split(/\r?\n/).forEach(function(line) {
+      const colon = line.indexOf(':');
+      if (colon > 0) {
+        const k = line.substring(0, colon).trim();
+        const v = line.substring(colon + 1).trim();
+        if (k && v && body[k] === undefined) body[k] = v;
+      }
+    });
+  }
+
   // Helper: prueba primero clave GAS, luego label original del formulario
   const v = (gasKey, label) => String(body[gasKey] || body[label] || '').trim();
 
@@ -394,7 +415,319 @@ function nuevaInscripcion(body) {
     'CENTRO':            prefCentro,
     'GRUPO_DIA':         dias,
     'ACTIVA':            'SÍ',
+    'RGPD_FIRMADO':      fecha,
   });
 
   return { ok: true, inscrId };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
+//  [D] ALERTAS DE IMPAGOS — envía email a familias con pago pendiente
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Envía emails de aviso a familias con pagos pendientes en el mes indicado.
+ * params: { mes: 'mayo', anyo: 2026 }
+ * Devuelve { ok: true, enviados: N, errores: [...], total: N }
+ */
+function sendAlertsImpagos(params) {
+  const mes  = String(params.mes || '').toLowerCase().trim();
+  const anyo = parseInt(params.anyo) || new Date().getFullYear();
+  if (!mes) return { ok: false, error: 'Parámetro "mes" requerido' };
+
+  const pagos         = sheetToObjects_('PAGOS').map(r => normalizeKeys_(r));
+  const clientes      = sheetToObjects_('CLIENTES');
+  const inscripciones = sheetToObjects_('INSCRIPCIONES');
+
+  if (!clientes.length || !inscripciones.length) {
+    return { ok: false, error: 'Hojas CLIENTES o INSCRIPCIONES vacías' };
+  }
+
+  // Alumnos que SÍ tienen PAGADO en el mes
+  const pagadosIds = new Set(
+    pagos.filter(p => {
+      const pMes  = String(p.mes || '').toLowerCase();
+      const pAnyo = p.fecha ? new Date(String(p.fecha)).getFullYear() : anyo;
+      return pMes === mes && pAnyo === anyo &&
+             String(p.estado || '').toUpperCase() === 'PAGADO';
+    }).map(p => String(p.id_alumno || p.alumnoid || p.alumno_id || ''))
+  );
+
+  // Inscripciones activas que deben pagar (tecnificación / recogida, modalidad mensual)
+  const SERV_OK = ['TECNIF', 'RECOGIDA'];
+  const MOD_NO  = ['SUELTA', 'PUNTUAL', 'ESPORAD'];
+  const MOD_OK  = ['SEMANA', 'MENSUAL'];
+
+  const inscDeuda = inscripciones.filter(i => {
+    const serv   = String(i.SERVICIO   || i.servicio   || '').toUpperCase();
+    const mod    = String(i.MODALIDAD  || i.modalidad  || '').toUpperCase();
+    const activa = String(i.ACTIVA     || i.activa     || '').toUpperCase();
+    if (activa !== 'SÍ' && activa !== 'SI') return false;
+    if (!SERV_OK.some(s => serv.includes(s))) return false;
+    if (MOD_NO.some(m  => mod.includes(m)))   return false;
+    if (!MOD_OK.some(m => mod.includes(m)))   return false;
+    return true;
+  });
+
+  // Quedarnos solo con los que NO han pagado
+  const sinPagar = inscDeuda.filter(i => {
+    const aId = String(i.ID_ALUMNO || i['ID ALUMNO'] || '');
+    return !pagadosIds.has(aId);
+  });
+
+  const mesLabel = mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + anyo;
+  let enviados   = 0;
+  const errores  = [];
+
+  sinPagar.forEach(function(i) {
+    const cliKey = String(i['CLAVE CLIENTE'] || i.clave_cliente || '');
+    const nomAlu = (String(i['CLAVE ALUMNO'] || i.clave_alumno || '').split('|')[1] || 'el/la alumno/a').trim();
+    const servicio = String(i.SERVICIO || i.servicio || '');
+
+    // Buscar cliente por clave
+    const cli = clientes.find(function(c) {
+      return String(c['CLAVE CLIENTE'] || '').trim() === cliKey;
+    });
+    if (!cli) return;
+
+    const emailDest = String(cli.EMAIL || cli['EMAIL TUTOR'] || '').toLowerCase().trim();
+    if (!emailDest || emailDest.indexOf('@') < 0) return;
+
+    const nomTutor = String(cli.NOMBRE || '').split(' ')[0] || 'familia';
+
+    try {
+      MailApp.sendEmail({
+        to:        emailDest,
+        subject:   'SM Academia · Pago pendiente ' + mesLabel,
+        body:
+          'Hola ' + nomTutor + ',\n\n' +
+          'Te escribimos desde SM Academia porque en nuestro sistema no consta el pago de ' +
+          mesLabel + ' correspondiente a ' + nomAlu + ' (' + servicio + ').\n\n' +
+          'Si ya has realizado el pago, indícanos la fecha y el método para actualizar nuestros registros. ' +
+          'Si tienes alguna duda, estamos a tu disposición.\n\n' +
+          'Un saludo,\nSamy Martín\nSM Academia\nhttps://academiasmfutbol.com',
+        htmlBody:
+          '<p>Hola <strong>' + nomTutor + '</strong>,</p>' +
+          '<p>Te escribimos desde <strong>SM Academia</strong> porque en nuestro sistema no consta el pago de ' +
+          '<strong>' + mesLabel + '</strong> correspondiente a <strong>' + nomAlu + '</strong> ' +
+          '(<em>' + servicio + '</em>).</p>' +
+          '<p>Si ya has realizado el pago, por favor indícanos la fecha y el método para actualizar nuestros registros. ' +
+          'Si tienes alguna duda, estamos a tu disposición.</p>' +
+          '<p>Un saludo,<br><strong>Samy Martín</strong><br>SM Academia<br>' +
+          '<a href="https://academiasmfutbol.com">academiasmfutbol.com</a></p>',
+      });
+      enviados++;
+    } catch (e) {
+      errores.push(emailDest + ': ' + e.message);
+    }
+  });
+
+  return { ok: true, enviados: enviados, errores: errores, total: sinPagar.length };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
+//  [C] VERIFACTU AEAT — envío de facturas al sistema de la AEAT
+//
+//  Requisito previo: en Script Properties de Apps Script configura:
+//    VF_PRIVATE_KEY_PEM  → clave privada RSA de tu certificado (formato PEM)
+//    VF_CERT_B64         → certificado X.509 en Base64 (sin cabeceras PEM)
+//    VF_ENTORNO          → 'TEST' | 'PROD' (por defecto TEST)
+//
+//  Endpoint AEAT test: https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP
+//  Endpoint AEAT prod: https://www1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP
+// ══════════════════════════════════════════════════════════════════════════
+
+function submitVerifactu(params) {
+  // params: { factura: {...}, xmlBody: '...', entorno: 'TEST'|'PROD' }
+  const props       = PropertiesService.getScriptProperties();
+  const privateKey  = props.getProperty('VF_PRIVATE_KEY_PEM') || '';
+  const certB64     = props.getProperty('VF_CERT_B64')        || '';
+  const entorno     = (params.entorno || props.getProperty('VF_ENTORNO') || 'TEST').toUpperCase();
+
+  const ENDPOINT_TEST = 'https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP';
+  const ENDPOINT_PROD = 'https://www1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP';
+  const endpoint      = entorno === 'PROD' ? ENDPOINT_PROD : ENDPOINT_TEST;
+
+  // Guardar en Sheets con estado PENDIENTE_ENVIO aunque falle el envío
+  const factura = params.factura || {};
+  if (factura['Id Factura']) {
+    try {
+      updateRow('FACTURAS', factura['Id Factura'], {
+        'Estado VeriFactu': privateKey ? 'ENVIANDO' : 'CERT_NO_CONFIGURADO',
+      });
+    } catch(_) {}
+  }
+
+  if (!privateKey || !certB64) {
+    return {
+      ok:    false,
+      error: 'Certificado no configurado. Añade VF_PRIVATE_KEY_PEM y VF_CERT_B64 en Script Properties del GAS.',
+      ayuda: 'Abre Apps Script → Proyecto → Configuración del proyecto → Propiedades de script'
+    };
+  }
+
+  // Construir XML VeriFactu según esquema AEAT 1.0
+  const xmlSoap = buildVerifactuSoap_(params.xmlBody || buildVerifactuXml_(factura), certB64, privateKey);
+  if (!xmlSoap.ok) return xmlSoap;
+
+  try {
+    const response = UrlFetchApp.fetch(endpoint, {
+      method:      'post',
+      contentType: 'text/xml; charset=UTF-8',
+      headers: {
+        'SOAPAction': 'https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/ws/SistemaFacturacion/RegFactuSistemaFacturacion',
+      },
+      payload:          xmlSoap.xml,
+      muteHttpExceptions: true,
+    });
+
+    const statusCode = response.getResponseCode();
+    const respBody   = response.getContentText();
+
+    // Parsear respuesta AEAT
+    const estadoAEAT = respBody.includes('<CSV>') ? 'ACEPTADA' :
+                       respBody.includes('KO')    ? 'RECHAZADA' : 'DESCONOCIDO';
+
+    // Actualizar Sheets con resultado
+    if (factura['Id Factura']) {
+      try {
+        updateRow('FACTURAS', factura['Id Factura'], {
+          'Estado VeriFactu': estadoAEAT,
+          'CSV AEAT':         (respBody.match(/<CSV>([^<]+)<\/CSV>/) || ['',''])[1],
+          'Fecha envío AEAT': Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),
+        });
+      } catch(_) {}
+    }
+
+    return {
+      ok:          statusCode === 200,
+      statusCode:  statusCode,
+      estado:      estadoAEAT,
+      entorno:     entorno,
+      responseXml: respBody.substring(0, 2000), // truncar para no saturar la respuesta
+    };
+
+  } catch (e) {
+    return { ok: false, error: 'Error de red: ' + e.message };
+  }
+}
+
+/** Construye el XML de la factura según esquema VeriFactu 1.0 */
+function buildVerifactuXml_(f) {
+  const nif    = f['NIF Emisor']     || '45766626F';
+  const nombre = f['Nombre emisor']  || 'Antonio Samuel Martín Rivera';
+  const numFac = f['Id Factura']     || '';
+  const fecha  = f['Fecha expedición'] || '';
+  const hora   = f['Hora expedición']  || '00:00:00';
+  const total  = parseFloat(f['Total factura'] || 0).toFixed(2);
+  const hash   = f['Hash VeriFactu'] || '';
+
+  return (
+    '<sfc:SuministroLRFacturasEmitidas ' +
+    'xmlns:sfc="https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/ws/SistemaFacturacion" ' +
+    'xmlns:sf="https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/xml/catalogos">' +
+      '<sfc:Cabecera>' +
+        '<sfc:Obligado>' +
+          '<sf:NombreRazon>' + xmlEscape_(nombre) + '</sf:NombreRazon>' +
+          '<sf:NIF>' + xmlEscape_(nif) + '</sf:NIF>' +
+        '</sfc:Obligado>' +
+      '</sfc:Cabecera>' +
+      '<sfc:RegistroFactura>' +
+        '<sfc:RegistroFacturacion>' +
+          '<sfc:IDVersion>1.0</sfc:IDVersion>' +
+          '<sfc:IDFactura>' +
+            '<sfc:IDEmisorFactura>' + xmlEscape_(nif) + '</sfc:IDEmisorFactura>' +
+            '<sfc:NumSerieFactura>' + xmlEscape_(numFac) + '</sfc:NumSerieFactura>' +
+            '<sfc:FechaExpedicionFactura>' + xmlEscape_(fecha) + '</sfc:FechaExpedicionFactura>' +
+          '</sfc:IDFactura>' +
+          '<sfc:NombreRazonEmisor>' + xmlEscape_(nombre) + '</sfc:NombreRazonEmisor>' +
+          '<sfc:TipoFactura>F1</sfc:TipoFactura>' +
+          '<sfc:DescripcionOperacion>' + xmlEscape_(f['Descripción operación'] || '') + '</sfc:DescripcionOperacion>' +
+          '<sfc:ImporteTotal>' + total + '</sfc:ImporteTotal>' +
+          '<sfc:FechaHoraHuella>' + xmlEscape_(fecha + 'T' + hora) + '</sfc:FechaHoraHuella>' +
+          '<sfc:Huella>' + xmlEscape_(hash) + '</sfc:Huella>' +
+        '</sfc:RegistroFacturacion>' +
+      '</sfc:RegistroFactura>' +
+    '</sfc:SuministroLRFacturasEmitidas>'
+  );
+}
+
+/** Envuelve el XML en un SOAP envelope firmado (WS-Security XMLDSig RSA-SHA256) */
+function buildVerifactuSoap_(bodyXml, certB64, privateKeyPem) {
+  try {
+    // ID del body para la referencia en la firma
+    const bodyId = 'Body-' + Utilities.getUuid().replace(/-/g,'').substring(0,16);
+
+    const bodyElem =
+      '<soapenv:Body xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" wsu:Id="' + bodyId + '" ' +
+      'xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">' +
+      bodyXml +
+      '</soapenv:Body>';
+
+    // Digest SHA-256 del body (canonicalización simple — sin C14N completo)
+    const bodyDigest = Utilities.base64Encode(
+      Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bodyElem, Utilities.Charset.UTF_8)
+    );
+
+    const signedInfo =
+      '<ds:SignedInfo xmlns:ds="http://www.w3.org/2000/09/xmldsig#">' +
+        '<ds:CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>' +
+        '<ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>' +
+        '<ds:Reference URI="#' + bodyId + '">' +
+          '<ds:Transforms>' +
+            '<ds:Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>' +
+          '</ds:Transforms>' +
+          '<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>' +
+          '<ds:DigestValue>' + bodyDigest + '</ds:DigestValue>' +
+        '</ds:Reference>' +
+      '</ds:SignedInfo>';
+
+    // Firmar SignedInfo con la clave privada RSA
+    const signatureBytes = Utilities.computeRsaSha256Signature(signedInfo, privateKeyPem);
+    const signatureB64   = Utilities.base64Encode(signatureBytes);
+
+    const certId = 'Cert-' + Utilities.getUuid().replace(/-/g,'').substring(0,16);
+
+    const header =
+      '<soapenv:Header>' +
+        '<wsse:Security xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd" ' +
+        'xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">' +
+          '<wsse:BinarySecurityToken ' +
+            'EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary" ' +
+            'ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3" ' +
+            'wsu:Id="' + certId + '">' + certB64 +
+          '</wsse:BinarySecurityToken>' +
+          '<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">' +
+            signedInfo +
+            '<ds:SignatureValue>' + signatureB64 + '</ds:SignatureValue>' +
+            '<ds:KeyInfo>' +
+              '<wsse:SecurityTokenReference>' +
+                '<wsse:Reference URI="#' + certId + '" ' +
+                'ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3"/>' +
+              '</wsse:SecurityTokenReference>' +
+            '</ds:KeyInfo>' +
+          '</ds:Signature>' +
+        '</wsse:Security>' +
+      '</soapenv:Header>';
+
+    const envelope =
+      '<?xml version="1.0" encoding="UTF-8"?>' +
+      '<soapenv:Envelope ' +
+      'xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" ' +
+      'xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">' +
+      header + bodyElem +
+      '</soapenv:Envelope>';
+
+    return { ok: true, xml: envelope };
+  } catch(e) {
+    return { ok: false, error: 'Error al construir SOAP: ' + e.message };
+  }
+}
+
+function xmlEscape_(s) {
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }

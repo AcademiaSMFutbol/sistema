@@ -4568,9 +4568,24 @@ async function enviarFacturaAEAT(facturaId) {
       row: { factura: facturaData, xmlBody: resultado.xml }
     });
 
-    if (res && res.ok) {
-      showToast(`✅ Factura ${facturaId} enviada a AEAT (${res.entorno}) — ${res.estado}`, 'success', 8000);
-      if (fDb) { fDb.estadoAeat = res.estado; saveCacheLocal(); }
+    if (res && res.ok && res.estado === 'ACEPTADA') {
+      const csvTxt = res.csv ? ` · CSV: ${res.csv}` : '';
+      showToast(`✅ Factura ${facturaId} enviada a AEAT (${res.entorno})${csvTxt}`, 'success', 10000);
+      if (fDb) { fDb.estadoAeat = res.estado; fDb.csvAeat = res.csv; saveCacheLocal(); }
+    } else if (res && (res.estado === 'RECHAZADA' || (res.ok && res.estado !== 'ACEPTADA'))) {
+      const detalle = res.descError ? `${res.codError ? res.codError+' — ' : ''}${res.descError}` : res.estado;
+      console.error('[VeriFactu] Respuesta AEAT:', res.responseXml);
+      openModal('Respuesta AEAT', `
+        <div style="font-size:13px;line-height:1.6">
+          <p><strong>Estado:</strong> ${res.estado} (HTTP ${res.statusCode})</p>
+          ${res.codError ? `<p><strong>Código error:</strong> ${res.codError}</p>` : ''}
+          ${res.descError ? `<p><strong>Descripción:</strong> ${res.descError}</p>` : ''}
+          <details style="margin-top:.75rem"><summary style="cursor:pointer;font-size:11px;color:var(--grey-2)">Ver respuesta XML completa</summary>
+            <pre style="font-size:10px;max-height:200px;overflow:auto;background:var(--bg-2);padding:.5rem;margin-top:.5rem;border-radius:4px">${(res.responseXml||'').replace(/</g,'&lt;')}</pre>
+          </details>
+        </div>`,
+        `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`
+      );
     } else if (res && res.error && res.error.includes('Certificado no configurado')) {
       openModal('Configurar certificado AEAT', `
         <div style="font-size:13px;line-height:1.6">

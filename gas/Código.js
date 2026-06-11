@@ -585,16 +585,29 @@ function submitVerifactu(params) {
     const statusCode = response.getResponseCode();
     const respBody   = response.getContentText();
 
-    // Parsear respuesta AEAT
-    const estadoAEAT = respBody.includes('<CSV>') ? 'ACEPTADA' :
-                       respBody.includes('KO')    ? 'RECHAZADA' : 'DESCONOCIDO';
+    // Parsear respuesta AEAT — los tags llevan prefijo de namespace (p.ej. sfdr:CSV)
+    // Usamos regex namespace-agnostic: coincide con cualquier prefijo
+    function xtag(tag) {
+      const m = respBody.match(new RegExp('<(?:[^:>]+:)?' + tag + '[^>]*>([\\s\\S]*?)<'));
+      return m ? m[1].trim() : '';
+    }
+    const csvVal         = xtag('CSV');
+    const estadoRegistro = xtag('EstadoRegistro');   // Correcto | AceptadoConErrores | Incorrecto
+    const estadoEnvio    = xtag('EstadoEnvio');       // Correcto | Incorrecto
+    const codError       = xtag('CodigoErrorRegistro');
+    const descError      = xtag('DescripcionErrorRegistro');
+
+    const estadoAEAT = csvVal                                   ? 'ACEPTADA'  :
+                       /^Correcto/i.test(estadoRegistro||estadoEnvio) ? 'ACEPTADA'  :
+                       /Incorrecto/i.test(estadoRegistro||estadoEnvio)? 'RECHAZADA' :
+                       statusCode !== 200                        ? 'ERROR_HTTP' : 'DESCONOCIDO';
 
     // Actualizar Sheets con resultado
     if (factura['Id Factura']) {
       try {
         updateRow('FACTURAS', factura['Id Factura'], {
           'Estado VeriFactu': estadoAEAT,
-          'CSV AEAT':         (respBody.match(/<CSV>([^<]+)<\/CSV>/) || ['',''])[1],
+          'CSV AEAT':         csvVal,
           'Fecha envío AEAT': Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),
         });
       } catch(_) {}
@@ -604,8 +617,11 @@ function submitVerifactu(params) {
       ok:          statusCode === 200,
       statusCode:  statusCode,
       estado:      estadoAEAT,
+      csv:         csvVal,
+      codError:    codError,
+      descError:   descError,
       entorno:     entorno,
-      responseXml: respBody.substring(0, 2000), // truncar para no saturar la respuesta
+      responseXml: respBody.substring(0, 4000),
     };
 
   } catch (e) {

@@ -2,9 +2,39 @@ name = "aeat-verifactu-proxy"
 main = "worker.js"
 compatibility_date = "2024-09-23"
 
-# Después de ejecutar:
-#   wrangler mtls-certificate upload --cert cert_public.pem --key clave_privada.pem --name aeat-cert
-# sustituye PONER_ID_AQUI por el ID que devuelva el comando (ej: a1b2c3d4-...)
+# ── INSTRUCCIONES DE DESPLIEGUE ──────────────────────────────────────────────
+#
+# 1. Crea cuenta gratuita en cloudflare.com (sin tarjeta de crédito)
+#
+# 2. En Git Bash, instala Wrangler y autentícate:
+#       npm install -g wrangler
+#       wrangler login
+#
+# 3. Convierte cert_b64.txt a PEM (desde el Escritorio):
+#       cd ~/OneDrive/Escritorio
+#       printf -- "-----BEGIN CERTIFICATE-----\n" > cert_public.pem
+#       cat cert_b64.txt >> cert_public.pem
+#       printf "\n-----END CERTIFICATE-----\n" >> cert_public.pem
+#
+# 4. Sube el certificado:
+#       npx wrangler cert upload mtls-certificate \
+#         --cert ~/OneDrive/Escritorio/cert_public.pem \
+#         --key  ~/OneDrive/Escritorio/clave_privada.pem \
+#         --name aeat-cert
+#    → copia el ID que devuelve (ej: a1b2c3d4-1234-5678-abcd-...)
+#
+# 5. Sustituye PONER_ID_AQUI por ese ID y guarda este fichero
+#
+# 6. Despliega el Worker (desde la carpeta cloudflare/ del repositorio):
+#       npx wrangler deploy
+#    → copia la URL del Worker (ej: https://aeat-verifactu-proxy.TU.workers.dev)
+#
+# 7. En GAS → Script Properties añade:
+#       VF_PROXY_URL = https://aeat-verifactu-proxy.TU.workers.dev
+#    → guarda y crea nuevo deployment en GAS
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
 [[mtls_certificates]]
 binding        = "AEAT_CERT"
 certificate_id = "PONER_ID_AQUI"

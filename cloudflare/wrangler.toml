@@ -1,0 +1,10 @@
+name = "aeat-verifactu-proxy"
+main = "worker.js"
+compatibility_date = "2024-09-23"
+
+# Después de ejecutar:
+#   wrangler mtls-certificate upload --cert cert_public.pem --key clave_privada.pem --name aeat-cert
+# sustituye PONER_ID_AQUI por el ID que devuelva el comando (ej: a1b2c3d4-...)
+[[mtls_certificates]]
+binding        = "AEAT_CERT"
+certificate_id = "PONER_ID_AQUI"

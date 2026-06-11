@@ -545,9 +545,12 @@ function submitVerifactu(params) {
   const certB64     = props.getProperty('VF_CERT_B64')        || '';
   const entorno     = (params.entorno || props.getProperty('VF_ENTORNO') || 'TEST').toUpperCase();
 
+  // Si hay proxy Cloudflare Worker configurado, úsalo (soporta TLS mutuo hacia AEAT)
+  // Si no, llama directamente a AEAT (solo funciona si el entorno lo permite)
+  const proxyUrl = props.getProperty('VF_PROXY_URL') || '';
   const ENDPOINT_TEST = 'https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP';
   const ENDPOINT_PROD = 'https://www1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP';
-  const endpoint      = entorno === 'PROD' ? ENDPOINT_PROD : ENDPOINT_TEST;
+  const endpoint      = proxyUrl || (entorno === 'PROD' ? ENDPOINT_PROD : ENDPOINT_TEST);
 
   // Guardar en Sheets con estado PENDIENTE_ENVIO aunque falle el envío
   const factura = params.factura || {};
@@ -572,12 +575,15 @@ function submitVerifactu(params) {
   if (!xmlSoap.ok) return xmlSoap;
 
   try {
+    // El Worker añade el SOAPAction; si llamamos directamente a AEAT lo ponemos aquí
+    const extraHeaders = proxyUrl
+      ? { 'X-Entorno': entorno }
+      : { 'SOAPAction': 'https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/ws/SistemaFacturacion/RegFactuSistemaFacturacion' };
+
     const response = UrlFetchApp.fetch(endpoint, {
       method:      'post',
       contentType: 'text/xml; charset=UTF-8',
-      headers: {
-        'SOAPAction': 'https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/ws/SistemaFacturacion/RegFactuSistemaFacturacion',
-      },
+      headers:     extraHeaders,
       payload:          xmlSoap.xml,
       muteHttpExceptions: true,
     });

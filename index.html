@@ -4572,7 +4572,7 @@ async function enviarFacturaAEAT(facturaId) {
       const csvTxt = res.csv ? ` · CSV: ${res.csv}` : '';
       showToast(`✅ Factura ${facturaId} enviada a AEAT (${res.entorno})${csvTxt}`, 'success', 10000);
       if (fDb) { fDb.estadoAeat = res.estado; fDb.csvAeat = res.csv; saveCacheLocal(); }
-    } else if (res && (res.estado === 'RECHAZADA' || (res.ok && res.estado !== 'ACEPTADA'))) {
+    } else if (res && (res.estado === 'RECHAZADA' || res.estado === 'ERROR_HTTP' || (res.ok && res.estado !== 'ACEPTADA'))) {
       const detalle = res.descError ? `${res.codError ? res.codError+' — ' : ''}${res.descError}` : res.estado;
       console.error('[VeriFactu] Respuesta AEAT:', res.responseXml);
       openModal('Respuesta AEAT', `

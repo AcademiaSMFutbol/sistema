@@ -641,8 +641,8 @@ function buildVerifactuXml_(f) {
 
   return (
     '<sfc:SuministroLRFacturasEmitidas ' +
-    'xmlns:sfc="https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/ws/SistemaFacturacion" ' +
-    'xmlns:sf="https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/xml/catalogos">' +
+    'xmlns:sf="https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/xml/catalogos" ' +
+    'xmlns:sfc="https://www2.agenciatributaria.gob.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1/cont/ws/SistemaFacturacion">' +
       '<sfc:Cabecera>' +
         '<sfc:Obligado>' +
           '<sf:NombreRazon>' + xmlEscape_(nombre) + '</sf:NombreRazon>' +
@@ -685,13 +685,20 @@ function buildVerifactuSoap_(bodyXml, certB64, privateKeyPem) {
   try {
     privateKeyPem = normalizePem_(privateKeyPem);
 
-    // ID del body para la referencia en la firma
+    // Strip XML declaration — no puede aparecer dentro del body SOAP
+    // y en exc-C14N se elimina, lo que causaría un digest incorrecto
+    const cleanBodyXml = bodyXml.replace(/^<\?xml[^?]*\?>\s*/i, '');
+
     const bodyId = 'Body-' + Utilities.getUuid().replace(/-/g,'').substring(0,16);
 
+    // exc-C14N: declaraciones de namespace (ordenadas) ANTES que atributos regulares
+    // xmlns:soapenv (s) < xmlns:wsu (w) → correcto; wsu:Id va después
     const bodyElem =
-      '<soapenv:Body xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" wsu:Id="' + bodyId + '" ' +
-      'xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">' +
-      bodyXml +
+      '<soapenv:Body ' +
+      'xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" ' +
+      'xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd" ' +
+      'wsu:Id="' + bodyId + '">' +
+      cleanBodyXml +
       '</soapenv:Body>';
 
     // Digest SHA-256 del body (canonicalización simple — sin C14N completo)

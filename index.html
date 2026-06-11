@@ -864,46 +864,13 @@ function limpiarSesionEmergencia() {
 // Familia: viene de columna PASSWORD en hoja CLIENTES (Google Sheets) o pass compartida
 const PASS_KEY = 'sm_passwords'; // localStorage key para passwords configurables
 
-function getAdminPass() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
-    return stored.admin || '';   // vacío → login fallará hasta que Admin configure su pass
-  } catch(e) { return ''; }
-}
-function getFamiliaPass() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
-    return stored.familia || ''; // vacío → login fallará hasta que Admin configure pass familias
-  } catch(e) { return ''; }
-}
-function getAmpaPass() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
-    return stored.ampa || '';
-  } catch(e) { return ''; }
-}
-function setPassword(role, newPass) {
-  try {
-    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
-    stored[role] = newPass;
-    localStorage.setItem(PASS_KEY, JSON.stringify(stored));
-    return true;
-  } catch(e) { return false; }
-}
-function getAmpaEmails() {
-  try {
-    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
-    return (stored.ampa_emails || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
-  } catch(e) { return []; }
-}
-function setAmpaEmails(emailsStr) {
-  try {
-    const stored = JSON.parse(localStorage.getItem(PASS_KEY) || '{}');
-    stored.ampa_emails = emailsStr;
-    localStorage.setItem(PASS_KEY, JSON.stringify(stored));
-    return true;
-  } catch(e) { return false; }
-}
+function _passData()           { try { return JSON.parse(localStorage.getItem(PASS_KEY)||'{}'); } catch(e) { return {}; } }
+function getAdminPass()       { return _passData().admin   || ''; }
+function getFamiliaPass()     { return _passData().familia || ''; }
+function getAmpaPass()        { return _passData().ampa    || ''; }
+function getAmpaEmails()      { return (_passData().ampa_emails||'').split(',').map(e=>e.trim().toLowerCase()).filter(Boolean); }
+function setPassword(role, v) { try { const d=_passData(); d[role]=v; localStorage.setItem(PASS_KEY,JSON.stringify(d)); return true; } catch(e) { return false; } }
+function setAmpaEmails(str)   { return setPassword('ampa_emails', str); }
 
 // Objeto legacy para compatibilidad — NO contiene passes reales
 const CREDENTIALS = {
@@ -1015,22 +982,8 @@ function gasRequest(action, data = {}, timeoutMs = 25000) {
 
 // Logo oficial SM Academia (compartido desde Google Drive)
 const LOGO_URL = 'https://academiasmfutbol.github.io/sistema/img/logo.png';
-// Fotos de jugadores y monitores — carpeta img en GitHub Pages
-// Formato: https://academiasmfutbol.github.io/img/jugadores/NOMBRE.jpg
-//          https://academiasmfutbol.github.io/img/monitores/NOMBRE.jpg
 const IMG_BASE   = 'https://academiasmfutbol.github.io/img';
 const GITHUB_IMG = IMG_BASE + '/';
-function getFotoJugador(nombre) {
-  if (!nombre) return null;
-  const n = nombre.split(' ')[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  return IMG_BASE + '/jugadores/' + n + '.jpg';
-}
-function getFotoMonitor(nombre) {
-  if (!nombre) return null;
-  const n = nombre.split(' ')[0].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  return IMG_BASE + '/monitores/' + n + '.jpg';
-}
-
 function normalizarDB(raw) {
 
   // CONFIG_NOMINAS — parámetros de nóminas
@@ -1061,6 +1014,7 @@ function normalizarDB(raw) {
       activo: true,
       _raw: c
     }));
+    DB._cliById = new Map(DB.clientes.map(c => [c.id, c]));
   }
 
   // ALUMNOS: NOMBRE + APELLIDOS, ACTIVO "SÍ"/"NO", CLAVE_CLIENTE
@@ -1178,6 +1132,7 @@ function normalizarDB(raw) {
       });
     }
     // ─────────────────────────────────────────────────────────────
+    DB._aluById = new Map(DB.alumnos.map(a => [a.id, a]));
   }
 
   // INSCRIPCIONES: ID_INSCRIPCIÓN, ACTIVA "SÍ"/"NO"
@@ -1405,6 +1360,7 @@ function normalizarDB(raw) {
       }
     });
     DB.personal = Object.values(personaMap);
+    DB._perById = new Map(DB.personal.map(p => [p.id, p]));
   }
 
   // SESIONES SM Fútbol — desde hoja SESIONES (estructura real de Sheets)
@@ -2683,8 +2639,8 @@ function calcEdad(fechaNac) {
   return edad;
 }
 
-// Buscar siempre por string — IDs reales son números, la app los trata como string
-function getAlumno(id) { return DB.alumnos.find(a => String(a.id) === String(id)) || {}; }
+// Lookups O(1) via Map — Maps se reconstruyen en normalizarDB al cargar datos
+function getAlumno(id) { return (DB._aluById||new Map()).get(String(id)) || DB.alumnos.find(a=>String(a.id)===String(id)) || {}; }
 
 // Resolver alumno tanto por ID numérico como por nombre (para sesiones de Sheets)
 function getAlumnoFlex(ref) {
@@ -2705,7 +2661,7 @@ function getAlumnoFlex(ref) {
   }
   return { nombre: ref };
 }
-function getPersona(id) { return DB.personal.find(p => String(p.id) === String(id)) || {}; }
+function getPersona(id) { return (DB._perById||new Map()).get(String(id)) || DB.personal.find(p=>String(p.id)===String(id)) || {}; }
 
 // URL de foto desde carpeta img en GitHub
 function fotoUrl(nombre, tipo) {
@@ -2735,7 +2691,7 @@ function avatarHtml(nombre, tipo, sizeOrStyle) {
          onerror="this.style.display='none';this.parentElement.style.display='flex'">${getInitials(nombre)}
   </div>`;
 }
-function getCliente(id) { return DB.clientes.find(c => String(c.id) === String(id)) || {}; }
+function getCliente(id) { return (DB._cliById||new Map()).get(String(id)) || DB.clientes.find(c=>String(c.id)===String(id)) || {}; }
 // Obtener mes actual en español
 function getMesActual() { return ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'][new Date().getMonth()]; }
 
@@ -4706,6 +4662,21 @@ async function enviarFacturaAEAT(facturaId) {
   }
 }
 
+function _facturaRowHtml(f) {
+  return `<tr onclick="verFactura('${f.id}')">
+    <td class="mono">${f.id}</td>
+    <td>${f.cliente.nombre||'—'}</td>
+    <td style="font-size:12px">${fmtDate(f.fecha)}</td>
+    <td><span class="badge badge-grey">${f.pagos.length} pago(s)</span></td>
+    <td><strong>${fmtEur(f.total)}</strong></td>
+    <td><span class="badge badge-green">Emitida</span></td>
+    <td style="display:flex;gap:4px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button>
+      <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();generarXMLVeriFactu('${f.id}')">XML</button>
+      <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();enviarFacturaAEAT('${f.id}')" title="Enviar a VeriFactu AEAT">AEAT</button>
+    </td>
+  </tr>`;
+}
 function facturas() {
   const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
   addTopbarBtn('Generar pendientes', () => generarTodasFacturas(), 'btn-primary');
@@ -4732,19 +4703,7 @@ function facturas() {
           <th>Estado</th><th></th>
         </tr></thead>
         <tbody>
-          ${todasFacturas.map(f=>`<tr onclick="verFactura('${f.id}')">
-            <td class="mono">${f.id}</td>
-            <td>${f.cliente.nombre||'—'}</td>
-            <td style="font-size:12px">${fmtDate(f.fecha)}</td>
-            <td><span class="badge badge-grey">${f.pagos.length} pago(s)</span></td>
-            <td><strong>${fmtEur(f.total)}</strong></td>
-            <td><span class="badge badge-green">Emitida</span></td>
-            <td style="display:flex;gap:4px;flex-wrap:wrap">
-              <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button>
-              <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();generarXMLVeriFactu('${f.id}')">XML</button>
-              <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();enviarFacturaAEAT('${f.id}')" title="Enviar a VeriFactu AEAT">AEAT</button>
-            </td>
-          </tr>`).join('') || `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">Sin facturas emitidas</div></div></td></tr>`}
+          ${todasFacturas.map(_facturaRowHtml).join('') || `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">Sin facturas emitidas</div></div></td></tr>`}
         </tbody>
       </table></div>
     </div>`;
@@ -4757,8 +4716,6 @@ function facturas() {
       const el = document.getElementById('fsort-' + c);
       if (el) el.textContent = c === _fSortCol ? FSORT_ICONS[String(_fSortDir)] : '↕';
     });
-    const factRows = document.querySelectorAll('#fact-thead ~ tbody tr, .fact-table-body tr');
-    // Re-renderizar la tabla de facturas
     const tbody = document.querySelector('#fact-thead').closest('table').querySelector('tbody');
     if (!tbody) return;
     const todasF = [...new Set(DB.pagos.filter(p=>p.facturaId).map(p=>p.facturaId))].map(fid => {
@@ -4771,15 +4728,7 @@ function facturas() {
       if (typeof va === 'number') return (va-vb)*_fSortDir;
       return String(va).localeCompare(String(vb), 'es', {numeric:true, sensitivity:'base'})*_fSortDir;
     });
-    tbody.innerHTML = todasF.map(f=>`<tr onclick="verFactura('${f.id}')">
-      <td class="mono">${f.id}</td>
-      <td>${f.cliente.nombre||'—'}</td>
-      <td style="font-size:12px">${fmtDate(f.fecha)}</td>
-      <td><span class="badge badge-grey">${f.pagos.length} pago(s)</span></td>
-      <td><strong>${fmtEur(f.total)}</strong></td>
-      <td><span class="badge badge-green">Emitida</span></td>
-      <td><button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();descargarFacturaPdf('${f.id}')">PDF</button> <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();generarXMLVeriFactu('${f.id}')">XML</button></td>
-    </tr>`).join('') || '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">Sin facturas</div></div></td></tr>';
+    tbody.innerHTML = todasF.map(_facturaRowHtml).join('') || '<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-title">Sin facturas</div></div></td></tr>';
   };
 }
 

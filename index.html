@@ -642,9 +642,7 @@ tbody tr:hover { background: #fafafa; }
         <div class="nav-item" onclick="navigate('extraescolares')" data-page="extraescolares">
           <span class="nav-icon">🏫</span><span>Extraescolares</span>
         </div>
-        <div class="nav-item" id="nav-pitusa" onclick="navigate('pitusa')" data-page="pitusa" style="display:none">
-          <span class="nav-icon">🎉</span><span>Pitusa Eventos</span>
-        </div>
+
 
       </div>
 
@@ -1227,51 +1225,6 @@ function normalizarDB(raw) {
           _raw: g
         };
       });
-  }
-
-  // EVENTOS PITUSA — hoja exclusiva de Patricia Leonor Pérez Armas
-  const _epRaw = raw['eventos pitusa'] || raw['EVENTOS PITUSA'] || [];
-  if (_epRaw.length) {
-    const _fmtEur = v => parseFloat(String(v||'0').replace(/[€\s]/g,'').replace(',','.')) || 0;
-    DB.eventosPitusa = _epRaw
-      .filter(e => e['Id'] || e['Id evento'] || e['Cliente (Nombre y apellidos)'] || e['CLIENTE'])
-      .map((e, i) => {
-        const pvp          = _fmtEur(e['PVP Final Cliente']);
-        const importePag   = _fmtEur(e['Importe Pagado']);
-        // % Pagado: siempre calcular desde importePag/pvp — más fiable que leer Sheets
-        // (Sheets puede devolver 0.12 o "12%" según formato de celda)
-        const pctPagado    = pvp > 0 ? Math.round(importePag / pvp * 100) : 0;
-        const chkTotal     = String(e['Check Pago Total']    ||'').toUpperCase()==='TRUE' || pctPagado >= 100;
-        const chkReserva   = chkTotal ? true : pctPagado >= 50;
-        const chkProveedor = String(e['Check Pago Proveedor']||'').toUpperCase()==='TRUE';
-        return {
-          id:             String(e['Id'] || e['Id evento'] || i+1),
-          fechaSolicitud: String(e['Fecha solicitud']||'').split('T')[0],
-          cliente:        String(e['Cliente (Nombre y apellidos)']||e['CLIENTE']||'').trim(),
-          telefono:       String(e['Teléfono']||e['TELEFONO']||'').trim(),
-          whatsapp:       String(e['Whatsapp']||'').trim(),
-          fechaEvento:    String(e['Fecha evento']||e['FECHA EVENTO']||'').split('T')[0],
-          lugar:          String(e['Lugar']||'').trim(),
-          paxNinos:       parseInt(e['Pax Niños']||e['Pax Ninos']||0)||0,
-          paxAdultos:     parseInt(e['Pax Adultos']||0)||0,
-          intereses:      String(e['Intereses']||'').trim(),
-          proveedores:    String(e['Proveedores']||'').trim(),
-          costeNeto:      _fmtEur(e['Coste Neto Total (€)']),
-          margen:         _fmtEur(e['Margen gestión']),
-          pvp,
-          estado:         String(e['Estado']||'PENDIENTE').trim(),
-          pdfPresupuesto: String(e['PDF Presupuesto']||'').trim(),
-          importePagado:  importePag,
-          pctPagado,
-          checkPagoReserva:   chkReserva,
-          checkPagoTotal:     chkTotal,
-          checkPagoProveedor: chkProveedor,
-          checkPagoCliente:   chkTotal,
-          _raw: e
-        };
-      });
-  } else {
-    DB.eventosPitusa = DB.eventosPitusa || [];
   }
 
   // FACTURAS VeriFactu
@@ -2393,14 +2346,6 @@ function startApp() {
   document.getElementById('nav-admin').style.display   = isAdmin ? '' : 'none';
   document.getElementById('nav-admin-2').style.display = isAdmin ? '' : 'none';
 
-  // Nav Pitusa Eventos — visible para Admin y para Patricia
-  const PATRICIA_NOMBRE = 'PATRICIA LEONOR PÉREZ ARMAS';
-  const esPitusa = currentUser.role === 'ADMIN' ||
-    (currentUser.name || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-      .includes('PATRICIA');
-  const navPitusa = document.getElementById('nav-pitusa');
-  if (navPitusa) navPitusa.style.display = esPitusa ? '' : 'none';
-
   if (isMonitor) {
     // Buscar la monitora: primero por email (más fiable), luego por nombre normalizado
     const normNombre = s => String(s||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
@@ -2439,14 +2384,10 @@ function startApp() {
       s.style.display = (s.id === 'nav-actividades') ? '' : 'none';
     });
     // Dentro de Actividades, mostrar solo las páginas de su actividad
-    // Patricia (eventos Pitusa) detectada por nombre
-    const esPatricia = (currentUser.name||'').toUpperCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g,'').includes('PATRICIA');
     document.querySelectorAll('#nav-actividades .nav-item').forEach(item => {
       const pg = item.dataset.page;
       const visible = (esTecnificacion && pg === 'futbol') ||
-                      (esExtraescolar  && pg === 'extraescolares') ||
-                      (esPatricia      && pg === 'pitusa');
+                      (esExtraescolar  && pg === 'extraescolares');
       item.style.display = visible ? '' : 'none';
     });
     // "Mi perfil" se muestra como texto alternativo para MONITOR
@@ -2553,7 +2494,6 @@ const PAGE_META = {
   configuracion:  { title: 'Configuración', sub: 'Sistema y conexión Google Sheets' },
   familia:        { title: 'Mi portal', sub: 'Seguimiento de tus alumnos' },
   'registro-horario': { title: 'Registro Horario', sub: 'Control de entradas y salidas del personal' },
-  pitusa:             { title: 'Pitusa Eventos', sub: 'Gestión de eventos · Patricia Leonor Pérez Armas' },
 };
 
 function navigate(page) {
@@ -2563,10 +2503,6 @@ function navigate(page) {
     if (currentUser.esTecnificacion) permitidas.push('futbol');
     if (currentUser.esExtraescolar)  permitidas.push('extraescolares');
     if (permitidas.length === 1) permitidas.push('extraescolares'); // fallback si sin actividad
-    // Patricia tiene acceso a su sección de eventos
-    const esPat = (currentUser.name||'').toUpperCase().normalize('NFD')
-      .replace(/[\u0300-\u036f]/g,'').includes('PATRICIA');
-    if (esPat) permitidas.push('pitusa');
     if (!permitidas.includes(page)) {
       page = permitidas[1] || 'extraescolares';
     }
@@ -2599,7 +2535,6 @@ function renderCurrentPage() {
     dashboard, clientes, alumnos, inscripciones, pagos, facturas,
     futbol, extraescolares, personal, incidencias, informes, configuracion,
     'registro-horario': registroHorario,
-    pitusa: pitusaEventos,
     nominas: nominas
   };
   if (pages[currentPage]) pages[currentPage]();
@@ -4269,14 +4204,16 @@ async function sha256hex(texto) {
 }
 
 // Cadena a firmar según esquema AEAT VeriFactu 1.0
-// Orden obligatorio: NIF|NumFactura|FechaExpedicion|TotalFactura|HashAnterior
-async function generarHashVF(numFactura, fechaExpedicion, totalFactura, hashAnterior) {
+// Orden: NIF|NumFactura|FechaExpedicion|TipoFactura|CuotaTotal|ImporteTotal|HuellaAnterior
+async function generarHashVF(numFactura, fechaExpedicion, cuotaTotal, totalFactura, hashAnterior) {
   const cadena = [
     VF_NIF_EMISOR,
     numFactura,
-    fechaExpedicion,        // formato yyyy-MM-dd
+    fechaExpedicion,           // dd-mm-yyyy
+    'F1',                      // TipoFactura (facturas completas)
+    cuotaTotal.toFixed(2),     // cuota IGIC
     totalFactura.toFixed(2),
-    hashAnterior || ''      // vacío en la primera factura
+    hashAnterior || ''         // vacío en la primera factura
   ].join('|');
   return await sha256hex(cadena);
 }
@@ -4328,7 +4265,7 @@ async function emitirFacturaVF(pagos, numFactura) {
 
   // Hash VeriFactu
   const hashAnterior = obtenerHashAnterior();
-  const hashActual   = await generarHashVF(numFactura, fechaExp, total, hashAnterior);
+  const hashActual   = await generarHashVF(numFactura, fechaExp, cuotaIgic, total, hashAnterior);
   const tsHuella     = ahora.toISOString().replace('T',' ').substring(0,19);
 
   // Descripción
@@ -4398,9 +4335,9 @@ async function emitirYGuardarFactura(pagos, numFactura) {
 }
 
 // Vista previa del hash antes de emitir
-async function previstaHashVF(numFactura, fechaExp, total) {
+async function previstaHashVF(numFactura, fechaExp, cuotaTotal, total) {
   const hashAnterior = obtenerHashAnterior();
-  const hash         = await generarHashVF(numFactura, fechaExp, total, hashAnterior);
+  const hash         = await generarHashVF(numFactura, fechaExp, cuotaTotal, total, hashAnterior);
   openModal('🔐 Vista previa VeriFactu', `
     <div style="font-family:monospace;font-size:11px;background:#f5f5f5;padding:1rem;border-radius:8px">
       <div style="margin-bottom:.5rem"><strong>Factura:</strong> ${numFactura}</div>
@@ -4459,7 +4396,7 @@ async function construirXMLVeriFactu(facturaId) {
     : '';
 
   const hashAnterior = obtenerHashAnterior();
-  const hashActual   = await generarHashVF(facturaId, fechaExp, total, hashAnterior);
+  const hashActual   = await generarHashVF(facturaId, fechaExp, cuota, total, hashAnterior);
   const urlQR        = urlQRVeriFactu(facturaId, fechaExp, total);
 
   const bloqueIgic = tipoIgic === 3
@@ -9115,315 +9052,6 @@ async function initApp() {
     }
   }
   if (btnLogin) btnLogin.disabled = false;
-}
-
-/* ═══════════════════════════════════════════════════════════
-   PAGE: PITUSA EVENTOS
-═══════════════════════════════════════════════════════════ */
-function pitusaEventos() {
-  document.getElementById('topbar-actions').innerHTML =
-    '<button class="btn btn-primary" onclick="modalNuevoEventoPitusa()" style="font-size:12px;margin-right:.5rem">+ Nuevo evento</button>' +
-    '<button class="btn btn-secondary" onclick="recargarPitusa()" style="font-size:12px">🔄 Recargar</button>';
-
-  const eventos = DB.eventosPitusa || [];
-
-  // Función badge estado
-  const estadoBadge = est => {
-    const e = (est||'').toUpperCase();
-    if (e === 'RESERVADO')     return '<span class="badge" style="background:#1b5e20;color:#fff">'  + est + '</span>';
-    if (e === 'NUEVO')         return '<span class="badge" style="background:#c62828;color:#fff">'  + est + '</span>';
-    if (e === 'PRESUPUESTADO') return '<span class="badge" style="background:#f57f17;color:#fff">'  + est + '</span>';
-    if (e === 'PENDIENTE')     return '<span class="badge" style="background:#1565c0;color:#fff">'  + est + '</span>';
-    return '<span class="badge badge-orange">' + est + '</span>';
-  };
-
-  // Check de pago: 🟡 reserva (50%), ✅ completo, ⏳ pendiente
-  const checkPagoHTML = e => {
-    if (e.checkPagoTotal)   return '<span title="Pago completo"   style="font-size:18px">✅</span>';
-    if (e.checkPagoReserva) return '<span title="Reserva pagada"  style="font-size:18px">🟡</span>';
-    return                         '<span title="Pendiente"        style="font-size:18px">⏳</span>';
-  };
-  const checkProvHTML = e => e.checkPagoProveedor
-    ? '<span style="font-size:18px">✅</span>'
-    : '<span style="font-size:18px">⏳</span>';
-
-  // KPIs
-  const total       = eventos.length;
-  const confirmados = eventos.filter(e => e.estado.toUpperCase().includes('CONFIRM')||e.estado.toUpperCase().includes('ACTIV')).length;
-  const pendientes  = eventos.filter(e => e.estado.toUpperCase().includes('PEND')||e.estado.toUpperCase().includes('PRESUP')).length;
-  const ingresos    = eventos.reduce((s,e)=>s+e.pvp,0);
-  const margenTotal = eventos.reduce((s,e)=>s+e.margen,0);
-  const costeTotal  = eventos.reduce((s,e)=>s+e.costeNeto,0);
-  const sinCobrar   = eventos.filter(e=>!e.checkPagoTotal && e.pvp>0).reduce((s,e)=>s+(e.pvp-e.importePagado),0);
-  const sinPagar    = eventos.filter(e=>!e.checkPagoProveedor && e.costeNeto>0).reduce((s,e)=>s+e.costeNeto,0);
-  const totalPax    = eventos.reduce((s,e)=>s+e.paxNinos+e.paxAdultos,0);
-
-  // Tabla
-  const hoy = new Date().toISOString().split('T')[0];
-  const proximos = eventos
-    .filter(e => e.fechaEvento >= hoy)
-    .sort((a,b) => a.fechaEvento.localeCompare(b.fechaEvento))
-    .slice(0,5);
-
-  const filas = eventos
-    .slice().sort((a,b) => (b.fechaEvento||'').localeCompare(a.fechaEvento||''))
-    .map(e => '<tr>' +
-      '<td style="font-size:11px;color:var(--grey-2);white-space:nowrap">' + fmtDate(e.fechaEvento) + '</td>' +
-      '<td><div style="font-weight:500;font-size:13px">' + (e.cliente||'—') + '</div>' +
-          '<div style="font-size:11px;color:var(--grey-2);margin-top:2px;display:flex;align-items:center;gap:6px">' +
-            (e.telefono ? '<span>' + e.telefono + '</span>' : '') +
-            (e.telefono
-              ? '<a href="https://wa.me/34' + e.telefono.replace(/[\s+\-().]/g,'').replace(/^34/,'') + '" target="_blank" ' +
-                'style="display:inline-flex;align-items:center;gap:3px;background:#25D366;color:#fff;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600;text-decoration:none">' +
-                '💬 WhatsApp</a>'
-              : '') +
-          '</div></td>' +
-      '<td style="font-size:12px">' + (e.lugar||'—') + '</td>' +
-      '<td style="text-align:center;font-size:12px">' + (e.paxNinos?'👶 '+e.paxNinos:'') + ' ' + (e.paxAdultos?'🧑 '+e.paxAdultos:'') + '</td>' +
-      '<td style="text-align:right;font-weight:600;color:var(--green)">' + (e.pvp?fmtEur(e.pvp):'—') + '</td>' +
-      '<td style="text-align:right;font-size:12px">' + (e.importePagado?fmtEur(e.importePagado):'—') + '</td>' +
-      '<td style="text-align:center;font-size:11px;font-weight:600;color:' + (e.pctPagado>=100?'#2e7d32':e.pctPagado>=50?'#f57f17':'#c62828') + '">' + (e.pvp>0?e.pctPagado+'%':'—') + '</td>' +
-      '<td style="text-align:center">' + checkPagoHTML(e) + '</td>' +
-      '<td style="text-align:center">' + checkProvHTML(e) + '</td>' +
-      '<td>' + estadoBadge(e.estado) + '</td>' +
-    '</tr>').join('');
-
-  const proximosHTML = proximos.length ? proximos.map(e =>
-    '<div style="display:flex;align-items:center;gap:12px;padding:.6rem 0;border-bottom:1px solid #f5f5f5">' +
-      '<div style="min-width:48px;text-align:center;background:var(--green-bg);border-radius:8px;padding:4px 6px">' +
-        '<div style="font-size:16px;font-weight:700;color:var(--green)">' + (fmtDate(e.fechaEvento)||'—').split(' ')[0] + '</div>' +
-        '<div style="font-size:10px;color:var(--grey-2)">' + (fmtDate(e.fechaEvento)||'').split(' ').slice(1).join(' ') + '</div>' +
-      '</div>' +
-      '<div style="flex:1">' +
-        '<div style="font-size:13px;font-weight:600">' + e.cliente + '</div>' +
-        '<div style="font-size:11px;color:var(--grey-2)">' + (e.lugar||'—') + ' · ' + (e.paxNinos||0) + ' niños · ' + (e.paxAdultos||0) + ' adultos</div>' +
-      '</div>' +
-      '<div style="text-align:right">' +
-        '<div style="font-size:13px;font-weight:600;color:var(--green)">' + (e.pvp?fmtEur(e.pvp):'—') + '</div>' +
-        checkPagoHTML(e) +
-      '</div>' +
-    '</div>'
-  ).join('') : '<div style="font-size:13px;color:var(--grey-2);padding:.5rem 0">Sin próximos eventos</div>';
-
-  document.getElementById('page-content').innerHTML =
-    '<div class="kpi-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:1rem">' +
-      '<div class="kpi-card"><div class="kpi-label">Total eventos</div><div class="kpi-value">' + total + '</div><div class="kpi-delta">' + confirmados + ' confirmados · ' + pendientes + ' pendientes</div></div>' +
-      '<div class="kpi-card"><div class="kpi-label">Ingresos PVP</div><div class="kpi-value green">' + fmtEur(ingresos) + '</div><div class="kpi-delta">Margen: ' + fmtEur(margenTotal) + '</div></div>' +
-      '<div class="kpi-card"><div class="kpi-label">Coste neto</div><div class="kpi-value">' + fmtEur(costeTotal) + '</div><div class="kpi-delta">' + (ingresos>0?Math.round(margenTotal/ingresos*100)+'% rentabilidad':'—') + '</div></div>' +
-      '<div class="kpi-card"><div class="kpi-label">Pax totales</div><div class="kpi-value">' + totalPax + '</div></div>' +
-      '<div class="kpi-card"><div class="kpi-label">Por cobrar</div><div class="kpi-value ' + (sinCobrar>0?'red':'') + '">' + fmtEur(sinCobrar) + '</div><div class="kpi-delta">clientes pendientes</div></div>' +
-      '<div class="kpi-card"><div class="kpi-label">Por pagar</div><div class="kpi-value ' + (sinPagar>0?'red':'') + '">' + fmtEur(sinPagar) + '</div><div class="kpi-delta">proveedores pendientes</div></div>' +
-    '</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 2fr;gap:1rem;margin-bottom:1rem">' +
-      '<div class="card"><div class="card-header"><span>📅</span><div class="card-title">Próximos eventos</div></div><div class="card-body">' + proximosHTML + '</div></div>' +
-      '<div class="card"><div class="card-header"><span>💡</span><div class="card-title">Leyenda pagos</div></div><div class="card-body" style="font-size:12px;display:flex;flex-direction:column;gap:.4rem">' +
-        '<div>✅ Pago completo (100%)</div>' +
-        '<div>🟡 Reserva cobrada (≥50%)</div>' +
-        '<div>⏳ Pendiente de cobro</div>' +
-      '</div></div>' +
-    '</div>' +
-    '<div class="card"><div class="card-header"><span>🎉</span><div class="card-title">Todos los eventos</div>' +
-      '<span style="margin-left:auto;font-size:12px;color:var(--grey-2)">' + total + ' registros</span>' +
-    '</div>' +
-    '<div style="overflow-x:auto"><table class="data-table"><thead><tr>' +
-      '<th>Fecha</th><th>Cliente</th><th>Lugar</th><th>Pax</th>' +
-      '<th style="text-align:right">PVP</th><th style="text-align:right">Pagado</th><th style="text-align:center">%</th>' +
-      '<th style="text-align:center">Cliente</th><th style="text-align:center">Proveedor</th><th>Estado</th>' +
-    '</tr></thead><tbody>' +
-      (filas || '<tr><td colspan="10" style="text-align:center;color:var(--grey-2);padding:2rem">Sin eventos registrados</td></tr>') +
-    '</tbody></table></div></div>';
-}
-
-function modalNuevoEventoPitusa() {
-  const hoy = new Date().toISOString().split('T')[0];
-  openModal('🎉 Nuevo evento Pitusa', `
-    <div class="form-grid">
-      <div class="field-group full">
-        <label class="field-label">Cliente (nombre y apellidos) *</label>
-        <input class="field-input" type="text" id="ep-cliente" placeholder="Nombre completo">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Teléfono</label>
-        <input class="field-input" type="tel" id="ep-telefono" placeholder="600 000 000">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Fecha del evento *</label>
-        <input class="field-input" type="date" id="ep-fecha-evento" value="${hoy}">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Estado</label>
-        <select class="field-select" id="ep-estado">
-          <option value="NUEVO">NUEVO</option>
-          <option value="PRESUPUESTADO">PRESUPUESTADO</option>
-          <option value="RESERVADO">RESERVADO</option>
-          <option value="PENDIENTE" selected>PENDIENTE</option>
-        </select>
-      </div>
-      <div class="field-group full">
-        <label class="field-label">Lugar</label>
-        <input class="field-input" type="text" id="ep-lugar" placeholder="Dirección o nombre del lugar">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Pax niños</label>
-        <input class="field-input" type="number" id="ep-pax-ninos" value="0" min="0">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Pax adultos</label>
-        <input class="field-input" type="number" id="ep-pax-adultos" value="0" min="0">
-      </div>
-      <div class="field-group full">
-        <label class="field-label">Intereses / Descripción</label>
-        <input class="field-input" type="text" id="ep-intereses" placeholder="Temática, preferencias…">
-      </div>
-      <div class="field-group full">
-        <label class="field-label">Proveedores</label>
-        <input class="field-input" type="text" id="ep-proveedores" placeholder="Nombres de proveedores">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Coste neto total (€)</label>
-        <input class="field-input" type="number" id="ep-coste" value="0" min="0" step="0.01">
-      </div>
-      <div class="field-group">
-        <label class="field-label">PVP final cliente (€)</label>
-        <input class="field-input" type="number" id="ep-pvp" value="0" min="0" step="0.01">
-      </div>
-      <div class="field-group">
-        <label class="field-label">Importe pagado (€)</label>
-        <input class="field-input" type="number" id="ep-importe-pagado" value="0" min="0" step="0.01">
-      </div>
-    </div>`,
-    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-     <button class="btn btn-primary" onclick="guardarEventoPitusa()">💾 Guardar evento</button>`
-  );
-}
-
-async function guardarEventoPitusa() {
-  const cliente  = document.getElementById('ep-cliente')?.value.trim();
-  const fechaEvt = document.getElementById('ep-fecha-evento')?.value;
-  if (!cliente || !fechaEvt) { showToast('Cliente y fecha son obligatorios', 'error'); return; }
-
-  const btn = document.querySelector('#modal-footer .btn-primary');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Guardando…'; }
-
-  const pvp        = parseFloat(document.getElementById('ep-pvp')?.value||0)||0;
-  const importePag = parseFloat(document.getElementById('ep-importe-pagado')?.value||0)||0;
-
-  // Solo columnas sin fórmulas en Sheets
-  // Excluidos: Id (A), Whatsapp (E), Margen gestión, % Pagado, Check Pago Reserva, Check Pago Total
-  const fila = {
-    'Fecha solicitud':              new Date().toISOString().split('T')[0],
-    'Cliente (Nombre y apellidos)': cliente,
-    'Teléfono':                     document.getElementById('ep-telefono')?.value.trim()||'',
-    'Fecha evento':                 fechaEvt,
-    'Lugar':                        document.getElementById('ep-lugar')?.value.trim()||'',
-    'Pax Niños':                    document.getElementById('ep-pax-ninos')?.value||'0',
-    'Pax Adultos':                  document.getElementById('ep-pax-adultos')?.value||'0',
-    'Intereses':                    document.getElementById('ep-intereses')?.value.trim()||'',
-    'Proveedores':                  document.getElementById('ep-proveedores')?.value.trim()||'',
-    'Coste Neto Total (€)':         document.getElementById('ep-coste')?.value||'0',
-    'PVP Final Cliente':            pvp,
-    'Estado':                       document.getElementById('ep-estado')?.value||'PRESUPUESTO',
-    'Importe Pagado':               importePag,
-    'Check Pago Proveedor':         'FALSE'
-  };
-
-  closeModal();
-  try {
-    const res = await writeToSheet('EVENTOS PITUSA', fila);
-    if (res && res.ok && !res.demo) {
-      showToast('✅ Evento guardado', 'success', 4000);
-      await recargarPitusa();
-    } else if (res && res.queued) {
-      showToast('📵 Sin conexión — evento guardado localmente', 'warning', 5000);
-    } else {
-      showToast('❌ Error: ' + (res?.error||'sin respuesta'), 'error', 6000);
-    }
-  } catch(e) { showToast('❌ ' + e.message, 'error', 6000); }
-}
-
-/* ═══════════════════════════════════════════════════════════
-   PORTAL AMPA — Vista privada para responsables del AMPA
-═══════════════════════════════════════════════════════════ */
-function portalAmpa() {
-  document.getElementById('page-title').textContent = 'Portal AMPA';
-  document.getElementById('page-sub').textContent   = 'Informe mensual de actividades extraescolares';
-  document.getElementById('topbar-actions').innerHTML = '';
-
-  const hoy = new Date();
-  const opts = [];
-  for (let i = 0; i < 12; i++) {
-    const d   = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1);
-    const mes = d.toLocaleDateString('es-ES', { month: 'long' });
-    const anyo = d.getFullYear();
-    const label = mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + anyo;
-    opts.push(`<option value="${mes}|${anyo}">${label}</option>`);
-  }
-
-  const nRegistros = (DB.asistencias_extra || []).length;
-
-  document.getElementById('page-content').innerHTML = `
-    <div style="max-width:520px;margin:2.5rem auto">
-      <div class="section-card">
-        <div class="section-card-title">Informe mensual de asistencia</div>
-        <p style="font-size:13px;color:var(--grey-2);margin-bottom:1.5rem;line-height:1.6">
-          Descarga el informe de asistencia de las actividades extraescolares del
-          <strong>CEIP Escaleritas</strong> en formato PDF.
-        </p>
-        <div class="field-group" style="margin-bottom:1.5rem">
-          <label class="field-label">Mes del informe</label>
-          <select class="field-select" id="ampa-portal-mes" style="width:100%">
-            ${opts.join('')}
-          </select>
-        </div>
-        <button class="btn btn-primary" style="width:100%;padding:.85rem" onclick="
-          const val = document.getElementById('ampa-portal-mes').value.split('|');
-          generarInformeAMPA(val[0], parseInt(val[1]));
-        ">📄 Descargar informe PDF</button>
-      </div>
-      <div style="margin-top:1rem;padding:1rem 1.25rem;background:var(--grey-bg);border-radius:10px;
-                  font-size:12px;color:var(--grey-2);display:flex;align-items:center;justify-content:space-between">
-        <span><strong>${nRegistros}</strong> registros de asistencia cargados</span>
-        <button onclick="syncAmpaData()" style="background:none;border:none;color:var(--green);
-                font-size:12px;font-weight:600;cursor:pointer;padding:0">🔄 Actualizar</button>
-      </div>
-    </div>`;
-}
-
-async function syncAmpaData() {
-  showToast('Actualizando datos AMPA…', 'info');
-  try {
-    const res = await gasRequest('GET_ASISTENCIAS_EXTRA');
-    if (res.ok && Array.isArray(res.asistencias)) {
-      normalizarDB({ asistencias_extra: res.asistencias });
-      saveCacheLocal();
-      showToast('Datos actualizados ✓', 'success');
-    } else {
-      showToast('Sin nuevos datos', 'warning');
-    }
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
-  portalAmpa();
-}
-
-function recargarPitusa() {
-  const btn = document.querySelector('#topbar-actions .btn');
-  if (btn) { btn.textContent = '⏳ Cargando...'; btn.disabled = true; }
-  if (!GAS_URL) { showToast('Sin URL de GAS configurada', 'warning'); return; }
-  gasRequest('GET_SHEET', { sheet: 'EVENTOS PITUSA' }, 15000)
-    .then(res => {
-      if (res.ok && Array.isArray(res.rows)) {
-        normalizarDB({ 'eventos pitusa': res.rows });
-        saveCacheLocal();
-        showToast('Eventos Pitusa actualizados ✅', 'success');
-        pitusaEventos();
-      } else {
-        showToast('Error al cargar eventos: ' + (res.error || 'sin datos'), 'error');
-        if (btn) { btn.textContent = '🔄 Recargar'; btn.disabled = false; }
-      }
-    })
-    .catch(e => {
-      showToast('Error de conexión: ' + e.message, 'error');
-      if (btn) { btn.textContent = '🔄 Recargar'; btn.disabled = false; }
-    });
 }
 
 initApp();

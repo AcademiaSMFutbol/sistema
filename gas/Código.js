@@ -168,7 +168,6 @@ function getAllData() {
       inscripciones:    sheetToObjects_('INSCRIPCIONES'),
       gastos:           sheetToObjects_('GASTOS'),
       personal:         sheetToObjects_('PERSONAL'),
-      'eventos pitusa': sheetToObjects_('EVENTOS PITUSA'),
     }
   };
 }

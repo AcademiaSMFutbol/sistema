@@ -654,8 +654,21 @@ function buildVerifactuXml_(f) {
 }
 
 /** Envuelve el XML en un SOAP envelope firmado (WS-Security XMLDSig RSA-SHA256) */
+/** Normaliza un PEM para que tenga saltos de línea cada 64 chars (por si se pegó como una sola línea) */
+function normalizePem_(pem) {
+  pem = String(pem || '').trim().replace(/\r/g, '');
+  if (pem.includes('\n')) return pem;
+  // Sin saltos de línea — reconstruir
+  const hdr = (pem.match(/-----BEGIN [^-]+-----/) || [''])[0];
+  const ftr = (pem.match(/-----END [^-]+-----/)   || [''])[0];
+  const b64 = pem.replace(hdr,'').replace(ftr,'').replace(/\s+/g,'');
+  return hdr + '\n' + (b64.match(/.{1,64}/g)||[]).join('\n') + '\n' + ftr;
+}
+
 function buildVerifactuSoap_(bodyXml, certB64, privateKeyPem) {
   try {
+    privateKeyPem = normalizePem_(privateKeyPem);
+
     // ID del body para la referencia en la firma
     const bodyId = 'Body-' + Utilities.getUuid().replace(/-/g,'').substring(0,16);
 

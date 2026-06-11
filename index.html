@@ -6524,6 +6524,10 @@ function nominas() {
 
   const ultimoNro = parseInt(getCfgNomina('ULTIMO_NRO_NOMINA')) || 0;
 
+  // diasMes del mes actual — precioHora es tarifa DIARIA (misma lógica que buildNominaHTML)
+  const _hoyNom  = new Date();
+  const _diasMes = new Date(_hoyNom.getFullYear(), _hoyNom.getMonth() + 1, 0).getDate();
+
   content.innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1.5rem">
       <div class="kpi-card">
@@ -6544,17 +6548,19 @@ function nominas() {
       <div class="section-card-title">Monitores</div>
       <table class="data-table">
         <thead><tr>
-          <th>Nombre</th><th>Horas/mes</th><th>Precio/h</th>
+          <th>Nombre</th><th>Horas/mes</th><th>Tarifa día</th>
           <th>Salario base</th><th>Coste empresa</th><th></th>
         </tr></thead>
         <tbody>
           ${monitores.map(p => {
-            const hMes    = parseFloat(p.horasJornada || p.horasMes || 0);
-            const base    = (hMes * p.precioHora).toFixed(2);
-            const ppExtra = (Math.ceil(parseFloat(base) / 6 * 100) / 100).toFixed(2);
-            const compSMI = (hMes * (p.precioSMI || 0)).toFixed(2);
-            const compDed = parseFloat(p.compDed || 0) || parseFloat(getCfgNomina('COMP_DEDICACION') || 0);
-            const total   = (parseFloat(base) + parseFloat(ppExtra) + parseFloat(compSMI) + compDed).toFixed(2);
+            const horasAlta = parseFloat(p.horasJornada || p.horasMes || 0);
+            const precioH   = parseFloat(p.precioHora  || 0);
+            const precioSMI = parseFloat(p.precioSMI   || 0);
+            const compDed   = parseFloat(p.compDed || 0) || parseFloat(getCfgNomina('COMP_DEDICACION') || 0);
+            const base      = Math.round(_diasMes * precioH   * 100) / 100;
+            const ppExtra   = Math.ceil (base     / 6          * 100) / 100;
+            const compSMI   = Math.round(_diasMes * precioSMI  * 100) / 100;
+            const total     = Math.round((base + ppExtra + compSMI + compDed) * 100) / 100;
             // Coste empresa
             const ccEmp   = parseFloat(getCfgNomina('COT_CC_EMPRESA')       || 0) / 100;
             const meiEmp  = parseFloat(getCfgNomina('COT_MEI_EMPRESA')       || 0) / 100;
@@ -6562,12 +6568,12 @@ function nominas() {
             const desEmp  = parseFloat(getCfgNomina('COT_DESEMPLEO_EMPRESA') || 0) / 100;
             const fpEmp   = parseFloat(getCfgNomina('COT_FP_EMPRESA')        || 0) / 100;
             const fogEmp  = parseFloat(getCfgNomina('COT_FOGASA_EMPRESA')    || 0) / 100;
-            const costeEmp = (parseFloat(total) * (1 + ccEmp + meiEmp + atEmp + desEmp + fpEmp + fogEmp)).toFixed(2);
+            const costeEmp = (total * (1 + ccEmp + meiEmp + atEmp + desEmp + fpEmp + fogEmp)).toFixed(2);
             return `<tr>
               <td><strong>${p.nombre}</strong><br>
-                  <span style="font-size:11px;color:var(--grey-2)">${p.actividad||''} · ${hMes}h/mes</span></td>
-              <td>${hMes}</td>
-              <td>${parseFloat(p.precioHora).toFixed(3)} €</td>
+                  <span style="font-size:11px;color:var(--grey-2)">${p.actividad||''} · ${horasAlta}h/mes</span></td>
+              <td>${horasAlta}</td>
+              <td>${precioH.toFixed(3)} €</td>
               <td>${fmtEur(base)}</td>
               <td>${fmtEur(costeEmp)}</td>
               <td><button class="btn btn-primary btn-sm"
@@ -7596,6 +7602,76 @@ function portalFamilia() {
 
   // Ocultar topbar-actions heredadas
   document.getElementById('topbar-actions').innerHTML = '';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PORTAL AMPA — vista para responsables AMPA de Escaleritas
+═══════════════════════════════════════════════════════════ */
+function portalAmpa() {
+  document.getElementById('topbar-actions').innerHTML = '';
+  const pc = document.getElementById('page-content');
+
+  const inscrEsc = DB.inscripciones.filter(i =>
+    String(i.centro || '').toUpperCase().includes('ESCALERITAS') && i.estado === 'ACTIVA'
+  );
+  const asistEsc = DB.asistencias_extra || [];
+
+  const hoyA   = new Date();
+  const mesStr = hoyA.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+    .replace(/^\w/, c => c.toUpperCase());
+
+  const filas = inscrEsc.map(i => {
+    const al = DB.alumnos.find(a => String(a.id) === String(i.alumnoId)) || {};
+    const nombre = al.nombre
+      ? (al.nombre + ' ' + (al.apellidos || '')).trim()
+      : (i.claveAlumno || '').split('|').slice(1).join('') || '—';
+    return `<tr>
+      <td><strong>${nombre}</strong></td>
+      <td><span class="badge badge-green">${i.servicio || '—'}</span></td>
+      <td>${i.grupoDia || i.dias || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  pc.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;text-align:center;padding:1.5rem 1rem">
+      <div style="font-size:32px;margin-bottom:.5rem">🏫</div>
+      <div style="font-size:18px;font-weight:700;color:var(--primary)">AMPA Escaleritas</div>
+      <div style="font-size:13px;color:var(--grey-2);margin-top:.25rem">Portal de seguimiento — Extraescolares SM Academia</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1rem">
+      <div class="kpi-card">
+        <div class="kpi-label">Alumnos inscritos</div>
+        <div class="kpi-value">${inscrEsc.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Registros asistencia</div>
+        <div class="kpi-value">${asistEsc.length}</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-header">Informe mensual</div>
+      <div style="padding:1rem">
+        <p style="font-size:13px;color:var(--grey-2);margin:0 0 1rem">
+          Genera el informe de asistencia del mes seleccionado para presentarlo a la dirección del colegio.
+        </p>
+        <button class="btn btn-primary" onclick="generarInformeAMPA()">📄 Generar informe PDF</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">Alumnos inscritos en Escaleritas</div>
+      ${inscrEsc.length ? `
+        <table class="data-table">
+          <thead><tr><th>Alumno</th><th>Servicio</th><th>Grupo / Días</th></tr></thead>
+          <tbody>${filas}</tbody>
+        </table>` : `
+        <div class="empty-state" style="padding:2rem">
+          <div class="empty-title">Sin alumnos inscritos en Escaleritas</div>
+          <div class="empty-desc">Verifica que la sincronización cargó los datos correctamente.</div>
+        </div>`}
+    </div>`;
 }
 
 /* ═══════════════════════════════════════════════════════════

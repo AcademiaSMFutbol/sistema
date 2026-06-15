@@ -836,6 +836,12 @@ let GAS_URL = localStorage.getItem(CONFIG_KEY) || GAS_URL_DEFAULT;
 if (!localStorage.getItem(CONFIG_KEY) && GAS_URL_DEFAULT !== 'PEGA_TU_URL_GAS_AQUI') {
   localStorage.setItem(CONFIG_KEY, GAS_URL_DEFAULT);
 }
+// Reset cadena de hashes al pasar a fórmula v2 (Orden HAC/1177/2024)
+// Solo se ejecuta una vez; sin facturas enviadas a AEAT la cadena puede empezar de cero
+if (localStorage.getItem('sm_hash_formula') !== 'v2') {
+  Object.keys(localStorage).filter(k => k.startsWith('sm_last_hash_')).forEach(k => localStorage.removeItem(k));
+  localStorage.setItem('sm_hash_formula', 'v2');
+}
 let currentUser = null;
 let currentPage = 'dashboard';
 let DB = {
@@ -4646,40 +4652,10 @@ function _facturaRowHtml(f) {
   </tr>`;
 }
 // Marca facturas emitidas con fórmula de hash antigua (v1) para re-emisión
-async function migrarHashesV1() {
-  const antiguas = DB.facturas.filter(f => f.estadoVerifactu !== 'HASH_RECALCULAR' &&
-    f.estadoVerifactu !== 'ACEPTADA' && f.estadoVerifactu !== 'ENVIADA');
-  if (!antiguas.length) return 0;
-  for (const f of antiguas) {
-    await gasPost('UPDATE', { sheet: 'FACTURAS', id: f.idFactura, row: { 'Estado VeriFactu': 'HASH_RECALCULAR' } });
-  }
-  // Limpiar hash chain local para que la próxima factura empiece como PrimerRegistro
-  Object.keys(localStorage).filter(k => k.startsWith('sm_last_hash_')).forEach(k => localStorage.removeItem(k));
-  return antiguas.length;
-}
-
 function facturas() {
   const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
-
-  // Avisar si hay facturas con hash antiguo (v1) pendientes de re-emisión
-  const conHashV1 = DB.facturas.filter(f => f.estadoVerifactu === 'HASH_RECALCULAR');
-  if (conHashV1.length) {
-    showToast(`⚠️ ${conHashV1.length} factura(s) con hash desactualizado (v1). Marca: HASH_RECALCULAR en Sheets.`, 'warning', 8000);
-  }
-
   addTopbarBtn('Generar pendientes', () => generarTodasFacturas(), 'btn-primary');
   addTopbarBtn('🔄 Actualizar', () => syncPagos(), 'btn-secondary');
-  // Botón de migración hash v1→v2: visible hasta que no queden facturas sin migrar
-  const sinMigrar = DB.facturas.filter(f => f.estadoVerifactu !== 'HASH_RECALCULAR' &&
-    f.estadoVerifactu !== 'ACEPTADA' && f.estadoVerifactu !== 'ENVIADA' && f.idFactura);
-  if (sinMigrar.length) {
-    addTopbarBtn('🔧 Migrar hashes v1', async () => {
-      const n = await migrarHashesV1();
-      showToast(`${n} factura(s) marcadas como HASH_RECALCULAR`, 'success', 5000);
-      await syncPagos();
-      navigate('facturas');
-    }, 'btn-secondary');
-  }
   const todasFacturas = [...new Set(DB.pagos.filter(p=>p.facturaId).map(p=>p.facturaId))].map(fid => {
     const pagos = DB.pagos.filter(p=>p.facturaId===fid);
     const cliente = getCliente(pagos[0]?.clienteId||'');

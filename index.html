@@ -4202,19 +4202,34 @@ async function sha256hex(texto) {
     .map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-// Cadena a firmar según esquema AEAT VeriFactu 1.0
-// Orden: NIF|NumFactura|FechaExpedicion|TipoFactura|CuotaTotal|ImporteTotal|HuellaAnterior
-async function generarHashVF(numFactura, fechaExpedicion, cuotaTotal, totalFactura, hashAnterior) {
-  const cadena = [
-    VF_NIF_EMISOR,
-    numFactura,
-    fechaExpedicion,           // dd-mm-yyyy
-    'F1',                      // TipoFactura (facturas completas)
-    cuotaTotal.toFixed(2),     // cuota IGIC
-    totalFactura.toFixed(2),
-    hashAnterior || ''         // vacío en la primera factura
-  ].join('|');
-  return await sha256hex(cadena);
+// Timestamp ISO 8601 con offset de zona horaria del dispositivo
+function _isoTimestampConHuso(d) {
+  const off  = -d.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const hh   = String(Math.floor(Math.abs(off) / 60)).padStart(2, '0');
+  const mm   = String(Math.abs(off) % 60).padStart(2, '0');
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0') + 'T' +
+    String(d.getHours()).padStart(2, '0') + ':' +
+    String(d.getMinutes()).padStart(2, '0') + ':' +
+    String(d.getSeconds()).padStart(2, '0') +
+    sign + hh + ':' + mm;
+}
+
+// Cadena de huella según Orden HAC/1177/2024: 8 campos campo=valor& separados por &
+// SHA-256 del resultado en hexadecimal mayúsculas (TipoHuella="01")
+async function generarHashVF(numFactura, fechaExpedicion, cuotaTotal, totalFactura, hashAnterior, fechaHoraHuso) {
+  const cadena =
+    'IDEmisorFactura='           + VF_NIF_EMISOR +
+    '&NumSerieFactura='          + numFactura +
+    '&FechaExpedicionFactura='   + fechaExpedicion +      // dd-mm-yyyy
+    '&TipoFactura=F1'                                   +
+    '&CuotaTotal='               + cuotaTotal.toFixed(2) +
+    '&ImporteTotal='             + totalFactura.toFixed(2) +
+    '&Huella='                   + (hashAnterior || '') + // vacío en primera factura
+    '&FechaHoraHusoGenRegistro=' + fechaHoraHuso;        // yyyy-mm-ddTHH:MM:SS±HH:MM
+  return (await sha256hex(cadena)).toUpperCase();
 }
 
 // Obtener el hash de la última factura emitida (para encadenamiento)
@@ -4263,9 +4278,10 @@ async function emitirFacturaVF(pagos, numFactura) {
   const descuento   = pagos.reduce((s,p) => s + (p.descEur || 0), 0);
 
   // Hash VeriFactu
-  const hashAnterior = obtenerHashAnterior();
-  const hashActual   = await generarHashVF(numFactura, fechaExp, cuotaIgic, total, hashAnterior);
-  const tsHuella     = ahora.toISOString().replace('T',' ').substring(0,19);
+  const hashAnterior  = obtenerHashAnterior();
+  const fechaHoraHuso = _isoTimestampConHuso(ahora);
+  const hashActual    = await generarHashVF(numFactura, fechaExp, cuotaIgic, total, hashAnterior, fechaHoraHuso);
+  const tsHuella      = ahora.toISOString().replace('T',' ').substring(0,19);
 
   // Descripción
   const alumnos = [...new Set(pagos.map(p => {
@@ -4335,8 +4351,8 @@ async function emitirYGuardarFactura(pagos, numFactura) {
 
 // Vista previa del hash antes de emitir
 async function previstaHashVF(numFactura, fechaExp, cuotaTotal, total) {
-  const hashAnterior = obtenerHashAnterior();
-  const hash         = await generarHashVF(numFactura, fechaExp, cuotaTotal, total, hashAnterior);
+  const hashAnterior  = obtenerHashAnterior();
+  const hash          = await generarHashVF(numFactura, fechaExp, cuotaTotal, total, hashAnterior, _isoTimestampConHuso(new Date()));
   openModal('🔐 Vista previa VeriFactu', `
     <div style="font-family:monospace;font-size:11px;background:#f5f5f5;padding:1rem;border-radius:8px">
       <div style="margin-bottom:.5rem"><strong>Factura:</strong> ${numFactura}</div>
@@ -4394,9 +4410,10 @@ async function construirXMLVeriFactu(facturaId) {
       (pagos[0].fecha ? new Date(pagos[0].fecha).getFullYear() : ahora.getFullYear())
     : '';
 
-  const hashAnterior = obtenerHashAnterior();
-  const hashActual   = await generarHashVF(facturaId, fechaExp, cuota, total, hashAnterior);
-  const urlQR        = urlQRVeriFactu(facturaId, fechaExp, total);
+  const hashAnterior  = obtenerHashAnterior();
+  const fechaHoraHuso = _isoTimestampConHuso(ahora);
+  const hashActual    = await generarHashVF(facturaId, fechaExp, cuota, total, hashAnterior, fechaHoraHuso);
+  const urlQR         = urlQRVeriFactu(facturaId, fechaExp, total);
 
   const bloqueIgic = tipoIgic === 3
     ? `<DetalleIVA>
@@ -4466,7 +4483,7 @@ async function construirXMLVeriFactu(facturaId) {
         <T:TipoUsoPosibleMultiOT>N</T:TipoUsoPosibleMultiOT>
         <T:IndicadorMultiplesOT>N</T:IndicadorMultiplesOT>
       </T:SistemaInformatico>
-      <T:FechaHoraHusoHorarioGeneration>${fechaExp}T${horaExp}+01:00</T:FechaHoraHusoHorarioGeneration>
+      <T:FechaHoraHusoGenRegistro>${fechaHoraHuso}</T:FechaHoraHusoGenRegistro>
       <T:NumRegistro>1</T:NumRegistro>
       <T:Huella>${hashActual}</T:Huella>
       <T:URL_QR>${urlQR}</T:URL_QR>
@@ -4628,10 +4645,41 @@ function _facturaRowHtml(f) {
     </td>
   </tr>`;
 }
+// Marca facturas emitidas con fórmula de hash antigua (v1) para re-emisión
+async function migrarHashesV1() {
+  const antiguas = DB.facturas.filter(f => f.estadoVerifactu !== 'HASH_RECALCULAR' &&
+    f.estadoVerifactu !== 'ACEPTADA' && f.estadoVerifactu !== 'ENVIADA');
+  if (!antiguas.length) return 0;
+  for (const f of antiguas) {
+    await gasPost('UPDATE', { sheet: 'FACTURAS', id: f.idFactura, row: { 'Estado VeriFactu': 'HASH_RECALCULAR' } });
+  }
+  // Limpiar hash chain local para que la próxima factura empiece como PrimerRegistro
+  Object.keys(localStorage).filter(k => k.startsWith('sm_last_hash_')).forEach(k => localStorage.removeItem(k));
+  return antiguas.length;
+}
+
 function facturas() {
   const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
+
+  // Avisar si hay facturas con hash antiguo (v1) pendientes de re-emisión
+  const conHashV1 = DB.facturas.filter(f => f.estadoVerifactu === 'HASH_RECALCULAR');
+  if (conHashV1.length) {
+    showToast(`⚠️ ${conHashV1.length} factura(s) con hash desactualizado (v1). Marca: HASH_RECALCULAR en Sheets.`, 'warning', 8000);
+  }
+
   addTopbarBtn('Generar pendientes', () => generarTodasFacturas(), 'btn-primary');
   addTopbarBtn('🔄 Actualizar', () => syncPagos(), 'btn-secondary');
+  // Botón de migración hash v1→v2: visible hasta que no queden facturas sin migrar
+  const sinMigrar = DB.facturas.filter(f => f.estadoVerifactu !== 'HASH_RECALCULAR' &&
+    f.estadoVerifactu !== 'ACEPTADA' && f.estadoVerifactu !== 'ENVIADA' && f.idFactura);
+  if (sinMigrar.length) {
+    addTopbarBtn('🔧 Migrar hashes v1', async () => {
+      const n = await migrarHashesV1();
+      showToast(`${n} factura(s) marcadas como HASH_RECALCULAR`, 'success', 5000);
+      await syncPagos();
+      navigate('facturas');
+    }, 'btn-secondary');
+  }
   const todasFacturas = [...new Set(DB.pagos.filter(p=>p.facturaId).map(p=>p.facturaId))].map(fid => {
     const pagos = DB.pagos.filter(p=>p.facturaId===fid);
     const cliente = getCliente(pagos[0]?.clienteId||'');

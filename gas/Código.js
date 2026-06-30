@@ -62,8 +62,9 @@ function doPost(e) {
     const body   = JSON.parse(e.postData.contents || '{}');
     const action = (body.action || '').trim();
     switch (action) {
-      case 'NUEVA_INSCRIPCION': result = nuevaInscripcion(body);             break;
-      case 'APPEND':            result = appendRow(body.sheet, body.row || {}); break;
+      case 'NUEVA_INSCRIPCION':     result = nuevaInscripcion(body);                 break;
+      case 'NUEVA_PREINSCRIPCION':  result = nuevaPreinscripcion(body);             break;
+      case 'APPEND':                result = appendRow(body.sheet, body.row || {}); break;
       default:
         result = { ok: false, error: 'Acción POST desconocida: ' + action };
     }
@@ -165,12 +166,14 @@ function getAllData() {
   return {
     ok: true,
     data: {
-      clientes:         sheetToObjects_('CLIENTES'),
-      alumnos:          sheetToObjects_('ALUMNOS'),
-      inscripciones:    sheetToObjects_('INSCRIPCIONES'),
-      gastos:           sheetToObjects_('GASTOS'),
-      personal:         sheetToObjects_('PERSONAL'),
-      facturas:         sheetToObjects_('FACTURAS'),
+      clientes:          sheetToObjects_('CLIENTES'),
+      alumnos:           sheetToObjects_('ALUMNOS'),
+      inscripciones:     sheetToObjects_('INSCRIPCIONES'),
+      gastos:            sheetToObjects_('GASTOS'),
+      personal:          sheetToObjects_('PERSONAL'),
+      facturas:          sheetToObjects_('FACTURAS'),
+      preinscripciones:  sheetToObjects_('PREINSCRIPCIONES'),
+      actividades:       sheetToObjects_('ACTIVIDADES'),
     }
   };
 }
@@ -467,6 +470,90 @@ function nuevaInscripcion(body) {
   });
 
   return { ok: true, inscrId };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════════
+//  NUEVA PREINSCRIPCIÓN  (formulario de interés familias — Escaleritas)
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Registra una preinscripción de interés en la hoja PREINSCRIPCIONES.
+ *
+ * Columnas esperadas en la hoja (créalas en ese orden):
+ *   ID_PREINSCRIPCION | FECHA | ESTADO | CURSO_ACADEMICO | CENTRO
+ *   NOMBRE_ALUMNO | APELLIDOS_ALUMNO | CURSO_ALUMNO | FECHA_NAC | SALUD | OBSERVACIONES
+ *   NOMBRE_TUTOR1 | APELLIDOS_TUTOR1 | RELACION_TUTOR1 | NIF_TUTOR1 | TELEFONO_TUTOR1 | EMAIL_TUTOR1
+ *   NOMBRE_TUTOR2 | APELLIDOS_TUTOR2 | RELACION_TUTOR2 | NIF_TUTOR2 | TELEFONO_TUTOR2 | EMAIL_TUTOR2
+ *   AUTORIZA_IMAGEN | ACEPTA_DATOS | ACEPTA_DATOS_SALUD | SOCIO_AMPA | IBAN
+ *   ACTIVIDADES | DIAS_DISPONIBLES
+ */
+function nuevaPreinscripcion(body) {
+  const v = (k1, k2) => String(body[k1] || (k2 ? body[k2] : '') || '').trim();
+
+  const nomAlu      = v('nombre_alumno',      'Nombre del alumno/a');
+  const apeAlu      = v('apellidos_alumno',   'Apellidos del alumno/a');
+  if (!nomAlu || !apeAlu) {
+    return { ok: false, error: 'Campos obligatorios: nombre_alumno y apellidos_alumno' };
+  }
+
+  const sh = ss_().getSheetByName('PREINSCRIPCIONES');
+  if (!sh) return { ok: false, error: 'Hoja PREINSCRIPCIONES no encontrada. Créala con las cabeceras indicadas.' };
+
+  const tz    = Session.getScriptTimeZone();
+  const fecha = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+  // Calcular siguiente ID
+  const lastRow = sh.getLastRow();
+  let nextId = 'PREINSC-001';
+  if (lastRow >= 2) {
+    const ids = sh.getRange(2, 1, lastRow - 1, 1).getValues().flat();
+    let max = 0;
+    ids.forEach(function(id) {
+      const n = parseInt(String(id).replace(/\D/g, '')) || 0;
+      if (n > max) max = n;
+    });
+    nextId = 'PREINSC-' + String(max + 1).padStart(3, '0');
+  }
+
+  // Actividades puede llegar como array (checkboxes) o string CSV
+  let actividades = body.actividades || body['Actividades de interés'] || '';
+  if (Array.isArray(actividades)) actividades = actividades.join(', ');
+
+  appendRow('PREINSCRIPCIONES', {
+    'ID_PREINSCRIPCION': nextId,
+    'FECHA':             fecha,
+    'ESTADO':            'RECIBIDA',
+    'CURSO_ACADEMICO':   v('curso_academico')   || '2026-2027',
+    'CENTRO':            v('centro')             || 'ESCALERITAS',
+    'NOMBRE_ALUMNO':     nomAlu,
+    'APELLIDOS_ALUMNO':  apeAlu,
+    'CURSO_ALUMNO':      v('curso_alumno',       'Curso escolar'),
+    'FECHA_NAC':         v('fecha_nac',          'Fecha de nacimiento'),
+    'SALUD':             v('salud',              'Enfermedades/alergias'),
+    'OBSERVACIONES':     v('observaciones',      'Observaciones'),
+    'NOMBRE_TUTOR1':     v('nombre_tutor1',      'Nombre tutor 1'),
+    'APELLIDOS_TUTOR1':  v('apellidos_tutor1',   'Apellidos tutor 1'),
+    'RELACION_TUTOR1':   v('relacion_tutor1',    'Relación tutor 1'),
+    'NIF_TUTOR1':        v('nif_tutor1',         'NIF/DNI tutor 1'),
+    'TELEFONO_TUTOR1':   v('telefono_tutor1',    'Teléfono tutor 1'),
+    'EMAIL_TUTOR1':      v('email_tutor1',       'Email tutor 1').toLowerCase(),
+    'NOMBRE_TUTOR2':     v('nombre_tutor2',      'Nombre tutor 2'),
+    'APELLIDOS_TUTOR2':  v('apellidos_tutor2',   'Apellidos tutor 2'),
+    'RELACION_TUTOR2':   v('relacion_tutor2',    'Relación tutor 2'),
+    'NIF_TUTOR2':        v('nif_tutor2',         'NIF/DNI tutor 2'),
+    'TELEFONO_TUTOR2':   v('telefono_tutor2',    'Teléfono tutor 2'),
+    'EMAIL_TUTOR2':      v('email_tutor2',       'Email tutor 2').toLowerCase(),
+    'AUTORIZA_IMAGEN':   v('autoriza_imagen',    'Cesión de imágenes').toUpperCase().startsWith('S') ? 'SÍ' : 'NO',
+    'ACEPTA_DATOS':      v('acepta_datos',       'Política de datos').toUpperCase().startsWith('S') ? 'SÍ' : 'NO',
+    'ACEPTA_DATOS_SALUD':v('acepta_datos_salud', 'Consentimiento datos salud').toUpperCase().startsWith('S') ? 'SÍ' : 'NO',
+    'SOCIO_AMPA':        v('socio_ampa',         '¿Desea hacerse socio del AMPA?').toUpperCase().startsWith('S') ? 'SÍ' : 'NO',
+    'IBAN':              v('iban',               'IBAN para domiciliación'),
+    'ACTIVIDADES':       String(actividades),
+    'DIAS_DISPONIBLES':  v('dias_disponibles',   'Días disponibles'),
+  });
+
+  return { ok: true, preinscId: nextId };
 }
 
 

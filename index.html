@@ -1563,6 +1563,50 @@ function normalizarDB(raw) {
   if (Object.keys(extraMap).length > 0) {
     DB.extraescolares = Object.values(extraMap);
   }
+
+  // PREINSCRIPCIONES — formulario de interés Escaleritas
+  if (raw.preinscripciones && raw.preinscripciones.length) {
+    DB.preinscripciones = raw.preinscripciones.map(p => ({
+      id:              p.ID_PREINSCRIPCION || '',
+      fecha:           p.FECHA || '',
+      estado:          (p.ESTADO || 'RECIBIDA').toUpperCase(),
+      cursoAcademico:  p.CURSO_ACADEMICO || '',
+      centro:          p.CENTRO || '',
+      nombreAlumno:    ((p.NOMBRE_ALUMNO || '') + ' ' + (p.APELLIDOS_ALUMNO || '')).trim().toUpperCase(),
+      cursoAlumno:     p.CURSO_ALUMNO || '',
+      fechaNac:        p.FECHA_NAC || '',
+      salud:           p.SALUD || '',
+      observaciones:   p.OBSERVACIONES || '',
+      tutor1:          { nombre: ((p.NOMBRE_TUTOR1 || '') + ' ' + (p.APELLIDOS_TUTOR1 || '')).trim(), relacion: p.RELACION_TUTOR1 || '', nif: p.NIF_TUTOR1 || '', telefono: p.TELEFONO_TUTOR1 || '', email: p.EMAIL_TUTOR1 || '' },
+      tutor2:          { nombre: ((p.NOMBRE_TUTOR2 || '') + ' ' + (p.APELLIDOS_TUTOR2 || '')).trim(), relacion: p.RELACION_TUTOR2 || '', nif: p.NIF_TUTOR2 || '', telefono: p.TELEFONO_TUTOR2 || '', email: p.EMAIL_TUTOR2 || '' },
+      autorizaImagen:  p.AUTORIZA_IMAGEN || '',
+      aceptaDatos:     p.ACEPTA_DATOS || '',
+      aceptaDatosSalud:p.ACEPTA_DATOS_SALUD || '',
+      socioAmpa:       p.SOCIO_AMPA || '',
+      iban:            p.IBAN || '',
+      actividades:     p.ACTIVIDADES || '',
+      diasDisponibles: p.DIAS_DISPONIBLES || '',
+      _raw: p
+    }));
+  } else {
+    DB.preinscripciones = DB.preinscripciones || [];
+  }
+
+  // ACTIVIDADES — catálogo de actividades Escaleritas
+  if (raw.actividades && raw.actividades.length) {
+    DB.actividades = raw.actividades.map(a => ({
+      id:          a.ID || a.ID_ACTIVIDAD || '',
+      nombre:      (a.NOMBRE || '').toUpperCase(),
+      tipo:        (a.TIPO || '').toUpperCase(),
+      copago:      parseFloat(a.COPAGO) || 0,
+      temporada:   (a.TEMPORADA || 'TODO_CURSO').toUpperCase(),
+      plazasMin:   parseInt(a.PLAZAS_MIN) || 0,
+      activa:      String(a.ACTIVA || 'SÍ').toUpperCase() !== 'NO',
+      _raw: a
+    }));
+  } else {
+    DB.actividades = DB.actividades || [];
+  }
 }
 
 async function syncAll() {
@@ -7711,24 +7755,114 @@ function portalFamilia() {
 /* ═══════════════════════════════════════════════════════════
    PORTAL AMPA — vista para responsables AMPA de Escaleritas
 ═══════════════════════════════════════════════════════════ */
-function portalAmpa() {
+function portalAmpa(tab) {
   document.getElementById('topbar-actions').innerHTML = '';
-  const pc = document.getElementById('page-content');
+  const pc  = document.getElementById('page-content');
+  tab = tab || 'preinscripciones';
 
-  const inscrEsc = DB.inscripciones.filter(i =>
-    String(i.centro || '').toUpperCase().includes('ESCALERITAS') && i.estado === 'ACTIVA'
+  const inscrEsc   = (DB.inscripciones || []).filter(i =>
+    String(i.centro || '').toUpperCase().includes('ESCALERITAS') &&
+    (String(i.estado || '').toUpperCase() === 'ACTIVA' || String(i.activa || '').toUpperCase() === 'SÍ' || String(i.activa || '').toUpperCase() === 'SI')
   );
-  const asistEsc = DB.asistencias_extra || [];
+  const preinscr   = DB.preinscripciones || [];
+  const recibidas  = preinscr.filter(p => p.estado === 'RECIBIDA').length;
+  const confirmadas= preinscr.filter(p => p.estado === 'CONFIRMADA').length;
+  const socios     = preinscr.filter(p => String(p.socioAmpa).toUpperCase() === 'SÍ').length;
 
-  const hoyA   = new Date();
-  const mesStr = hoyA.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
-    .replace(/^\w/, c => c.toUpperCase());
+  const tabStyle = t => t === tab
+    ? 'padding:.5rem 1rem;border-bottom:2px solid var(--primary);color:var(--primary);font-weight:600;cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;font-size:14px'
+    : 'padding:.5rem 1rem;border-bottom:2px solid transparent;color:var(--grey-2);cursor:pointer;background:none;border-top:none;border-left:none;border-right:none;font-size:14px';
+
+  pc.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;text-align:center;padding:1.2rem 1rem">
+      <div style="font-size:28px;margin-bottom:.3rem">🏫</div>
+      <div style="font-size:17px;font-weight:700;color:var(--primary)">AMPA Escaleritas</div>
+      <div style="font-size:12px;color:var(--grey-2)">Extraescolares SM Academia · Curso 2026-2027</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:1rem">
+      <div class="kpi-card">
+        <div class="kpi-label">Inscritos activos</div>
+        <div class="kpi-value">${inscrEsc.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Preinscripciones</div>
+        <div class="kpi-value">${preinscr.length}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Pendientes revisión</div>
+        <div class="kpi-value" style="color:var(--warning)">${recibidas}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Socios AMPA</div>
+        <div class="kpi-value" style="color:var(--success)">${socios}</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;border-bottom:1px solid var(--border);padding:0 1rem">
+        <button style="${tabStyle('preinscripciones')}" onclick="portalAmpa('preinscripciones')">Preinscripciones</button>
+        <button style="${tabStyle('inscritos')}" onclick="portalAmpa('inscritos')">Inscritos</button>
+        <button style="${tabStyle('actividades')}" onclick="portalAmpa('actividades')">Actividades</button>
+      </div>
+      <div id="ampa-tab-content" style="padding:0">
+        ${tab === 'preinscripciones' ? _ampaTabPreinscripciones(preinscr) : ''}
+        ${tab === 'inscritos'        ? _ampaTabInscritos(inscrEsc) : ''}
+        ${tab === 'actividades'      ? _ampaTabActividades() : ''}
+      </div>
+    </div>
+
+    <div style="padding:.75rem 0">
+      <button class="btn btn-secondary" style="width:100%" onclick="generarInformeAMPA()">📄 Generar informe mensual PDF</button>
+    </div>`;
+}
+
+function _ampaTabPreinscripciones(preinscr) {
+  if (!preinscr.length) return `
+    <div class="empty-state" style="padding:2rem">
+      <div class="empty-icon">📋</div>
+      <div class="empty-title">Sin preinscripciones</div>
+      <div class="empty-desc">Cuando las familias rellenen el formulario de interés aparecerán aquí.</div>
+    </div>`;
+
+  const estadoBadge = e => {
+    if (e === 'CONFIRMADA') return '<span class="badge badge-green">Confirmada</span>';
+    if (e === 'RECHAZADA')  return '<span class="badge badge-red">Rechazada</span>';
+    return '<span class="badge badge-yellow">Recibida</span>';
+  };
+
+  const filas = preinscr.map((p, idx) => `
+    <tr onclick="_ampaDetallePreinscripcion(${idx})" style="cursor:pointer">
+      <td><strong>${p.nombreAlumno || '—'}</strong><br><small style="color:var(--grey-2)">${p.cursoAlumno || ''}</small></td>
+      <td style="font-size:12px">${(p.actividades || '—').replace(/,/g,', ')}</td>
+      <td>${p.tutor1.email || p.tutor1.telefono || '—'}</td>
+      <td>${p.socioAmpa === 'SÍ' ? '<span class="badge badge-blue">Socio</span>' : ''}</td>
+      <td>${estadoBadge(p.estado)}</td>
+      <td>
+        ${p.estado === 'RECIBIDA' ? `
+          <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();_ampaConfirmarPreinscripcion('${p.id}')">✓</button>
+          <button class="btn btn-sm btn-danger"  onclick="event.stopPropagation();_ampaRechazarPreinscripcion('${p.id}')">✗</button>` : ''}
+      </td>
+    </tr>`).join('');
+
+  return `
+    <table class="data-table">
+      <thead><tr><th>Alumno</th><th>Actividades</th><th>Contacto</th><th>AMPA</th><th>Estado</th><th></th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table>`;
+}
+
+function _ampaTabInscritos(inscrEsc) {
+  if (!inscrEsc.length) return `
+    <div class="empty-state" style="padding:2rem">
+      <div class="empty-icon">👥</div>
+      <div class="empty-title">Sin alumnos inscritos en Escaleritas</div>
+      <div class="empty-desc">Verifica que la sincronización cargó los datos correctamente.</div>
+    </div>`;
 
   const filas = inscrEsc.map(i => {
     const al = DB.alumnos.find(a => String(a.id) === String(i.alumnoId)) || {};
-    const nombre = al.nombre
-      ? (al.nombre + ' ' + (al.apellidos || '')).trim()
-      : (i.claveAlumno || '').split('|').slice(1).join('') || '—';
+    const nombre = al.nombre || (i.claveAlumno || '').split('|').slice(1).join('') || '—';
     return `<tr>
       <td><strong>${nombre}</strong></td>
       <td><span class="badge badge-green">${i.servicio || '—'}</span></td>
@@ -7736,46 +7870,96 @@ function portalAmpa() {
     </tr>`;
   }).join('');
 
-  pc.innerHTML = `
-    <div class="card" style="margin-bottom:1rem;text-align:center;padding:1.5rem 1rem">
-      <div style="font-size:32px;margin-bottom:.5rem">🏫</div>
-      <div style="font-size:18px;font-weight:700;color:var(--primary)">AMPA Escaleritas</div>
-      <div style="font-size:13px;color:var(--grey-2);margin-top:.25rem">Portal de seguimiento — Extraescolares SM Academia</div>
-    </div>
+  return `
+    <table class="data-table">
+      <thead><tr><th>Alumno</th><th>Actividad</th><th>Grupo / Días</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table>`;
+}
 
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1rem">
-      <div class="kpi-card">
-        <div class="kpi-label">Alumnos inscritos</div>
-        <div class="kpi-value">${inscrEsc.length}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Registros asistencia</div>
-        <div class="kpi-value">${asistEsc.length}</div>
-      </div>
-    </div>
+function _ampaTabActividades() {
+  const CATALOGO = [
+    { nombre: 'Inglés',                 tipo: 'SUBVENCIONADA',    copago: 6,  temporada: 'Todo el curso' },
+    { nombre: 'Baile',                  tipo: 'SUBVENCIONADA',    copago: 6,  temporada: 'Todo el curso' },
+    { nombre: 'Multideporte',           tipo: 'SUBVENCIONADA',    copago: 6,  temporada: 'Todo el curso' },
+    { nombre: 'Multideporte adaptado',  tipo: 'SUBVENCIONADA',    copago: 6,  temporada: 'Todo el curso' },
+    { nombre: 'Baloncesto',             tipo: 'NO SUBVENCIONADA', copago: 26, temporada: 'Todo el curso' },
+    { nombre: 'Herr. educativas con IA',tipo: 'NO SUBVENCIONADA', copago: 26, temporada: 'Todo el curso' },
+    { nombre: 'Ludoteca',               tipo: 'NO SUBVENCIONADA', copago: 26, temporada: 'Todo el curso' },
+    { nombre: 'Recogida temprana',      tipo: 'NO SUBVENCIONADA', copago: 26, temporada: 'Solo sept. y jun.' },
+    { nombre: 'Recogida tardía',        tipo: 'NO SUBVENCIONADA', copago: 26, temporada: 'Solo sept. y jun.' },
+  ];
 
-    <div class="card" style="margin-bottom:1rem">
-      <div class="card-header">Informe mensual</div>
-      <div style="padding:1rem">
-        <p style="font-size:13px;color:var(--grey-2);margin:0 0 1rem">
-          Genera el informe de asistencia del mes seleccionado para presentarlo a la dirección del colegio.
-        </p>
-        <button class="btn btn-primary" onclick="generarInformeAMPA()">📄 Generar informe PDF</button>
-      </div>
-    </div>
+  const tipoBadge = t => t === 'SUBVENCIONADA'
+    ? '<span class="badge badge-blue">Subvencionada</span>'
+    : '<span class="badge badge-grey">No subvencionada</span>';
 
-    <div class="card">
-      <div class="card-header">Alumnos inscritos en Escaleritas</div>
-      ${inscrEsc.length ? `
-        <table class="data-table">
-          <thead><tr><th>Alumno</th><th>Servicio</th><th>Grupo / Días</th></tr></thead>
-          <tbody>${filas}</tbody>
-        </table>` : `
-        <div class="empty-state" style="padding:2rem">
-          <div class="empty-title">Sin alumnos inscritos en Escaleritas</div>
-          <div class="empty-desc">Verifica que la sincronización cargó los datos correctamente.</div>
-        </div>`}
+  const filas = CATALOGO.map(a => `
+    <tr>
+      <td><strong>${a.nombre}</strong></td>
+      <td>${tipoBadge(a.tipo)}</td>
+      <td style="text-align:right;font-weight:600">${a.copago}€/mes</td>
+      <td style="font-size:12px;color:var(--grey-2)">${a.temporada}</td>
+    </tr>`).join('');
+
+  return `
+    <table class="data-table">
+      <thead><tr><th>Actividad</th><th>Tipo</th><th style="text-align:right">Copago</th><th>Temporada</th></tr></thead>
+      <tbody>${filas}</tbody>
+    </table>
+    <div style="padding:.75rem 1rem;font-size:12px;color:var(--grey-2)">
+      Mínimo 12 alumnos para actividades no subvencionadas. Los precios pueden ajustarse antes del inicio del curso.
     </div>`;
+}
+
+function _ampaDetallePreinscripcion(idx) {
+  const p = (DB.preinscripciones || [])[idx];
+  if (!p) return;
+  const t2 = p.tutor2.nombre ? `
+    <div style="margin-top:.75rem">
+      <strong>Tutor 2:</strong> ${p.tutor2.nombre} (${p.tutor2.relacion || '—'})<br>
+      NIF: ${p.tutor2.nif || '—'} · Tel: ${p.tutor2.telefono || '—'} · ${p.tutor2.email || '—'}
+    </div>` : '';
+  showModal('Preinscripción — ' + p.nombreAlumno, `
+    <div style="font-size:14px;line-height:1.8">
+      <strong>Alumno:</strong> ${p.nombreAlumno} · ${p.cursoAlumno || '—'} · Nac: ${p.fechaNac || '—'}<br>
+      ${p.salud ? `<strong>Salud:</strong> ${p.salud}<br>` : ''}
+      ${p.observaciones ? `<strong>Obs:</strong> ${p.observaciones}<br>` : ''}
+      <div style="margin-top:.75rem">
+        <strong>Tutor 1:</strong> ${p.tutor1.nombre} (${p.tutor1.relacion || '—'})<br>
+        NIF: ${p.tutor1.nif || '—'} · Tel: ${p.tutor1.telefono || '—'} · ${p.tutor1.email || '—'}
+      </div>
+      ${t2}
+      <div style="margin-top:.75rem">
+        <strong>Actividades:</strong> ${p.actividades || '—'}<br>
+        <strong>Días disponibles:</strong> ${p.diasDisponibles || '—'}<br>
+        <strong>Socio AMPA:</strong> ${p.socioAmpa || '—'}<br>
+        ${p.iban ? `<strong>IBAN:</strong> ${p.iban}<br>` : ''}
+      </div>
+      <div style="margin-top:.75rem;font-size:12px;color:var(--grey-2)">
+        Cesión imagen: ${p.autorizaImagen} · Política datos: ${p.aceptaDatos} · Datos salud: ${p.aceptaDatosSalud}
+      </div>
+    </div>`, [
+    { label: 'Cerrar', action: 'closeModal()' },
+  ]);
+}
+
+async function _ampaConfirmarPreinscripcion(id) {
+  if (!confirm('¿Confirmar preinscripción ' + id + '?')) return;
+  try {
+    const res = await gasRequest('UPDATE', { sheet: 'PREINSCRIPCIONES', id, row: { ESTADO: 'CONFIRMADA' } });
+    if (res.ok) { showToast('Preinscripción confirmada', 'success'); await syncAll(); portalAmpa('preinscripciones'); }
+    else showToast('Error: ' + res.error, 'error');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+}
+
+async function _ampaRechazarPreinscripcion(id) {
+  if (!confirm('¿Rechazar preinscripción ' + id + '?')) return;
+  try {
+    const res = await gasRequest('UPDATE', { sheet: 'PREINSCRIPCIONES', id, row: { ESTADO: 'RECHAZADA' } });
+    if (res.ok) { showToast('Preinscripción rechazada', 'success'); await syncAll(); portalAmpa('preinscripciones'); }
+    else showToast('Error: ' + res.error, 'error');
+  } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 /* ═══════════════════════════════════════════════════════════

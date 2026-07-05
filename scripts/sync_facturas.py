@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
 """
 Sync facturas de proveedores desde correo (IMAP) a Google Drive.
-SM Academia — ejecutado por GitHub Actions cada día.
+SM Academia — ejecutar localmente o vía tarea programada.
 
-Requiere los siguientes GitHub Secrets:
-  GMAIL_USER, GMAIL_APP_PASSWORD
-  OUTLOOK_ACCOUNTS  → JSON: [{"user":"...","password":"..."}]
-  CUSTOM_ACCOUNTS   → JSON: [{"host":"...","user":"...","password":"..."}]
-  GOOGLE_SA_JSON    → JSON de la cuenta de servicio de Google Drive
+Uso:
+  1. Copia config.ejemplo.json → config.json y rellena tus contraseñas
+  2. pip install google-api-python-client google-auth
+  3. python scripts/sync_facturas.py
 """
 
-import os
-import sys
 import json
 import email
 import imaplib
 import io
+import sys
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
+from pathlib import Path
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
-# ── Configuración Drive ────────────────────────────────────────────────────────
+# ── Carpetas Drive ─────────────────────────────────────────────────────────────
 
 DRIVE_ROOT = '1i09bvwehgbDlaywAu1ED_M0J-V_j3Oqv'
 
@@ -37,18 +36,15 @@ SUPPLIER_FOLDERS = {
     'DECATHLON':        '1I-R31StLHi0EnoKvkYjn0WlDQbxE4cxL',
 }
 
-# (proveedor, [palabras clave en remitente o asunto])
 SUPPLIER_RULES = [
     ('RENTBOX',         ['rentbox', 'rent-box']),
-    ('CANVA',           ['canva.com', 'canva']),
+    ('CANVA',           ['canva.com', '@canva']),
     ('ANTHROPIC',       ['anthropic.com']),
     ('MERCADECOR',      ['mercadecor', 'supemegastore']),
-    ('BAZAR BUHO',      ['buho', 'búho', 'bazarbuho', 'bazar buho']),
+    ('BAZAR BUHO',      ['buho', 'búho', 'bazarbuho']),
     ('IMPRENTA ALZOLA', ['alzola']),
     ('DECATHLON',       ['decathlon']),
 ]
-
-IMAP_SEARCH_DAYS = 60
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -73,211 +69,139 @@ def identify_supplier(sender: str, subject: str) -> str | None:
     return None
 
 
-def imap_since_date() -> str:
-    d = datetime.now(timezone.utc) - timedelta(days=IMAP_SEARCH_DAYS)
-    return d.strftime('%d-%b-%Y')
-
-
-def fetch_pdfs_from_imap(host: str, user: str, password: str) -> list[dict]:
-    """Conecta por IMAP y devuelve lista de {filename, data, sender, subject, date}."""
+def fetch_pdfs(host: str, user: str, password: str, days: int) -> list[dict]:
     results = []
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%d-%b-%Y')
     try:
         conn = imaplib.IMAP4_SSL(host, 993)
         conn.login(user, password)
         conn.select('INBOX')
-
-        since = imap_since_date()
-        _, msg_ids = conn.search(None, f'(SINCE "{since}" HAS X-GM-RAW "has:attachment")')
-        # Fallback para servidores que no soporten X-GM-RAW
-        if not msg_ids or not msg_ids[0]:
-            _, msg_ids = conn.search(None, f'SINCE "{since}"')
-
+        _, msg_ids = conn.search(None, f'SINCE "{since}"')
         ids = msg_ids[0].split() if msg_ids[0] else []
-        print(f'  [{user}] {len(ids)} mensajes desde hace {IMAP_SEARCH_DAYS} días')
-
+        print(f'  {user}: {len(ids)} mensajes en {days} días')
         for mid in ids:
             _, data = conn.fetch(mid, '(RFC822)')
             msg = email.message_from_bytes(data[0][1])
             sender  = decode_str(msg.get('From', ''))
             subject = decode_str(msg.get('Subject', ''))
             date    = decode_str(msg.get('Date', ''))
-
             for part in msg.walk():
-                if part.get_content_maintype() == 'multipart':
-                    continue
-                if part.get('Content-Disposition') is None:
-                    continue
-                if part.get_content_type() not in ('application/pdf', 'application/octet-stream'):
+                ct = part.get_content_type()
+                if ct not in ('application/pdf', 'application/octet-stream'):
                     continue
                 filename = decode_str(part.get_filename() or '')
                 if not filename.lower().endswith('.pdf'):
                     continue
                 payload = part.get_payload(decode=True)
-                if not payload:
-                    continue
-                results.append({
-                    'filename': filename,
-                    'data':     payload,
-                    'sender':   sender,
-                    'subject':  subject,
-                    'date':     date,
-                    'account':  user,
-                })
-
+                if payload:
+                    results.append({
+                        'filename': filename,
+                        'data':     payload,
+                        'sender':   sender,
+                        'subject':  subject,
+                        'date':     date,
+                        'account':  user,
+                    })
         conn.logout()
-    except imaplib.IMAP4.error as e:
-        print(f'  ⚠️  Error IMAP [{user}@{host}]: {e}', file=sys.stderr)
     except Exception as e:
-        print(f'  ⚠️  Error inesperado [{user}@{host}]: {e}', file=sys.stderr)
+        print(f'  ⚠️  Error en {user}: {e}', file=sys.stderr)
     return results
 
 
-# ── Drive ──────────────────────────────────────────────────────────────────────
-
-def build_drive_service():
-    sa_json = os.environ.get('GOOGLE_SA_JSON', '')
-    if not sa_json:
-        raise RuntimeError('GOOGLE_SA_JSON no configurado')
-    info = json.loads(sa_json)
+def build_drive(sa_path: str):
+    with open(sa_path) as f:
+        info = json.load(f)
     creds = service_account.Credentials.from_service_account_info(
         info, scopes=['https://www.googleapis.com/auth/drive']
     )
     return build('drive', 'v3', credentials=creds, cache_discovery=False)
 
 
-def list_existing_files(drive, folder_id: str) -> set[str]:
-    existing = set()
-    page_token = None
+def list_files(drive, folder_id: str) -> set[str]:
+    names, token = set(), None
     while True:
-        resp = drive.files().list(
+        r = drive.files().list(
             q=f"'{folder_id}' in parents and trashed=false",
-            fields='nextPageToken, files(name)',
-            pageToken=page_token,
+            fields='nextPageToken,files(name)',
+            pageToken=token,
         ).execute()
-        for f in resp.get('files', []):
-            existing.add(f['name'])
-        page_token = resp.get('nextPageToken')
-        if not page_token:
+        names.update(f['name'] for f in r.get('files', []))
+        token = r.get('nextPageToken')
+        if not token:
             break
-    return existing
+    return names
 
 
-def ensure_supplier_folder(drive, supplier: str) -> str:
+def ensure_folder(drive, supplier: str) -> str:
     if supplier in SUPPLIER_FOLDERS:
         return SUPPLIER_FOLDERS[supplier]
-    # Crear subcarpeta nueva
-    meta = {
-        'name': supplier,
-        'mimeType': 'application/vnd.google-apps.folder',
-        'parents': [DRIVE_ROOT],
-    }
-    folder = drive.files().create(body=meta, fields='id').execute()
-    fid = folder['id']
+    meta = {'name': supplier, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [DRIVE_ROOT]}
+    fid = drive.files().create(body=meta, fields='id').execute()['id']
     SUPPLIER_FOLDERS[supplier] = fid
-    print(f'  📁 Nueva carpeta creada para {supplier}: {fid}')
+    print(f'  📁 Nueva carpeta: {supplier}')
     return fid
 
 
-def upload_to_drive(drive, folder_id: str, filename: str, data: bytes):
-    meta = {'name': filename, 'parents': [folder_id]}
-    media = MediaIoBaseUpload(io.BytesIO(data), mimetype='application/pdf', resumable=False)
+def upload(drive, folder_id: str, filename: str, data: bytes):
+    meta  = {'name': filename, 'parents': [folder_id]}
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype='application/pdf')
     drive.files().create(body=meta, media_body=media, fields='id').execute()
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    print(f'\n=== Sync Facturas Proveedores — {datetime.now().strftime("%Y-%m-%d %H:%M")} ===\n')
+    config_path = Path(__file__).parent / 'config.json'
+    if not config_path.exists():
+        print('❌ Falta scripts/config.json — copia config.ejemplo.json y rellena tus datos.')
+        sys.exit(1)
 
-    # 1. Construir servicio Drive y cachear archivos existentes
-    print('Conectando a Google Drive...')
-    drive = build_drive_service()
-    existing_cache: dict[str, set[str]] = {}
-    for supplier, fid in SUPPLIER_FOLDERS.items():
-        existing_cache[supplier] = list_existing_files(drive, fid)
-    existing_cache['_UNKNOWN'] = list_existing_files(drive, DRIVE_ROOT)
-    print(f'  Drive listo. {sum(len(v) for v in existing_cache.values())} archivos indexados.\n')
+    with open(config_path) as f:
+        cfg = json.load(f)
 
-    # 2. Recopilar todos los PDFs de correo
-    all_pdfs: list[dict] = []
+    days = cfg.get('dias_atras', 60)
 
-    # Gmail
-    gmail_user = os.environ.get('GMAIL_USER', '')
-    gmail_pass = os.environ.get('GMAIL_APP_PASSWORD', '')
-    if gmail_user and gmail_pass:
-        print(f'📧 Gmail: {gmail_user}')
-        all_pdfs += fetch_pdfs_from_imap('imap.gmail.com', gmail_user, gmail_pass)
-    else:
-        print('⚠️  GMAIL_USER / GMAIL_APP_PASSWORD no configurados')
+    print(f'\n=== Sync Facturas — {datetime.now().strftime("%Y-%m-%d %H:%M")} ===\n')
+    print('Conectando a Drive...')
+    drive = build_drive(cfg['google_sa_json'])
+    cache = {s: list_files(drive, fid) for s, fid in SUPPLIER_FOLDERS.items()}
+    cache['_UNKNOWN'] = list_files(drive, DRIVE_ROOT)
+    print(f'Drive listo.\n')
 
-    # Outlook (outlook.es, hotmail.es, etc.)
-    outlook_raw = os.environ.get('OUTLOOK_ACCOUNTS', '[]')
-    for acc in json.loads(outlook_raw):
-        print(f'📧 Outlook: {acc["user"]}')
-        all_pdfs += fetch_pdfs_from_imap('imap-mail.outlook.com', acc['user'], acc['password'])
+    print('Revisando correos...')
+    all_pdfs = []
+    for acc in cfg['cuentas']:
+        all_pdfs += fetch_pdfs(acc['host'], acc['user'], acc['password'], days)
+    print(f'\n{len(all_pdfs)} PDFs encontrados en correo.\n')
 
-    # Cuentas dominio propio (direccion@sm-academia.com, samy.martin@academiasmfutbol.com)
-    custom_raw = os.environ.get('CUSTOM_ACCOUNTS', '[]')
-    for acc in json.loads(custom_raw):
-        print(f'📧 Custom [{acc["host"]}]: {acc["user"]}')
-        all_pdfs += fetch_pdfs_from_imap(acc['host'], acc['user'], acc['password'])
-
-    print(f'\nTotal PDFs encontrados en correo: {len(all_pdfs)}\n')
-
-    # 3. Clasificar y subir
     saved, skipped, unknown = [], [], []
 
     for pdf in all_pdfs:
         supplier = identify_supplier(pdf['sender'], pdf['subject'])
-        filename = pdf['filename']
+        key      = supplier or '_UNKNOWN'
+        folder   = ensure_folder(drive, supplier) if supplier else DRIVE_ROOT
 
-        if supplier:
-            folder_id = ensure_supplier_folder(drive, supplier)
-            cache_key = supplier
-        else:
-            folder_id = DRIVE_ROOT
-            cache_key = '_UNKNOWN'
-
-        if filename in existing_cache.get(cache_key, set()):
-            skipped.append({'supplier': supplier or 'DESCONOCIDO', 'filename': filename})
+        if pdf['filename'] in cache.get(key, set()):
+            skipped.append(pdf['filename'])
             continue
 
         try:
-            upload_to_drive(drive, folder_id, filename, pdf['data'])
-            existing_cache.setdefault(cache_key, set()).add(filename)
-            entry = {
-                'supplier': supplier or 'DESCONOCIDO',
-                'filename': filename,
-                'date':     pdf['date'],
-                'account':  pdf['account'],
-            }
-            saved.append(entry)
-            print(f'  ✅ {supplier or "DESCONOCIDO"} → {filename}')
+            upload(drive, folder, pdf['filename'], pdf['data'])
+            cache.setdefault(key, set()).add(pdf['filename'])
+            saved.append({'supplier': supplier or 'DESCONOCIDO', 'filename': pdf['filename']})
+            print(f'  ✅ [{supplier or "DESCONOCIDO"}] {pdf["filename"]}')
         except Exception as e:
-            print(f'  ❌ Error subiendo {filename}: {e}', file=sys.stderr)
+            print(f'  ❌ Error subiendo {pdf["filename"]}: {e}', file=sys.stderr)
 
         if not supplier:
-            unknown.append(filename)
+            unknown.append(pdf['filename'])
 
-    # 4. Resumen
-    print(f'\n{"="*60}')
-    print(f'RESUMEN')
-    print(f'{"="*60}')
-    print(f'✅ Facturas guardadas:  {len(saved)}')
-    print(f'⏭️  Duplicadas omitidas: {len(skipped)}')
-    print(f'❓ Proveedor desconocido: {len(unknown)}')
-
-    if saved:
-        print('\nGuardadas:')
-        for s in saved:
-            print(f'  [{s["supplier"]}] {s["filename"]} ({s["account"]})')
-
+    print(f'\n{"─"*50}')
+    print(f'Guardadas: {len(saved)}  |  Duplicadas omitidas: {len(skipped)}  |  Sin clasificar: {len(unknown)}')
     if unknown:
-        print('\nProveedor desconocido (en carpeta raíz, clasificar manualmente):')
+        print('Sin clasificar (en carpeta raíz — revisa manualmente):')
         for f in unknown:
             print(f'  - {f}')
-
-    print()
 
 
 if __name__ == '__main__':

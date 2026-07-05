@@ -4684,25 +4684,77 @@ function facturas() {
   };
 }
 
-function generarTodasFacturas() {
-  const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
-  if (!listos.length) { showToast('Sin pagos pendientes de facturar', 'info'); return; }
-  // Agrupar por cliente
-  const porCliente = {};
-  listos.forEach(p => { if (!porCliente[p.clienteId]) porCliente[p.clienteId] = []; porCliente[p.clienteId].push(p); });
-  let count = 0;
-  Object.entries(porCliente).forEach(([cid, ps]) => {
-    const num = String(DB.pagos.filter(p=>p.facturaId).length + count + 1).padStart(4,'0');
-    const fid = `SM-26-${num}`;
-    ps.forEach(p => { p.facturaId = fid; p.estadoPdf = 'EMITIDA'; });
-    count++;
-  });
-  saveCacheLocal();
-  // NOTA: En producción, escribir ID_FACTURA y ESTADO_PDF en hoja PAGOS
-  // via writeToSheet para que persistan en Sheets sin depender de caché
-  showToast(count + ' factura(s) generada(s) ✓ — Recuerda actualizar PAGOS en Sheets', 'success');
-  facturas();
-}
+// Persiste factura_id / estado_pdf en la fila de PAGOS via una accion GAS
+  // estrecha y especifica (MARCAR_FACTURA_PAGO), que solo toca esas dos
+  // columnas. PAGOS esta bloqueada como solo lectura en writeToSheet/updateInSheet
+  // a proposito (evita ediciones masivas accidentales desde la app); esto la
+  // rodea de forma controlada, exactamente para este caso de uso.
+  async function marcarPagoFacturado(idPago, facturaId, estadoPdf) {
+    if (!GAS_URL) return { ok: true, demo: true };
+    try {
+      return await gasRequest('MARCAR_FACTURA_PAGO', { id: idPago, row: { facturaId, estadoPdf } });
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+  
+  async function generarTodasFacturas() {
+    const listos = DB.pagos.filter(p=>p.estadoPdf==='LISTO PARA EMITIR'&&!p.facturaId);
+    if (!listos.length) { showToast('Sin pagos pendientes de facturar', 'info'); return; }
+    // Agrupar por cliente
+    const porCliente = {};
+    listos.forEach(p => { if (!porCliente[p.clienteId]) porCliente[p.clienteId] = []; porCliente[p.clienteId].push(p); });
+
+    DB.facturas = DB.facturas || [];
+    const anyoActual = new Date().getFullYear();
+    const prefijo = `SM-${String(anyoActual).slice(-2)}-`;
+    let correlativo = DB.facturas.filter(f => (f.idFactura||'').startsWith(prefijo)).length;
+
+    let count = 0, errores = 0;
+    showToast('Generando facturas…', 'info');
+
+    for (const [cid, ps] of Object.entries(porCliente)) {
+      correlativo++;
+      const fid = `${prefijo}${String(correlativo).padStart(4,'0')}`;
+
+      const fila = await emitirYGuardarFactura(ps, fid);
+      if (!fila) { errores++; continue; }
+
+      // Reflejar de inmediato en DB.facturas: si no, el encadenamiento de hash
+      // (obtenerHashAnterior) y los botones PDF/XML de la siguiente factura de
+      // este mismo lote no verian esta factura hasta el proximo sync
+      DB.facturas.push({
+        idFactura:    fid,
+        fechaExp:     fila['Fecha expedición'] || '',
+        total:        parseFloat(fila['Total factura']||0)||0,
+        hashActual:   fila['Hash actual']    || '',
+        hashAnterior: fila['Hash anterior']  || '',
+        estadoAeat:   fila['Estado Envío']   || 'PENDIENTE',
+        _raw: fila,
+      });
+
+      // Persistir factura_id / estado_pdf en cada pago (PAGOS en Sheets),
+      // no solo en memoria — esto es lo que antes se perdia al recargar
+      for (const p of ps) {
+        const res = await marcarPagoFacturado(p.id, fid, 'EMITIDA');
+        if (res && res.ok) {
+          p.facturaId = fid;
+          p.estadoPdf = 'EMITIDA';
+        } else {
+          errores++;
+        }
+      }
+      count++;
+    }
+
+    saveCacheLocal();
+    if (errores) {
+            showToast(`${count} factura(s) generada(s), ${errores} error(es) al guardar — revisa la consola`, 'warning', 6000);
+    } else {
+      showToast(count + ' factura(s) generada(s) y registrada(s) ✓', 'success');
+    }
+    facturas();
+  }
 
 // Calcula SHA-256 de un string (para VeriFactu)
 async function sha256(str) {
@@ -4733,10 +4785,24 @@ async function descargarFacturaPdf(fid) {
   window.gaEvent('descarga_factura_pdf', { factura_id: fid });
   const ps = DB.pagos.filter(p=>p.facturaId===fid);
   const c = getCliente(ps[0]?.clienteId||'');
-  // Hash VeriFactu real (SHA-256 encadenado)
-  const total = ps.reduce((s,p)=>s+p.totalEsperado,0);
-  const fecha = ps[0]?.fecha || new Date().toISOString().split('T')[0];
-  const vf = await huellaVerifactu(fid, total, fecha);
+  // Hash VeriFactu real: se lee de la factura ya registrada en Sheets
+      // (DB.facturas), nunca se recalcula aparte, para que el hash impreso en
+      // el PDF sea siempre el mismo que quedó registrado en el sistema.
+      const total = ps.reduce((s,p)=>s+p.totalEsperado,0);
+      const fecha = ps[0]?.fecha || new Date().toISOString().split('T')[0];
+      const facturaReg = DB.facturas.find(f => f.idFactura === fid);
+      if (!facturaReg || !facturaReg.hashActual) {
+        showToast('No se encontró el registro VeriFactu de esta factura — sincroniza y vuelve a intentar', 'error', 6000);
+        return;
+      }
+      const _m = fid.match(/^SM-(\d{2})-(.+)$/);
+      const vf = {
+        hash: facturaReg.hashActual,
+        num: _m ? _m[2] : fid,
+        SERIE: _m ? ('SM' + _m[1]) : 'SM',
+        NIF_EMISOR: VF_NIF_EMISOR,
+        hashAnterior: facturaReg.hashAnterior,
+      };
 
   const filas = ps.map(p => {
     const a = getAlumno(p.alumnoId);

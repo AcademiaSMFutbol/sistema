@@ -1,0 +1,46 @@
+name: Sync Facturas Proveedores
+
+on:
+  schedule:
+    - cron: '17 7 * * *'   # 08:17 hora Canarias (UTC+1)
+  workflow_dispatch:         # disparo manual desde GitHub Actions
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias
+        run: pip install google-api-python-client google-auth
+
+      - name: Sincronizar facturas
+        env:
+          # ── Gmail ─────────────────────────────────────────────────────────
+          # Genera App Password en: Google Account → Seguridad → Contraseñas de aplicación
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+
+          # ── Cuentas Outlook (JSON array) ──────────────────────────────────
+          # Genera App Password en: account.microsoft.com → Seguridad → Contraseñas de aplicación
+          # Formato: [{"user":"a.samuelmarriv@outlook.es","password":"xxxx"},...]
+          OUTLOOK_ACCOUNTS:   ${{ secrets.OUTLOOK_ACCOUNTS }}
+
+          # ── Cuentas dominio propio (JSON array) ───────────────────────────
+          # Formato: [{"host":"imap.gmail.com","user":"direccion@sm-academia.com","password":"xxxx"},...]
+          CUSTOM_ACCOUNTS:    ${{ secrets.CUSTOM_ACCOUNTS }}
+
+          # ── Google Drive Service Account ──────────────────────────────────
+          # 1. Ve a console.cloud.google.com → IAM → Cuentas de servicio → Crear
+          # 2. Descarga JSON de clave
+          # 3. Comparte la carpeta Drive con el email de la cuenta de servicio (editor)
+          # 4. Pega el JSON completo como secreto GOOGLE_SA_JSON
+          GOOGLE_SA_JSON:     ${{ secrets.GOOGLE_SA_JSON }}
+
+        run: python scripts/sync_facturas.py

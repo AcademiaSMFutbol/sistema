@@ -18,7 +18,7 @@
 if ( ! defined( 'ABSPATH' ) ) exit;
 
 // ── URL del GAS ────────────────────────────────────────────────────────────────
-define( 'SM_GAS_URL', 'https://script.google.com/macros/s/AKfycbw9H4oeIsj-ETPCurhI5JhKIEgB65g56DQlOWLGzh11ms4ypIQAgbdhs29FSXS6cuhoNQ/exec' );
+define( 'SM_GAS_URL', 'https://script.google.com/macros/s/AKfycbxr3x2Ops-a1LlIV8KcSPYFuJMF56ijy8It82Qek6mIHxASdIlJZWIuFwufWE7-YrsBhg/exec' );
 
 // ── Email del administrador para notificaciones de error ───────────────────────
 define( 'SM_ADMIN_EMAIL', 'asmarriv1986@gmail.com' );

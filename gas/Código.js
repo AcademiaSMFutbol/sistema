@@ -37,6 +37,8 @@ function doGet(e) {
       case 'NUEVA_INSCRIPCION':     result = nuevaInscripcion(rowP);           break;
       case 'SEND_ALERTS_IMPAGOS':   result = sendAlertsImpagos(rowP);          break;
       case 'SUBMIT_VERIFACTU':      result = submitVerifactu(rowP);            break;
+      case 'GET_FACTURAS':          result = getFacturasData();               break;
+      case 'MARCAR_FACTURA_PAGO':  result = marcarFacturaPago(idP, rowP);     break;
       default:
         result = { ok: false, error: 'Acción desconocida: ' + action };
     }
@@ -168,6 +170,7 @@ function getAllData() {
       inscripciones:    sheetToObjects_('INSCRIPCIONES'),
       gastos:           sheetToObjects_('GASTOS'),
       personal:         sheetToObjects_('PERSONAL'),
+      facturas:         sheetToObjects_('FACTURAS'),
     }
   };
 }
@@ -178,6 +181,11 @@ function getPagosData() {
     .map(r => normalizeKeys_(r))
     .filter(p => String(p.id_pago || '').trim() !== '');
   return { ok: true, pagos, total: pagos.length, ts: new Date().toISOString() };
+}
+
+function getFacturasData() {
+    const facturas = sheetToObjects_('FACTURAS');
+    return { ok: true, facturas, total: facturas.length, ts: new Date().toISOString() };
 }
 
 function getSesionesData() {
@@ -281,6 +289,47 @@ function updateRow(sheetName, id, rowObj) {
     }
   }
   return { ok: false, error: 'No se encontró id=' + id + ' en ' + sheetName };
+}
+
+  /**
+   * Marca una factura en la fila de PAGOS correspondiente, tocando UNICAMENTE
+    * las columnas ID_FACTURA y ESTADO PDF (nunca el resto de la fila). Se usa
+     * porque PAGOS esta bloqueada como solo lectura para writeToSheet/updateInSheet
+      * en la app (evita ediciones masivas accidentales); esta accion es estrecha
+       * y especifica para poder registrar el vinculo pago -> factura de forma segura.
+        * idPago: valor de ID_PAGO a localizar.
+         * rowObj: { facturaId, estadoPdf } (ambos opcionales, solo se escribe lo presente).
+          */
+function marcarFacturaPago(idPago, rowObj) {
+    if (idPago === undefined || idPago === '') {
+          return { ok: false, error: 'Parametro "id" (ID_PAGO) requerido' };
+    }
+    if (typeof rowObj === 'string') {
+          try { rowObj = JSON.parse(rowObj); } catch(_) { return { ok: false, error: 'row JSON invalido' }; }
+    }
+    rowObj = rowObj || {};
+
+    const sh = ss_().getSheetByName('PAGOS') || sheetByKw_('PAGOS');
+    if (!sh) return { ok: false, error: 'Hoja PAGOS no encontrada' };
+
+    const data = sh.getDataRange().getValues();
+    const hdrs = data[0];
+    const ciId  = hdrs.findIndex(h => String(h).trim() === 'ID_PAGO');
+    const ciFac = hdrs.findIndex(h => String(h).trim() === 'ID_FACTURA');
+    const ciPdf = hdrs.findIndex(h => String(h).trim() === 'ESTADO PDF');
+    if (ciId  < 0) return { ok: false, error: 'Columna ID_PAGO no encontrada en PAGOS' };
+    if (ciFac < 0) return { ok: false, error: 'Columna ID_FACTURA no encontrada en PAGOS' };
+    if (ciPdf < 0) return { ok: false, error: 'Columna ESTADO PDF no encontrada en PAGOS' };
+
+    const idStr = String(idPago).trim();
+    for (let i = 1; i < data.length; i++) {
+          if (String(data[i][ciId]).trim() === idStr) {
+                  if (rowObj.facturaId !== undefined) sh.getRange(i + 1, ciFac + 1).setValue(rowObj.facturaId);
+                  if (rowObj.estadoPdf !== undefined) sh.getRange(i + 1, ciPdf + 1).setValue(rowObj.estadoPdf);
+                  return { ok: true, rowIndex: i + 1 };
+          }
+    }
+    return { ok: false, error: 'No se encontro ID_PAGO=' + idPago + ' en PAGOS' };
 }
 
 
@@ -557,7 +606,7 @@ function submitVerifactu(params) {
   if (factura['Id Factura']) {
     try {
       updateRow('FACTURAS', factura['Id Factura'], {
-        'Estado VeriFactu': privateKey ? 'ENVIANDO' : 'CERT_NO_CONFIGURADO',
+                'Estado Envío': privateKey ? 'ENVIANDO' : 'CERT_NO_CONFIGURADO',
       });
     } catch(_) {}
   }
@@ -612,9 +661,9 @@ function submitVerifactu(params) {
     if (factura['Id Factura']) {
       try {
         updateRow('FACTURAS', factura['Id Factura'], {
-          'Estado VeriFactu': estadoAEAT,
-          'CSV AEAT':         csvVal,
-          'Fecha envío AEAT': Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),
+                    'Estado Envío':      estadoAEAT,
+                    'CSV Respuesta':     csvVal,
+                    'Código error AEAT': codError,
         });
       } catch(_) {}
     }

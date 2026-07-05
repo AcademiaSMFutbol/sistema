@@ -442,13 +442,6 @@ tbody tr:hover { background: #fafafa; }
 /* Chart container */
 .chart-container { position: relative; height: 200px; }
 
-/* Camino SM */
-.camino-badge {
-  display: inline-flex; align-items: center; gap: 5px;
-  background: linear-gradient(135deg, #1b5e20, #2e7d32); color: white;
-  padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
-}
-
 /* Config API */
 .config-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.7);
@@ -901,6 +894,7 @@ function loadDemoData() {
     {id:'SRV002',nombre:'TECNIFICACIÓN',modalidad:'2 SESIONES / SEMANA',precio:110,igic:3,activo:true},
     {id:'SRV003',nombre:'TECNIFICACIÓN',modalidad:'3 SESIONES / SEMANA',precio:144,igic:3,activo:true},
     {id:'SRV004',nombre:'TECNIFICACIÓN',modalidad:'SESIÓN SUELTA',precio:15,igic:3,activo:true},
+    {id:'SRV010',nombre:'TECNIFICACIÓN',modalidad:'SESIÓN INDIVIDUAL',precio:30,igic:3,activo:true},
     {id:'SRV005',nombre:'RECOGIDA TEMPRANA',modalidad:'MENSUALIDAD',precio:26,igic:7,activo:true},
     {id:'SRV006',nombre:'MULTIDEPORTE',modalidad:'MENSUALIDAD',precio:30,igic:7,activo:true},
     {id:'SRV007',nombre:'MULTIDEPORTE ADAPTADO',modalidad:'MENSUALIDAD',precio:30,igic:7,activo:true},
@@ -2534,7 +2528,7 @@ const PAGE_META = {
   pagos:          { title: 'Pagos', sub: 'Control de cobros y morosidad' },
   facturas:       { title: 'Facturas', sub: 'Emisión y archivo VeriFactu' },
 
-  futbol:         { title: 'SM Fútbol', sub: 'Sesiones, evaluaciones y Camino SM' },
+  futbol:         { title: 'SM Fútbol', sub: 'Sesiones y evaluaciones' },
   extraescolares: { title: 'SM Extraescolares', sub: 'CEIP Escaleritas · Actividades y asistencia' },
   // asistencia eliminada — se registra desde SM Fútbol y SM Extraescolares
   personal:       { title: 'Personal', sub: 'Monitores y certificaciones' },
@@ -2951,9 +2945,6 @@ function dashboard() {
     try { return daysBetween(hoy, new Date(p.certVence)) < 60; } catch(e) { return false; }
   });
 
-  // Top Camino SM
-  const topCamino = [...DB.alumnos].filter(a=>a.activo).sort((a,b)=>b.camino-a.camino).slice(0,5);
-
   // Histórico 6 meses — ingresos reales + gastos reales desde Sheets
   const MESES_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   const historico = Array.from({length:6},(_,i)=>{
@@ -3096,18 +3087,6 @@ function dashboard() {
 
       <div style="display:flex;flex-direction:column;gap:1rem">
         <div class="card">
-          <div class="card-header"><span>🏆</span><div class="card-title">Top Camino SM</div></div>
-          <div class="card-body" style="padding-top:.5rem">
-            ${topCamino.map((a,i)=>`
-              <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:${i<4?'1px solid #f5f5f5':'none'}">
-                <div style="font-size:12px;font-weight:700;color:var(--grey-2);width:16px">${i+1}</div>
-                ${avatarHtml(a.nombre,'jugador','width:32px;height:32px;font-size:11px;min-width:32px')}
-                <div style="flex:1;font-size:12px;font-weight:500;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${a.nombre}</div>
-                <div class="camino-badge">⭐ ${a.camino}</div>
-              </div>`).join('')}
-          </div>
-        </div>
-        <div class="card">
           <div class="card-header"><span>🎂</span><div class="card-title">Próximos cumpleaños</div></div>
           <div class="card-body" style="padding-top:.5rem">
             ${cumples.map(a=>`
@@ -3210,7 +3189,6 @@ function verCliente(id) {
       <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f5f5f5">
         <div class="avatar">${getInitials(a.nombre)}</div>
         <div style="flex:1"><div style="font-weight:500">${a.nombre}</div><div style="font-size:12px;color:var(--grey-2)">${a.actividad} · ${a.modalidad}</div></div>
-        <div class="camino-badge">⭐ ${a.camino}</div>
       </div>`).join('')}
     <div class="section-divider">Historial de pagos</div>
     ${pagos.slice(-4).reverse().map(p=>`
@@ -3306,11 +3284,10 @@ function alumnos() {
         <td><div style="font-size:12px">${c.nombre||'—'}</div></td>
         <td>${actividadBadge(a.actividad)}</td>
         <td style="font-size:12px">${a.modalidad}</td>
-        <td><div class="camino-badge">⭐ ${a.camino}</div></td>
         <td>${(a.activo===true||a.activo)?'<span class="badge badge-green">Activo</span>':'<span class="badge badge-grey">Baja</span>'}</td>
         <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();modalEditarAlumno('${a.id}')">Editar</button></td>
       </tr>`;
-    }).join('') || `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🎓</div><div class="empty-title">Sin alumnos</div></div></td></tr>`;
+    }).join('') || `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🎓</div><div class="empty-title">Sin alumnos</div></div></td></tr>`;
   };
   document.getElementById('page-content').innerHTML = `
     <div class="filters-bar">
@@ -3330,7 +3307,7 @@ function alumnos() {
     </div>
     <div class="card">
       <div class="table-wrap"><table>
-        <thead><tr><th>Alumno</th><th>Familia</th><th>Actividad</th><th>Modalidad</th><th>Camino SM</th><th>Estado</th><th></th></tr></thead>
+        <thead><tr><th>Alumno</th><th>Familia</th><th>Actividad</th><th>Modalidad</th><th>Estado</th><th></th></tr></thead>
         <tbody id="alumnos-table"></tbody>
       </table></div>
     </div>`;
@@ -3375,7 +3352,6 @@ function verAlumno(id) {
         <div style="font-size:18px;font-weight:600">${a.nombre}</div>
         <div style="font-size:13px;color:var(--grey-2)">${edad} años · ${a.grupo||'Sin grupo asignado'}</div>
         <div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px">${inscBadges}</div>
-        ${a.camino !== undefined ? `<div style="margin-top:6px"><div class="camino-badge" style="display:inline-flex">⭐ ${a.camino} pts Camino SM</div></div>` : ''}
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.5rem">
@@ -3429,7 +3405,7 @@ function modalNuevoAlumno() {
       <div class="field-group"><label class="field-label">Modalidad</label>
         <select class="field-select" id="al-modalidad">
           <option>1 SESIÓN / SEMANA</option><option>2 SESIONES / SEMANA</option>
-          <option>3 SESIONES / SEMANA</option><option>SESIÓN SUELTA</option><option>MENSUALIDAD</option>
+          <option>3 SESIONES / SEMANA</option><option>SESIÓN SUELTA</option><option>SESIÓN INDIVIDUAL</option><option>MENSUALIDAD</option>
         </select>
       </div>
       <div class="field-group"><label class="field-label">Grupo / Día</label>
@@ -3480,7 +3456,7 @@ async function modalEditarAlumno(id) {
       </div>
       <div class="field-group"><label class="field-label">Modalidad</label>
         <select class="field-select" id="eal-modalidad">
-          ${['1 SESIÓN / SEMANA','2 SESIONES / SEMANA','3 SESIONES / SEMANA','SESIÓN SUELTA','MENSUALIDAD'].map(v=>`<option ${a.modalidad===v?'selected':''}>${v}</option>`).join('')}
+          ${['1 SESIÓN / SEMANA','2 SESIONES / SEMANA','3 SESIONES / SEMANA','SESIÓN SUELTA','SESIÓN INDIVIDUAL','MENSUALIDAD'].map(v=>`<option ${a.modalidad===v?'selected':''}>${v}</option>`).join('')}
         </select>
       </div>
       <div class="field-group"><label class="field-label">Grupo</label>
@@ -5115,14 +5091,12 @@ function futbol() {
   addTopbarBtn('🏟️ Alquiler Cuevas Torres', () => modalAlquilerCuevas(), 'btn-secondary');
   }
 
-  // Camino SM ranking
-  const topCamino = [...DB.alumnos].filter(a=>a.activo&&(a.actividad==='TECNIFICACIÓN')).sort((a,b)=>b.camino-a.camino);
+  const alumnosFutbol = [...DB.alumnos].filter(a=>a.activo&&(a.actividad==='TECNIFICACIÓN')).sort((a,b)=>a.nombre.localeCompare(b.nombre));
 
   document.getElementById('page-content').innerHTML = `
     <div class="tabs">
       <div class="tab active" onclick="switchTab('futbol-sesiones',this)">Sesiones</div>
       <div class="tab" onclick="switchTab('futbol-alumnos',this)">Alumnos</div>
-      <div class="tab" onclick="switchTab('futbol-camino',this)">Camino SM</div>
     </div>
 
     <!-- SESIONES -->
@@ -5168,9 +5142,9 @@ function futbol() {
     <div id="futbol-alumnos" style="display:none">
       <div class="card">
         <div class="table-wrap"><table>
-          <thead><tr><th>Alumno</th><th>Grupo</th><th>Asistencia</th><th>Tec.</th><th>Dec.</th><th>Comp.</th><th>Act.</th><th>Camino SM</th></tr></thead>
+          <thead><tr><th>Alumno</th><th>Grupo</th><th>Asistencia</th><th>Tec.</th><th>Dec.</th><th>Comp.</th><th>Act.</th></tr></thead>
           <tbody>
-            ${topCamino.map(a => {
+            ${alumnosFutbol.map(a => {
               const asist = DB.asistencias.filter(x=>x.alumnoId===a.id);
               const pct = asist.length ? Math.round(asist.filter(x=>x.presente).length/asist.length*100) : 0;
               const evals = asist.filter(x=>x.evaluacion);
@@ -5188,7 +5162,6 @@ function futbol() {
                 <td style="font-size:12px">${avg('decision')}</td>
                 <td style="font-size:12px">${avg('competitividad')}</td>
                 <td style="font-size:12px">${avg('actitud')}</td>
-                <td><div class="camino-badge">⭐ ${a.camino}</div></td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -5196,37 +5169,10 @@ function futbol() {
       </div>
     </div>
 
-    <!-- CAMINO SM -->
-    <div id="futbol-camino" style="display:none">
-      <div class="card" style="margin-bottom:1rem">
-        <div class="card-header"><span>🏆</span><div class="card-title">Ranking Camino SM · Temporada 2026</div></div>
-        <div class="card-body">
-          ${topCamino.map((a,i)=>`
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:${i<topCamino.length-1?'1px solid #f5f5f5':'none'}">
-              <div style="font-size:${i===0?'24px':i===1?'20px':'16px'};width:28px;text-align:center">${i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`}</div>
-              <div class="avatar">${getInitials(a.nombre)}</div>
-              <div style="flex:1">
-                <div style="font-weight:600">${a.nombre}</div>
-                <div style="font-size:12px;color:var(--grey-2)">${a.grupo} · ${a.modalidad}</div>
-              </div>
-              <div>
-                <div class="camino-badge" style="font-size:14px;padding:6px 14px">⭐ ${a.camino} pts</div>
-              </div>
-            </div>`).join('')}
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-header"><span>📖</span><div class="card-title">Cómo funciona Camino SM</div></div>
-        <div class="card-body" style="font-size:13px;line-height:1.8;color:var(--grey-3)">
-          <strong style="color:var(--black)">+10 puntos</strong> por cada sesión asistida<br>
-          <strong style="color:var(--black)">+10 puntos extra</strong> al alumno con mejores valores (compañerismo, esfuerzo, actitud, superación)<br>
-          Los puntos se acumulan durante toda la temporada. El sistema premia la constancia sobre el resultado.
-        </div>
-      </div>
     </div>`;
 
   window.switchTab = (id, el) => {
-    ['futbol-sesiones','futbol-alumnos','futbol-camino'].forEach(t => { const el2=document.getElementById(t); if(el2) el2.style.display='none'; });
+    ['futbol-sesiones','futbol-alumnos'].forEach(t => { const el2=document.getElementById(t); if(el2) el2.style.display='none'; });
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     const target = document.getElementById(id); if(target) target.style.display='';
     el.classList.add('active');
@@ -5261,7 +5207,6 @@ function verSesion(id) {
           <div class="avatar avatar-sm">${getInitials(a.nombre)}</div>
           <div style="font-weight:500;flex:1">${a.nombre}</div>
           <span class="badge ${asi.presente?'badge-green':'badge-red'}">${asi.presente?'Presente':'Ausente'}</span>
-          ${asi.puntosCamino>0?`<div class="camino-badge">+${asi.puntosCamino}</div>`:''}
         </div>
         ${ev?`<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;font-size:11px;text-align:center;margin-left:42px">
           <div><div style="color:var(--grey-2)">Técnica</div><div style="font-weight:600">${ev.tecnica}/5</div></div>
@@ -5908,7 +5853,6 @@ function verExtraAlumno(alumnoId) {
         <div style="font-size:16px;font-weight:600">${a.nombre}</div>
         <div style="font-size:13px;color:var(--grey-2)">${a.curso||'—'} · ${edad !== null ? edad + ' años' : ''}</div>
         <div style="font-size:12px;color:var(--grey-2);margin-top:2px">Familia: ${c.nombre||'—'} · ${c.telefono||'Sin teléfono'}</div>
-        <div style="margin-top:6px"><div class="camino-badge">⭐ ${a.camino||0} pts Camino SM</div></div>
       </div>
     </div>
     <div class="section-divider">Actividades en CEIP Escaleritas</div>
@@ -5920,52 +5864,38 @@ function verExtraAlumno(alumnoId) {
       </div>`).join('') : '<div style="color:var(--grey-2);font-size:13px">Sin inscripciones activas encontradas.</div>'}
     ${a.observaciones ? `<div style="margin-top:1rem;padding:.75rem;background:#f5f5f5;border-radius:6px;font-size:12px"><strong>Observaciones:</strong> ${a.observaciones}</div>` : ''}
     `,
-    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
-     <button class="btn btn-primary" onclick="closeModal();darCaminoExtra('${alumnoId}')">⭐ Dar puntos Camino SM</button>`
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>`
   );
 }
 
-function darCaminoExtra(alumnoId) {
-  const a = getAlumno(alumnoId); if (!a.nombre) return;
-  const cats = ['Compañerismo','Superación','Responsabilidad','Iniciativa','Esfuerzo'];
-  const cat = prompt(`Categoría Camino SM para ${a.nombre}:\n${cats.map((c,i)=>`${i+1}. ${c}`).join('\n')}\nEscribe el número:`, '1');
-  if (!cat) return;
-  if (!a.camino) a.camino = 0;
-  a.camino += 10;
-  saveCacheLocal();
-  showToast(`+10 puntos Camino SM a ${a.nombre} (${cats[parseInt(cat)-1]||'Valores'}) ✓`, 'success');
-  extraescolares();
-}
-
 // ═══════════════════════════════════════════════════════════
-// CALENDARIO ESCOLAR CANARIAS 2025-2026 — Las Palmas GC
+// CALENDARIO ESCOLAR CANARIAS 2026-2027 — Las Palmas GC
 // Días NO lectivos hardcoded. Actualizar cada curso.
 // ═══════════════════════════════════════════════════════════
-const DIAS_NO_LECTIVOS_2025_26 = new Set([
-  // Navidad
-  '2025-12-22','2025-12-23','2025-12-24','2025-12-25','2025-12-26',
-  '2025-12-27','2025-12-28','2025-12-29','2025-12-30','2025-12-31',
-  '2026-01-01','2026-01-02','2026-01-03','2026-01-04','2026-01-05',
-  '2026-01-06','2026-01-07',
-  // Semana Santa
-  '2026-03-30','2026-03-31','2026-04-01','2026-04-02','2026-04-03',
-  '2026-04-04','2026-04-05',
+const DIAS_NO_LECTIVOS_2026_27 = new Set([
+  // Navidad 2026-27
+  '2026-12-22','2026-12-23','2026-12-24','2026-12-25','2026-12-26',
+  '2026-12-27','2026-12-28','2026-12-29','2026-12-30','2026-12-31',
+  '2027-01-01','2027-01-02','2027-01-03','2027-01-04','2027-01-05',
+  '2027-01-06','2027-01-07',
+  // Semana Santa (Pascua 4 abril 2027)
+  '2027-03-29','2027-03-30','2027-03-31','2027-04-01','2027-04-02',
+  '2027-04-03','2027-04-04','2027-04-05',
   // Festivos nacionales
-  '2025-10-12', // Fiesta Nacional España
-  '2025-11-01', // Todos los Santos
-  '2025-12-05', // Día del Enseñante (Las Palmas)
-  '2025-12-08', // Inmaculada Concepción
-  '2025-12-06', // Constitución
-  '2026-01-06', // Reyes Magos
-  '2026-04-02', // Jueves Santo
-  '2026-04-03', // Viernes Santo
-  '2026-05-01', // Día del Trabajo
-  '2026-05-30', // Día de Canarias
-  '2026-06-24', // Fundación Las Palmas GC
-  // Festivos insulares
-  '2025-09-08', // Nuestra Señora del Pino (Gran Canaria)
-  // Carnaval Las Palmas 2026
-  '2026-02-17', // Martes de Carnaval
+  '2026-10-12', // Fiesta Nacional España
+  '2026-12-07', // Día del Enseñante Las Palmas (Dic 6 cae domingo → lunes)
+  '2026-12-08', // Inmaculada Concepción
+  '2027-01-06', // Reyes Magos
+  '2027-04-02', // Jueves Santo
+  '2027-04-03', // Viernes Santo
+  '2027-05-01', // Día del Trabajo (sábado, sin puente confirmado)
+  '2027-05-30', // Día de Canarias (sábado, sin puente confirmado)
+  '2027-06-24', // Fundación Las Palmas GC (San Juan)
+  // Festivos insulares Gran Canaria
+  '2026-09-08', // Nuestra Señora del Pino
+  // Carnaval Las Palmas 2027 (Martes de Carnaval = 16 feb)
+  '2027-02-15', // Lunes
+  '2027-02-16', // Martes de Carnaval
 ]);
 
 // Patrón de días de la semana por código GRUPO_DIA
@@ -5996,7 +5926,7 @@ function calcDiasLectivos(mesNombre, anyo, grupoDia) {
     const fecha = new Date(anyo, mesNum-1, d);
     const diaSemana = fecha.getDay(); // 0=dom, 1=lun ... 5=vie, 6=sab
     const fechaStr = fecha.toISOString().split('T')[0];
-    if (patron.includes(diaSemana) && !DIAS_NO_LECTIVOS_2025_26.has(fechaStr)) {
+    if (patron.includes(diaSemana) && !DIAS_NO_LECTIVOS_2026_27.has(fechaStr)) {
       count++;
     }
   }
@@ -6609,7 +6539,7 @@ function asistencia() {
               <div class="avatar">${getInitials(a.nombre)}</div>
               <div style="flex:1">
                 <div style="font-weight:500">${a.nombre}</div>
-                <div style="font-size:12px;color:var(--grey-2)">${a.grupo} · Camino SM: ⭐ ${a.camino}</div>
+                <div style="font-size:12px;color:var(--grey-2)">${a.grupo}</div>
               </div>
               <div style="display:flex;gap:6px">
                 <button class="btn btn-sm" id="p-${a.id}" onclick="marcarPresenteRapido('${a.id}',true)" style="background:var(--green-bg);color:var(--green-dim)">✓ Presente</button>
@@ -7474,10 +7404,6 @@ function portalFamilia() {
     const extraPresentes = asistExtra.filter(a => a.presente).length;
     const extraTotal     = asistExtra.length;
 
-    // Puntos Camino SM
-    const camino = al.camino || 0;
-    const caminoBadge = camino > 0 ? `<span class="camino-badge" style="font-size:14px">⭐ ${camino} pts</span>` : '';
-
     // Bloque evaluaciones fútbol
     const evalBlock = evals.length ? `
       <div style="margin-top:.75rem">
@@ -7595,7 +7521,6 @@ function portalFamilia() {
             <div class="card-title" style="font-size:16px">${al.nombre}</div>
             <div style="font-size:12px;color:var(--grey-2)">${al.curso||''} · ${al.grupo||''}</div>
           </div>
-          <div style="margin-left:auto">${caminoBadge}</div>
         </div>
         <div class="card-body">
           ${actBlock}
@@ -7707,8 +7632,6 @@ function portalFamilia() {
       String(a.alumnoId)===String(al.id) || String(a.claveAlumno||'').toUpperCase()===alNombre
     ).filter(a=>a.presente).length;
   }, 0);
-  const puntosTotal = misAlumnos.reduce((s,al)=>s+(al.camino||0),0);
-
   const kpisDashboard = `
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-bottom:1rem">
       <div class="kpi-card" onclick="document.getElementById('fam-alumnos').scrollIntoView({behavior:'smooth'})" style="cursor:pointer;border:2px solid var(--green-bg)">
@@ -7725,11 +7648,6 @@ function portalFamilia() {
         <div class="kpi-label">Sesiones asistidas</div>
         <div class="kpi-value green">${totalSesiones}</div>
         <div class="kpi-delta">Total acumulado</div>
-      </div>
-      <div class="kpi-card" onclick="document.getElementById('fam-alumnos').scrollIntoView({behavior:'smooth'})" style="cursor:pointer">
-        <div class="kpi-label">Camino SM</div>
-        <div class="kpi-value">⭐ ${puntosTotal}</div>
-        <div class="kpi-delta">Puntos acumulados</div>
       </div>
     </div>`;
 
@@ -8678,10 +8596,6 @@ function informeTecnificacionPdf(alumnoId) {
         '<div style="font-size:11px;color:#666">' + al.nombre + ' · ' + (al.curso||'') + ' · ' + (al.grupo||'') + '</div>' +
         '<div style="font-size:11px;color:#666">Familia: ' + (cliente.nombre||currentUser.name) + ' · Generado el ' + new Date().toLocaleDateString('es-ES') + '</div>' +
       '</div>' +
-      '<div style="margin-left:auto;text-align:right">' +
-        '<div style="font-size:24px;font-weight:800;color:#2e7d32">⭐ ' + (al.camino||0) + '</div>' +
-        '<div style="font-size:10px;color:#888">Puntos Camino SM</div>' +
-      '</div>' +
     '</div>' +
 
     '<h2>Resumen global</h2>' +
@@ -8781,7 +8695,6 @@ function informes() {
         {icon:'📊',titulo:'Informe mensual general',desc:'KPIs, ingresos, asistencia y alumnos del mes',btn:'Generar informe',fn:'generarInformeGeneral()'},
         {icon:'📄',titulo:'Informe AMPA Extraescolares',desc:'Asistencia mensual por actividad para el AMPA',btn:'Generar PDF',fn:'generarInformeAMPA()'},
         {icon:'📋',titulo:'Informe trimestral asesoría',desc:'Ingresos, gastos PERSONAL/SERVICIOS/SS y balance para contable',btn:'Generar PDF',fn:'modalInformeTrimestral()'},
-        {icon:'🏆',titulo:'Ranking Camino SM',desc:'Puntuación acumulada de todos los alumnos',btn:'Ver ranking',fn:"navigate('futbol')"},
         {icon:'💳',titulo:'Resumen de pagos',desc:'Estado de cobros y morosidad del período',btn:'Ver pagos',fn:"navigate('pagos')"},
         {icon:'👤',titulo:'Informe individual de alumno',desc:'Asistencia, evaluaciones y evolución personal',btn:'Seleccionar alumno',fn:'modalInformeAlumno()'},
         {icon:'⚠️',titulo:'Historial de incidencias',desc:'Registro completo de golpes, conflictos y alertas',btn:'Ver incidencias',fn:"navigate('incidencias')"},
@@ -8933,9 +8846,6 @@ function informes() {
       .alumno-foto { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 3px solid #2e7d32; background: #e8f5e9; flex-shrink: 0; }
       .alumno-info h2 { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
       .alumno-info p { font-size: 11px; color: #666; line-height: 1.6; }
-      .camino { text-align: right; margin-left: auto; }
-      .camino-pts { font-size: 28px; font-weight: 800; color: #2e7d32; }
-      .camino-label { font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: .05em; }
       .section { margin-bottom: 1.5rem; }
       .section-title { font-size: 13px; font-weight: 700; color: #2e7d32; text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid #e8f5e9; padding-bottom: 4px; margin-bottom: .75rem; }
       .kpi-row { display: flex; gap: .75rem; margin-bottom: 1rem; }
@@ -8980,10 +8890,6 @@ function informes() {
           ${al.modalidad ? ` · ${al.modalidad}` : ''}
         </p>
         ${vecesMejor>0?`<span class="mejor">🏅 Mejor alumno × ${vecesMejor} ${vecesMejor===1?'vez':'veces'} este mes</span>`:''}
-      </div>
-      <div class="camino">
-        <div class="camino-pts">⭐ ${al.camino||0}</div>
-        <div class="camino-label">Camino SM</div>
       </div>
     </div>
 

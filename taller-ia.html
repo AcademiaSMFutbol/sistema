@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Taller IA — SM Academia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --black:#000;--bg:#0a0a0a;--bg2:#111;--bg3:#1a1a1a;--bg4:#222;
+  --green:#2e7d32;--glow:#4caf50;--glow2:#66bb6a;
+  --grey:#cccccc;--grey2:#888;--grey3:#444;
+  --white:#fff;--red:#ef5350;--orange:#ff9800;--blue:#42a5f5;
+  --radius:12px;--radius-sm:8px;
+  --font:'DM Sans',sans-serif;--title:'Bebas Neue',sans-serif;--mono:'JetBrains Mono',monospace;
+  --trans:.18s cubic-bezier(.4,0,.2,1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:var(--font);background:var(--black);color:var(--grey);font-size:15px;line-height:1.6;min-height:100vh;overflow-x:hidden}
+input,textarea,select,button{font-family:var(--font)}
+a{text-decoration:none;color:inherit}
+button{cursor:pointer;border:none;background:none}
+
+/* GRID BACKGROUND */
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:linear-gradient(rgba(46,125,50,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(46,125,50,.07) 1px,transparent 1px);
+  background-size:40px 40px;pointer-events:none;z-index:0;
+  animation:gridMove 20s linear infinite;
+}
+@keyframes gridMove{0%{background-position:0 0}100%{background-position:40px 40px}}
+
+/* UTILS */
+.hidden{display:none!important}
+.green{color:var(--glow)}
+.mono{font-family:var(--mono)}
+.flex{display:flex}
+.gap-1{gap:.5rem}.gap-2{gap:1rem}.gap-3{gap:1.5rem}
+.items-center{align-items:center}
+.justify-between{justify-content:space-between}
+.wrap{flex-wrap:wrap}
+
+/* SCROLLBAR */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--green);border-radius:3px}
+
+/* ── LOGIN ───────────────────────────────────────────────── */
+#screen-login{
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:var(--black);z-index:100;
+}
+.login-wrap{
+  width:min(420px,95vw);background:var(--bg2);border:1px solid var(--green);
+  border-radius:20px;padding:2.5rem 2rem;position:relative;overflow:hidden;
+  box-shadow:0 0 40px rgba(76,175,80,.15);
+}
+.login-wrap::before{
+  content:'';position:absolute;top:-60px;right:-60px;width:180px;height:180px;
+  background:radial-gradient(circle,rgba(76,175,80,.2),transparent 70%);pointer-events:none;
+}
+.login-logo{text-align:center;margin-bottom:2rem}
+.login-logo .badge{
+  display:inline-block;background:var(--green);color:#fff;
+  font-family:var(--title);font-size:1.8rem;letter-spacing:2px;
+  padding:.3rem 1.2rem;border-radius:8px;margin-bottom:.5rem;
+}
+.login-logo h1{font-family:var(--title);font-size:2rem;color:var(--white);letter-spacing:3px;line-height:1}
+.login-logo p{color:var(--grey2);font-size:.85rem;margin-top:.3rem}
+.login-tabs{display:flex;gap:.5rem;margin-bottom:1.5rem}
+.login-tab{
+  flex:1;padding:.6rem;border-radius:8px;border:1px solid var(--grey3);
+  color:var(--grey2);font-size:.85rem;font-weight:500;transition:var(--trans);text-align:center;cursor:pointer;background:var(--bg3);
+}
+.login-tab.active{background:var(--green);color:#fff;border-color:var(--green)}
+.form-group{margin-bottom:1rem}
+.form-label{display:block;font-size:.8rem;color:var(--grey2);margin-bottom:.4rem;font-weight:500;letter-spacing:.5px;text-transform:uppercase}
+.form-input{
+  width:100%;background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  padding:.7rem 1rem;color:var(--white);font-size:.95rem;transition:var(--trans);
+}
+.form-input:focus{outline:none;border-color:var(--glow);box-shadow:0 0 0 3px rgba(76,175,80,.15)}
+.btn-primary{
+  width:100%;background:var(--green);color:#fff;border-radius:8px;padding:.8rem;
+  font-size:1rem;font-weight:600;letter-spacing:.5px;transition:var(--trans);
+  border:1px solid var(--green);
+}
+.btn-primary:hover{background:var(--glow);box-shadow:0 0 20px rgba(76,175,80,.4)}
+.login-error{color:var(--red);font-size:.85rem;margin-top:.5rem;display:none;text-align:center}
+
+/* ── APP SHELL ───────────────────────────────────────────── */
+#app{display:none;min-height:100vh;position:relative;z-index:1}
+
+/* TOP BAR */
+.topbar{
+  position:sticky;top:0;z-index:50;background:rgba(10,10,10,.95);
+  backdrop-filter:blur(12px);border-bottom:1px solid var(--grey3);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:.75rem 1.25rem;gap:1rem;
+}
+.topbar-brand{font-family:var(--title);font-size:1.4rem;color:var(--white);letter-spacing:2px}
+.topbar-brand span{color:var(--glow)}
+.topbar-right{display:flex;align-items:center;gap:.75rem}
+.user-badge{
+  background:var(--bg3);border:1px solid var(--grey3);border-radius:20px;
+  padding:.35rem .9rem;font-size:.8rem;color:var(--grey2);display:flex;align-items:center;gap:.4rem;
+}
+.user-badge .dot{width:8px;height:8px;background:var(--glow);border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.85)}}
+.btn-sm{
+  padding:.35rem .8rem;border-radius:6px;font-size:.8rem;font-weight:500;
+  border:1px solid var(--grey3);color:var(--grey2);transition:var(--trans);background:var(--bg3);
+}
+.btn-sm:hover{border-color:var(--glow);color:var(--glow)}
+.btn-sm.danger:hover{border-color:var(--red);color:var(--red)}
+
+/* MODULE NAV */
+.module-nav{
+  display:flex;gap:0;border-bottom:1px solid var(--grey3);
+  background:var(--bg2);overflow-x:auto;padding:0 1rem;
+}
+.module-nav::-webkit-scrollbar{height:3px}
+.mod-tab{
+  padding:.75rem 1.25rem;font-size:.82rem;font-weight:500;color:var(--grey2);
+  border-bottom:2px solid transparent;transition:var(--trans);white-space:nowrap;cursor:pointer;
+  display:flex;align-items:center;gap:.5rem;
+}
+.mod-tab:hover{color:var(--grey)}
+.mod-tab.active{color:var(--glow);border-bottom-color:var(--glow)}
+.mod-tab .check{color:var(--glow);font-size:.75rem}
+
+/* MAIN CONTENT */
+.main-content{max-width:860px;margin:0 auto;padding:2rem 1.25rem 4rem}
+
+/* CARDS */
+.card{
+  background:var(--bg2);border:1px solid var(--grey3);border-radius:var(--radius);
+  padding:1.5rem;margin-bottom:1.25rem;transition:var(--trans);
+}
+.card:hover{border-color:rgba(76,175,80,.3)}
+.card-glow{border-color:rgba(76,175,80,.4);box-shadow:0 0 20px rgba(76,175,80,.08)}
+.card-title{
+  font-family:var(--title);font-size:1.5rem;color:var(--white);letter-spacing:2px;
+  margin-bottom:.75rem;display:flex;align-items:center;gap:.6rem;
+}
+.card-title .icon{font-size:1.2rem}
+.section-label{
+  font-family:var(--mono);font-size:.72rem;color:var(--glow);letter-spacing:2px;
+  text-transform:uppercase;margin-bottom:.5rem;display:block;
+}
+h2.mod-heading{font-family:var(--title);font-size:2.2rem;color:var(--white);letter-spacing:3px;margin-bottom:.25rem}
+.mod-subtitle{color:var(--grey2);font-size:.9rem;margin-bottom:1.5rem}
+
+/* PROGRESS BAR */
+.progress-wrap{margin:.5rem 0 1rem}
+.progress-label{display:flex;justify-content:space-between;font-size:.78rem;color:var(--grey2);margin-bottom:.3rem}
+.progress-bar{background:var(--bg3);border-radius:4px;height:6px;overflow:hidden}
+.progress-fill{background:linear-gradient(90deg,var(--green),var(--glow));border-radius:4px;height:100%;transition:.4s ease}
+
+/* THEORY CONTENT */
+.theory-content p{color:var(--grey);line-height:1.75;margin-bottom:.75rem}
+.theory-content strong{color:var(--white)}
+.theory-content ul{margin:.5rem 0 .75rem 1.25rem}
+.theory-content li{margin-bottom:.4rem;color:var(--grey)}
+.highlight-box{
+  background:rgba(46,125,50,.12);border-left:3px solid var(--glow);
+  border-radius:0 8px 8px 0;padding:.9rem 1rem;margin:1rem 0;
+}
+.highlight-box p{margin:0;color:var(--grey)}
+.tool-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:.75rem;margin:1rem 0}
+.tool-card{
+  background:var(--bg3);border:1px solid var(--grey3);border-radius:10px;
+  padding:.9rem;text-align:center;transition:var(--trans);cursor:default;
+}
+.tool-card:hover{border-color:var(--glow);transform:translateY(-2px)}
+.tool-card .tool-icon{font-size:1.6rem;margin-bottom:.4rem}
+.tool-card .tool-name{font-weight:600;color:var(--white);font-size:.9rem}
+.tool-card .tool-desc{font-size:.75rem;color:var(--grey2);margin-top:.2rem}
+.code-block{
+  background:#0d1117;border:1px solid var(--grey3);border-radius:8px;
+  padding:1rem 1.25rem;font-family:var(--mono);font-size:.82rem;color:#7ee787;
+  overflow-x:auto;margin:.75rem 0;white-space:pre-wrap;word-break:break-all;
+}
+
+/* EXERCISES */
+.exercise-wrap{background:var(--bg3);border:1px solid rgba(76,175,80,.25);border-radius:var(--radius);padding:1.25rem}
+.exercise-title{font-weight:600;color:var(--white);margin-bottom:.25rem}
+.exercise-sub{font-size:.83rem;color:var(--grey2);margin-bottom:1rem}
+.quiz-options{display:flex;flex-direction:column;gap:.5rem}
+.quiz-opt{
+  background:var(--bg2);border:1px solid var(--grey3);border-radius:8px;
+  padding:.7rem 1rem;color:var(--grey);transition:var(--trans);cursor:pointer;
+  display:flex;align-items:center;gap:.75rem;font-size:.9rem;
+}
+.quiz-opt:hover{border-color:var(--glow);color:var(--white)}
+.quiz-opt.correct{border-color:var(--glow);background:rgba(76,175,80,.15);color:var(--glow)}
+.quiz-opt.wrong{border-color:var(--red);background:rgba(239,83,80,.12);color:var(--red)}
+.quiz-opt.disabled{pointer-events:none;opacity:.6}
+.quiz-opt .opt-key{
+  width:26px;height:26px;border-radius:6px;background:var(--bg3);
+  font-family:var(--mono);font-size:.75rem;display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.feedback-msg{
+  margin-top:.75rem;padding:.7rem 1rem;border-radius:8px;font-size:.88rem;font-weight:500;
+}
+.feedback-msg.ok{background:rgba(76,175,80,.15);color:var(--glow);border:1px solid rgba(76,175,80,.3)}
+.feedback-msg.fail{background:rgba(239,83,80,.12);color:var(--red);border:1px solid rgba(239,83,80,.3)}
+.btn-check{
+  margin-top:.75rem;background:var(--green);color:#fff;border-radius:8px;
+  padding:.6rem 1.4rem;font-size:.88rem;font-weight:600;transition:var(--trans);
+}
+.btn-check:hover{background:var(--glow);box-shadow:0 0 16px rgba(76,175,80,.4)}
+.btn-reset{
+  margin-top:.5rem;margin-left:.5rem;background:var(--bg3);color:var(--grey2);border-radius:8px;
+  padding:.6rem 1rem;font-size:.88rem;border:1px solid var(--grey3);transition:var(--trans);
+}
+.btn-reset:hover{border-color:var(--grey2);color:var(--grey)}
+
+/* CHECKLIST */
+.checklist{display:flex;flex-direction:column;gap:.5rem;margin:.5rem 0}
+.check-item{
+  display:flex;align-items:flex-start;gap:.75rem;padding:.6rem .75rem;
+  background:var(--bg2);border:1px solid var(--grey3);border-radius:8px;cursor:pointer;transition:var(--trans);
+}
+.check-item.done{border-color:rgba(76,175,80,.4);background:rgba(76,175,80,.07)}
+.check-item input[type=checkbox]{width:18px;height:18px;accent-color:var(--glow);flex-shrink:0;margin-top:2px;cursor:pointer}
+.check-item label{font-size:.88rem;color:var(--grey);cursor:pointer;line-height:1.4}
+.check-item.done label{color:var(--glow)}
+
+/* DRIVE STRUCTURE EXERCISE */
+.drive-tree{font-family:var(--mono);font-size:.83rem;line-height:1.8;padding:.5rem}
+.drive-item{padding:.3rem .5rem;border-radius:6px;cursor:grab;transition:var(--trans);user-select:none}
+.drive-item:hover{background:rgba(76,175,80,.1)}
+.drive-item.folder{color:var(--glow)}
+.drive-item.file{color:var(--grey2)}
+.drop-zone{
+  min-height:180px;background:var(--bg2);border:2px dashed var(--grey3);
+  border-radius:10px;padding:1rem;transition:var(--trans);
+}
+.drop-zone.dragover{border-color:var(--glow);background:rgba(76,175,80,.06)}
+
+/* PROMPT BUILDER */
+.prompt-builder{display:flex;flex-direction:column;gap:.75rem}
+.pb-field{display:flex;flex-direction:column;gap:.3rem}
+.pb-label{font-size:.78rem;color:var(--glow);font-family:var(--mono);letter-spacing:1px;text-transform:uppercase}
+.pb-select,.pb-input{
+  background:var(--bg2);border:1px solid var(--grey3);border-radius:8px;
+  padding:.6rem .9rem;color:var(--white);font-size:.88rem;transition:var(--trans);
+}
+.pb-select:focus,.pb-input:focus{outline:none;border-color:var(--glow)}
+.pb-select option{background:var(--bg2)}
+.prompt-output{
+  background:#0d1117;border:1px solid var(--glow);border-radius:10px;
+  padding:1rem;font-family:var(--mono);font-size:.8rem;color:#7ee787;
+  min-height:100px;white-space:pre-wrap;word-break:break-all;line-height:1.7;
+}
+.btn-copy{
+  background:var(--bg3);border:1px solid var(--grey3);color:var(--grey2);
+  border-radius:8px;padding:.55rem 1rem;font-size:.82rem;transition:var(--trans);
+}
+.btn-copy:hover{border-color:var(--glow);color:var(--glow)}
+.btn-copy.copied{border-color:var(--glow);color:var(--glow);background:rgba(76,175,80,.1)}
+
+/* TASK SUBMISSION */
+.task-box{border:1px solid rgba(76,175,80,.3);border-radius:var(--radius);overflow:hidden}
+.task-header{
+  background:rgba(46,125,50,.15);padding:1rem 1.25rem;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.task-header h3{font-family:var(--title);font-size:1.2rem;color:var(--white);letter-spacing:2px}
+.task-status{
+  font-family:var(--mono);font-size:.72rem;padding:.25rem .7rem;border-radius:20px;font-weight:500;
+}
+.status-pending{background:rgba(255,152,0,.15);color:var(--orange);border:1px solid rgba(255,152,0,.3)}
+.status-submitted{background:rgba(66,165,245,.15);color:var(--blue);border:1px solid rgba(66,165,245,.3)}
+.status-reviewed{background:rgba(76,175,80,.15);color:var(--glow);border:1px solid rgba(76,175,80,.3)}
+.task-body{padding:1.25rem}
+.task-desc{color:var(--grey);font-size:.9rem;margin-bottom:.75rem;line-height:1.6}
+.criteria-list{display:flex;flex-direction:column;gap:.35rem;margin-bottom:1rem}
+.criteria-item{
+  display:flex;align-items:center;gap:.5rem;font-size:.83rem;color:var(--grey2);
+}
+.criteria-item::before{content:'▸';color:var(--glow);font-size:.7rem}
+.task-textarea{
+  width:100%;background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  padding:.8rem;color:var(--white);font-size:.88rem;resize:vertical;min-height:90px;
+  transition:var(--trans);line-height:1.6;
+}
+.task-textarea:focus{outline:none;border-color:var(--glow)}
+.task-url{
+  width:100%;background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  padding:.7rem .9rem;color:var(--white);font-size:.88rem;transition:var(--trans);margin-top:.5rem;
+}
+.task-url:focus{outline:none;border-color:var(--glow)}
+.btn-submit{
+  background:var(--green);color:#fff;border-radius:8px;padding:.65rem 1.4rem;
+  font-size:.88rem;font-weight:600;transition:var(--trans);margin-top:.75rem;
+}
+.btn-submit:hover{background:var(--glow);box-shadow:0 0 16px rgba(76,175,80,.4)}
+.btn-submit:disabled{opacity:.4;pointer-events:none}
+.task-feedback{
+  margin-top:1rem;padding:1rem;background:rgba(76,175,80,.08);
+  border:1px solid rgba(76,175,80,.2);border-radius:8px;
+}
+.task-feedback .score{font-family:var(--title);font-size:2.5rem;color:var(--glow);line-height:1}
+.task-feedback .score-label{font-size:.75rem;color:var(--grey2);margin-top:.1rem}
+.task-feedback .comment{font-size:.88rem;color:var(--grey);margin-top:.6rem;line-height:1.6}
+
+/* COMMENTS */
+.comments-section{margin-top:1.5rem}
+.comment-list{display:flex;flex-direction:column;gap:.75rem;margin-bottom:1rem}
+.comment-item{
+  background:var(--bg3);border:1px solid var(--grey3);border-radius:10px;padding:.9rem 1rem;
+}
+.comment-item.instructor-comment{border-color:rgba(76,175,80,.4);background:rgba(46,125,50,.1)}
+.comment-meta{display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem}
+.comment-author{font-weight:600;color:var(--white);font-size:.88rem}
+.comment-role{
+  font-family:var(--mono);font-size:.68rem;padding:.15rem .5rem;border-radius:10px;
+}
+.role-instructor{background:rgba(76,175,80,.2);color:var(--glow)}
+.role-student{background:rgba(136,136,136,.2);color:var(--grey2)}
+.comment-time{font-size:.75rem;color:var(--grey3);margin-left:auto}
+.comment-text{font-size:.88rem;color:var(--grey);line-height:1.6}
+.reply-list{margin-top:.6rem;padding-top:.6rem;border-top:1px solid var(--grey3)}
+.reply-item{font-size:.83rem;color:var(--grey2);padding:.4rem 0;display:flex;gap:.5rem;align-items:flex-start}
+.reply-item .reply-author{color:var(--glow);font-weight:600;white-space:nowrap}
+.comment-form{display:flex;flex-direction:column;gap:.5rem}
+.comment-input{
+  width:100%;background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  padding:.7rem .9rem;color:var(--white);font-size:.88rem;resize:none;transition:var(--trans);line-height:1.5;
+}
+.comment-input:focus{outline:none;border-color:var(--glow)}
+.btn-comment{
+  align-self:flex-start;background:var(--bg3);border:1px solid var(--grey3);color:var(--grey2);
+  border-radius:8px;padding:.5rem 1.1rem;font-size:.83rem;transition:var(--trans);
+}
+.btn-comment:hover{border-color:var(--glow);color:var(--glow)}
+.reply-toggle{
+  font-size:.75rem;color:var(--grey2);background:none;border:none;cursor:pointer;
+  margin-top:.3rem;transition:var(--trans);
+}
+.reply-toggle:hover{color:var(--glow)}
+
+/* INSTRUCTOR PANEL */
+.panel-tabs{display:flex;gap:.5rem;margin-bottom:1.5rem}
+.panel-tab{
+  padding:.55rem 1.1rem;border-radius:20px;border:1px solid var(--grey3);
+  color:var(--grey2);font-size:.82rem;font-weight:500;transition:var(--trans);cursor:pointer;background:var(--bg2);
+}
+.panel-tab.active{background:var(--green);color:#fff;border-color:var(--green)}
+.student-row{
+  background:var(--bg2);border:1px solid var(--grey3);border-radius:10px;
+  padding:1rem 1.25rem;margin-bottom:.75rem;transition:var(--trans);
+}
+.student-row:hover{border-color:rgba(76,175,80,.3)}
+.student-name{font-weight:600;color:var(--white);font-size:.95rem}
+.student-code{font-family:var(--mono);font-size:.75rem;color:var(--grey2)}
+.mod-pills{display:flex;gap:.35rem;flex-wrap:wrap;margin-top:.5rem}
+.mod-pill{
+  font-family:var(--mono);font-size:.68rem;padding:.2rem .6rem;border-radius:10px;
+  border:1px solid var(--grey3);color:var(--grey2);
+}
+.mod-pill.done{border-color:var(--glow);color:var(--glow);background:rgba(76,175,80,.1)}
+.mod-pill.submitted{border-color:var(--blue);color:var(--blue)}
+.eval-card{
+  background:var(--bg2);border:1px solid var(--grey3);border-radius:10px;padding:1.25rem;margin-bottom:.75rem;
+}
+.eval-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;margin-bottom:.75rem}
+.eval-student{font-weight:600;color:var(--white)}
+.eval-module{font-size:.8rem;color:var(--grey2);margin-top:.1rem}
+.eval-submission{
+  background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  padding:.7rem;font-size:.85rem;color:var(--grey);margin-bottom:.75rem;line-height:1.6;word-break:break-all;
+}
+.score-input-wrap{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
+.score-label-sm{font-size:.8rem;color:var(--grey2)}
+.score-input{
+  width:70px;background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  padding:.5rem;color:var(--white);font-size:1.1rem;font-weight:600;text-align:center;
+  font-family:var(--mono);transition:var(--trans);
+}
+.score-input:focus{outline:none;border-color:var(--glow)}
+.comment-eval{
+  width:100%;background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  padding:.6rem .9rem;color:var(--white);font-size:.85rem;margin-top:.5rem;
+  resize:none;transition:var(--trans);
+}
+.comment-eval:focus{outline:none;border-color:var(--glow)}
+.btn-eval{
+  background:var(--green);color:#fff;border-radius:8px;padding:.55rem 1.2rem;
+  font-size:.83rem;font-weight:600;transition:var(--trans);margin-top:.5rem;
+}
+.btn-eval:hover{background:var(--glow);box-shadow:0 0 12px rgba(76,175,80,.4)}
+.empty-state{text-align:center;padding:3rem 1rem;color:var(--grey2)}
+.empty-state .empty-icon{font-size:3rem;margin-bottom:.75rem}
+
+/* DASHBOARD HERO */
+.dashboard-hero{
+  background:linear-gradient(135deg,rgba(46,125,50,.2),rgba(10,10,10,.5));
+  border:1px solid rgba(76,175,80,.25);border-radius:16px;padding:2rem;margin-bottom:1.5rem;
+  position:relative;overflow:hidden;
+}
+.dashboard-hero::after{
+  content:'';position:absolute;right:-40px;top:-40px;width:180px;height:180px;
+  background:radial-gradient(circle,rgba(76,175,80,.15),transparent 70%);pointer-events:none;
+}
+.hero-title{font-family:var(--title);font-size:2.4rem;color:var(--white);letter-spacing:3px;line-height:1}
+.hero-sub{color:var(--grey2);margin-top:.4rem;font-size:.9rem}
+.hero-meta{display:flex;gap:1rem;margin-top:1.25rem;flex-wrap:wrap}
+.hero-stat{
+  background:rgba(0,0,0,.4);border:1px solid var(--grey3);border-radius:10px;
+  padding:.6rem 1rem;display:flex;align-items:center;gap:.6rem;
+}
+.hero-stat .stat-val{font-family:var(--title);font-size:1.6rem;color:var(--glow);line-height:1}
+.hero-stat .stat-lbl{font-size:.75rem;color:var(--grey2)}
+.module-cards{display:grid;grid-template-columns:1fr;gap:.75rem}
+@media(min-width:600px){.module-cards{grid-template-columns:1fr 1fr}}
+.mod-card{
+  background:var(--bg2);border:1px solid var(--grey3);border-radius:12px;
+  padding:1.25rem;cursor:pointer;transition:var(--trans);position:relative;overflow:hidden;
+}
+.mod-card:hover{border-color:var(--glow);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.mod-card.locked{opacity:.5;cursor:not-allowed}
+.mod-card .mod-num{font-family:var(--mono);font-size:.72rem;color:var(--grey2);margin-bottom:.3rem}
+.mod-card .mod-name{font-family:var(--title);font-size:1.2rem;color:var(--white);letter-spacing:1px}
+.mod-card .mod-desc{font-size:.8rem;color:var(--grey2);margin-top:.3rem}
+.mod-card .mod-status{
+  position:absolute;top:.9rem;right:.9rem;font-family:var(--mono);font-size:.65rem;
+  padding:.2rem .6rem;border-radius:10px;
+}
+.mod-locked{background:rgba(136,136,136,.15);color:var(--grey2);border:1px solid var(--grey3)}
+.mod-progress{background:rgba(255,152,0,.15);color:var(--orange);border:1px solid rgba(255,152,0,.3)}
+.mod-complete{background:rgba(76,175,80,.15);color:var(--glow);border:1px solid rgba(76,175,80,.3)}
+
+/* VIDEO EMBED */
+.video-wrap{position:relative;padding-bottom:56.25%;height:0;border-radius:10px;overflow:hidden;margin:.75rem 0;border:1px solid var(--grey3)}
+.video-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:none}
+
+/* RESOURCE LINKS */
+.resource-list{display:flex;flex-direction:column;gap:.4rem;margin:.5rem 0}
+.resource-link{
+  display:flex;align-items:center;gap:.6rem;padding:.6rem .9rem;
+  background:var(--bg3);border:1px solid var(--grey3);border-radius:8px;
+  color:var(--grey);font-size:.85rem;transition:var(--trans);
+}
+.resource-link:hover{border-color:var(--glow);color:var(--glow)}
+.resource-link .res-icon{font-size:1rem;flex-shrink:0}
+.resource-link .res-type{font-family:var(--mono);font-size:.68rem;color:var(--grey2);margin-left:auto}
+
+/* TOAST */
+.toast{
+  position:fixed;bottom:1.5rem;right:1.5rem;background:var(--bg2);border:1px solid var(--glow);
+  color:var(--white);border-radius:10px;padding:.75rem 1.25rem;font-size:.88rem;
+  box-shadow:0 4px 24px rgba(0,0,0,.4);transform:translateY(100px);opacity:0;
+  transition:.3s cubic-bezier(.4,0,.2,1);z-index:1000;max-width:300px;
+}
+.toast.show{transform:translateY(0);opacity:1}
+
+@media(max-width:480px){
+  .main-content{padding:1rem .75rem 3rem}
+  .hero-title{font-size:1.8rem}
+  .card{padding:1rem}
+  .topbar-brand{font-size:1.1rem}
+}
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="screen-login">
+  <div class="login-wrap">
+    <div class="login-logo">
+      <div class="badge">SM</div>
+      <h1>TALLER IA</h1>
+      <p>Build-It-Yourself — Clubes de Fútbol</p>
+    </div>
+    <div class="login-tabs">
+      <div class="login-tab active" onclick="setLoginTab('student')">Alumno</div>
+      <div class="login-tab" onclick="setLoginTab('instructor')">Instructor</div>
+    </div>
+    <!-- Student form -->
+    <div id="form-student">
+      <div class="form-group">
+        <label class="form-label">Tu nombre</label>
+        <input class="form-input" id="inp-name" placeholder="Ej: Juan García" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Código del taller</label>
+        <input class="form-input" id="inp-code" placeholder="Código recibido" autocomplete="off">
+      </div>
+      <button class="btn-primary" onclick="loginStudent()">Entrar al taller</button>
+      <div class="login-error" id="student-error">Código incorrecto. Contacta con el instructor.</div>
+    </div>
+    <!-- Instructor form -->
+    <div id="form-instructor" class="hidden">
+      <div class="form-group">
+        <label class="form-label">Código de instructor</label>
+        <input class="form-input" id="inp-instructor-code" placeholder="Código privado" type="password" autocomplete="off">
+      </div>
+      <button class="btn-primary" onclick="loginInstructor()">Acceder como instructor</button>
+      <div class="login-error" id="instructor-error">Código incorrecto.</div>
+    </div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-brand"><span>SM</span> TALLER IA</div>
+    <div class="topbar-right">
+      <div class="user-badge">
+        <div class="dot"></div>
+        <span id="topbar-user">—</span>
+      </div>
+      <button class="btn-sm" id="btn-instructor-panel" onclick="showInstructor()" style="display:none">Panel</button>
+      <button class="btn-sm" id="btn-dashboard" onclick="showDashboard()">Inicio</button>
+      <button class="btn-sm danger" onclick="logout()">Salir</button>
+    </div>
+  </div>
+
+  <!-- Module nav (hidden on dashboard/instructor) -->
+  <div class="module-nav hidden" id="module-nav">
+    <div class="mod-tab active" onclick="goModule(0)" id="tab-0">
+      <span>01</span> Ecosistema
+    </div>
+    <div class="mod-tab" onclick="goModule(1)" id="tab-1">
+      <span>02</span> Datos
+    </div>
+    <div class="mod-tab" onclick="goModule(2)" id="tab-2">
+      <span>03</span> Web App
+    </div>
+    <div class="mod-tab" onclick="goModule(3)" id="tab-3">
+      <span>04</span> Despliegue
+    </div>
+    <div class="mod-tab" onclick="showDashboard()" id="tab-back" style="color:var(--grey3);font-size:.75rem">← Inicio</div>
+  </div>
+
+  <!-- SCREENS -->
+  <div id="screen-dashboard" class="main-content"></div>
+  <div id="screen-module" class="main-content hidden"></div>
+  <div id="screen-instructor" class="main-content hidden"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// CONSTANTS & STATE
+// ═══════════════════════════════════════════════════
+const INSTRUCTOR_CODE = 'SM2026';
+const TALLER_CODE = 'FUTBOL2026';
+
+const KEYS = {
+  session: 'sm_taller_session',
+  progress: 'sm_taller_progress',
+  submissions: 'sm_taller_submissions',
+  comments: 'sm_taller_comments',
+  students: 'sm_taller_students',
+  scores: 'sm_taller_scores',
+};
+
+let STATE = { user: null, module: 0, view: 'dashboard' };
+
+// ═══════════════════════════════════════════════════
+// MODULES DATA
+// ═══════════════════════════════════════════════════
+const MODULES = [
+  {
+    id: 0,
+    num: '01',
+    icon: '🧠',
+    title: 'Ecosistema IA',
+    subtitle: 'Selecciona la herramienta correcta para cada tarea',
+    theory: `
+      <p>El ecosistema de IAs es amplio y cada herramienta tiene sus puntos fuertes. Elegir la correcta marca la diferencia entre un flujo de trabajo eficiente y uno frustrante.</p>
+      <div class="tool-grid">
+        <div class="tool-card"><div class="tool-icon">💬</div><div class="tool-name">ChatGPT</div><div class="tool-desc">Conversación, redacción, análisis general</div></div>
+        <div class="tool-card"><div class="tool-icon">🔮</div><div class="tool-name">Gemini</div><div class="tool-desc">Integrado en Google: Drive, Sheets, Docs</div></div>
+        <div class="tool-card"><div class="tool-icon">⚡</div><div class="tool-name">Claude</div><div class="tool-desc">Documentos largos, código, razonamiento</div></div>
+        <div class="tool-card"><div class="tool-icon">🎨</div><div class="tool-name">Gamma</div><div class="tool-desc">Presentaciones y documentos visuales</div></div>
+        <div class="tool-card"><div class="tool-icon">📋</div><div class="tool-name">Notion AI</div><div class="tool-desc">Base de conocimiento, notas, wiki</div></div>
+      </div>
+      <div class="highlight-box"><p><strong>Regla de oro:</strong> No existe "la mejor IA". Existe la IA correcta para la tarea correcta. Un buen gestor de club domina 2-3 herramientas en profundidad antes de diversificar.</p></div>
+      <p><strong>Para tu club de fútbol:</strong></p>
+      <ul>
+        <li>Comunicados a padres → ChatGPT o Claude</li>
+        <li>Análisis de datos de jugadores → Gemini + Sheets</li>
+        <li>Presentación fin de temporada → Gamma</li>
+        <li>Wiki interna del club → Notion AI</li>
+        <li>Generar código para tu app → Claude</li>
+      </ul>
+    `,
+    resources: [
+      { icon: '📄', text: 'Comparativa completa de herramientas IA 2024', type: 'PDF', url: '#' },
+      { icon: '🔗', text: 'Plantilla: Mapa de herramientas para tu club', type: 'Drive', url: '#' },
+      { icon: '▶️', text: 'Video: Primeros pasos con Claude', type: 'Video', url: '#' },
+    ],
+    exercise: {
+      type: 'quiz',
+      title: '¿Qué herramienta usarías?',
+      subtitle: 'Selecciona la mejor IA para cada caso de uso en tu club',
+      questions: [
+        {
+          q: 'Quieres analizar las estadísticas de 45 jugadores guardadas en Google Sheets',
+          options: ['ChatGPT', 'Gemini', 'Gamma', 'Notion AI'],
+          correct: 1,
+          explanation: 'Gemini se integra nativamente con Google Sheets, ideal para analizar datos directamente.'
+        },
+        {
+          q: 'Necesitas crear una presentación visual para patrocinadores',
+          options: ['Claude', 'ChatGPT', 'Gamma', 'Gemini'],
+          correct: 2,
+          explanation: 'Gamma está especializada en crear presentaciones atractivas desde texto.'
+        },
+        {
+          q: 'Quieres que la IA lea un contrato de 50 páginas y te resuma los puntos clave',
+          options: ['Gemini', 'Gamma', 'Claude', 'Notion AI'],
+          correct: 2,
+          explanation: 'Claude tiene la ventana de contexto más grande y es excelente con documentos extensos.'
+        },
+        {
+          q: 'Quieres crear una wiki interna con procedimientos del club accesible a todo el staff',
+          options: ['ChatGPT', 'Notion AI', 'Gamma', 'Claude'],
+          correct: 1,
+          explanation: 'Notion AI permite crear bases de conocimiento colaborativas perfectas para wikis de club.'
+        },
+      ]
+    },
+    task: {
+      title: 'Mapa de Herramientas de tu Club',
+      desc: 'Crea un documento (puede ser en Google Docs, Notion o cualquier formato) donde definas qué IA usarás para cada área de tu club: comunicación, datos, presentaciones, etc.',
+      criteria: [
+        'Mínimo 5 áreas de uso diferentes identificadas',
+        'Justificación de por qué elegiste esa IA para esa tarea',
+        'Al menos 2 herramientas distintas en tu mapa',
+      ],
+      placeholder: 'Pega aquí el link a tu documento o describe tu mapa de herramientas...',
+      type: 'url'
+    }
+  },
+  {
+    id: 1,
+    num: '02',
+    icon: '📂',
+    title: 'Arquitectura de Datos',
+    subtitle: 'Estructura tu Google Drive como un profesional',
+    theory: `
+      <p>La gestión de datos es la base de cualquier operación eficiente. Un Drive bien organizado es la diferencia entre encontrar lo que buscas en 5 segundos o en 5 minutos.</p>
+      <div class="highlight-box"><p><strong>Principio MEC:</strong> Metodología → Estructura → Contenido. Primero defines cómo trabajas, luego construyes la estructura, luego llenas de contenido.</p></div>
+      <p><strong>Estructura recomendada para tu club:</strong></p>
+      <div class="code-block">📁 CLUB [AÑO]
+├── 📁 01_Alumnos
+│   ├── 📁 [Nombre Alumno]
+│   │   ├── 📄 Ficha_Personal.sheets
+│   │   ├── 📄 Asistencias.sheets
+│   │   └── 📄 Estadisticas.sheets
+├── 📁 02_Pagos
+│   ├── 📄 Control_Mensual.sheets
+│   └── 📄 Facturas
+├── 📁 03_Temporada
+│   ├── 📁 Sesiones
+│   └── 📁 Competicion
+└── 📁 04_Admin
+    ├── 📄 Contratos
+    └── 📄 Comunicaciones</div>
+      <p>Cada carpeta tiene una numeración que fuerza el orden. Cada alumno tiene su propia subcarpeta. Los datos están separados por tipo.</p>
+      <p><strong>Sheets clave a crear:</strong></p>
+      <ul>
+        <li><strong>Ficha de alumno:</strong> datos personales, médicos, contactos</li>
+        <li><strong>Control de asistencias:</strong> fecha, presente/ausente, observaciones</li>
+        <li><strong>Estadísticas técnicas:</strong> métricas por sesión según tu metodología</li>
+        <li><strong>Control de pagos:</strong> mensualidades, estado, fecha de pago</li>
+      </ul>
+    `,
+    resources: [
+      { icon: '📊', text: 'Plantilla Google Sheets — Ficha de Alumno', type: 'Sheets', url: '#' },
+      { icon: '📊', text: 'Plantilla — Control de Asistencias', type: 'Sheets', url: '#' },
+      { icon: '📊', text: 'Plantilla — Control de Pagos Mensual', type: 'Sheets', url: '#' },
+    ],
+    exercise: {
+      type: 'checklist',
+      title: 'Construye tu estructura de Drive',
+      subtitle: 'Marca cada carpeta/sheet que hayas creado en tu Google Drive real',
+      items: [
+        'Carpeta principal del club creada con el año',
+        'Subcarpeta 01_Alumnos con al menos un alumno de prueba',
+        'Sheet de ficha personal rellenado con datos de ejemplo',
+        'Subcarpeta 02_Pagos con sheet de control mensual',
+        'Subcarpeta 03_Temporada creada',
+        'Permisos del Drive configurados (solo tú tienes acceso editor)',
+        'Shared con Gemini para permitir análisis con IA',
+      ]
+    },
+    task: {
+      title: 'Screenshot de tu Drive Profesional',
+      desc: 'Captura de pantalla (o link compartido) mostrando la estructura de carpetas que has creado en Google Drive con datos reales de tu club.',
+      criteria: [
+        'Estructura de carpetas numeradas visible',
+        'Al menos una carpeta de alumno real o de prueba',
+        'Mínimo un Sheet de control (asistencias o pagos) creado',
+      ],
+      placeholder: 'Pega aquí el link a tu Google Drive compartido o describe la estructura que creaste...',
+      type: 'url'
+    }
+  },
+  {
+    id: 2,
+    num: '03',
+    icon: '⚙️',
+    title: 'Generación Web App',
+    subtitle: 'La IA lee tus datos y genera código personalizado',
+    theory: `
+      <p>El módulo más potente: usar IA para generar aplicaciones web completas sin saber programar. El secreto está en el <strong>prompt de arquitecto</strong>: no le pides a la IA que "haga una app", le das contexto detallado y ella construye.</p>
+      <div class="highlight-box"><p><strong>Anatomía del prompt perfecto:</strong> Rol → Contexto → Datos → Funcionalidades → Stack técnico → Restricciones → Output esperado</p></div>
+      <p><strong>Stack que usamos (vanilla, sin dependencias):</strong></p>
+      <ul>
+        <li>HTML5 semántico para estructura</li>
+        <li>CSS3 con variables para estilos</li>
+        <li>JavaScript vanilla para lógica</li>
+        <li>localStorage para persistencia de datos</li>
+        <li>Google Fonts para tipografía (única dependencia externa)</li>
+      </ul>
+      <div class="code-block">// Ejemplo: leyendo tu Sheet con Google Sheets API
+async function cargarAlumnos() {
+  const url = \`https://sheets.googleapis.com/v4/spreadsheets/\${ID}/values/Alumnos\`;
+  const res = await fetch(url + '?key=' + API_KEY);
+  const data = await res.json();
+  return data.values; // array de filas
+}</div>
+      <p>Con este patrón, tu app lee los datos del Drive en tiempo real. Cambias el Sheet → la app se actualiza automáticamente.</p>
+    `,
+    resources: [
+      { icon: '📄', text: 'Guía: Prompts para generar apps con Claude', type: 'PDF', url: '#' },
+      { icon: '🔗', text: 'Repositorio de plantillas HTML/CSS/JS', type: 'GitHub', url: '#' },
+      { icon: '▶️', text: 'Video: Generando tu primera app en 30 minutos', type: 'Video', url: '#' },
+    ],
+    exercise: {
+      type: 'prompt-builder',
+      title: 'Constructor de Prompts',
+      subtitle: 'Configura los parámetros y genera tu prompt para Claude',
+      fields: [
+        { id: 'app-type', label: 'Tipo de app', type: 'select', options: ['Panel de asistencias', 'Control de pagos', 'Estadísticas de jugadores', 'Agenda de sesiones', 'App de resultados'] },
+        { id: 'users', label: '¿Quién la usa?', type: 'select', options: ['Solo yo (entrenador)', 'Yo + padres', 'Todo el equipo técnico', 'Acceso público'] },
+        { id: 'data', label: 'Fuente de datos', type: 'select', options: ['Google Sheets (API)', 'localStorage (sin servidor)', 'JSON estático', 'Entrada manual'] },
+        { id: 'style', label: 'Estilo visual', type: 'select', options: ['Dark mode profesional', 'Claro y minimalista', 'Colores del club', 'Estilo SM Academia'] },
+      ]
+    },
+    task: {
+      title: 'Tu Primera App Generada',
+      desc: 'Usa Claude (o cualquier IA) con el prompt que construiste para generar una app web funcional para tu club. Puede ser simple: una lista de alumnos, un control de asistencia, o similar.',
+      criteria: [
+        'App funcional que se puede abrir en el navegador',
+        'Datos de tu club (aunque sean de prueba)',
+        'Diseño coherente y legible en móvil',
+      ],
+      placeholder: 'Pega aquí el código HTML de tu app, o el link si ya la tienes publicada...',
+      type: 'text'
+    }
+  },
+  {
+    id: 3,
+    num: '04',
+    icon: '🚀',
+    title: 'Despliegue Profesional',
+    subtitle: 'GitHub Pages: tu app accesible desde cualquier móvil, gratis',
+    theory: `
+      <p>Tienes tu app generada. Ahora necesitas que sea accesible desde cualquier dispositivo, sin pagar servidor, con URL profesional. GitHub Pages es la solución.</p>
+      <div class="highlight-box"><p><strong>Filosofía SM Academia:</strong> Autonomía total. Sin cuotas externas, sin dependencias de terceros. Tu app es tuya, el código es tuyo, el dominio es tuyo.</p></div>
+      <p><strong>Proceso de despliegue (4 pasos):</strong></p>
+      <ul>
+        <li><strong>1. Crear repositorio</strong> en github.com con tu nombre de usuario</li>
+        <li><strong>2. Subir tu archivo</strong> index.html al repositorio</li>
+        <li><strong>3. Activar GitHub Pages</strong> en Settings → Pages → Deploy from branch</li>
+        <li><strong>4. Tu URL</strong>: tuusuario.github.io/nombre-repo</li>
+      </ul>
+      <p>Actualizar la app es igual de simple: editas el archivo localmente y lo subes de nuevo. O directamente editas en GitHub desde el navegador.</p>
+      <p><strong>Dominio personalizado (opcional):</strong> Si tienes un dominio propio, puedes configurarlo en GitHub Pages sin coste adicional. Tu app en club.com en vez de github.io.</p>
+    `,
+    resources: [
+      { icon: '▶️', text: 'Video: Despliegue en GitHub Pages paso a paso', type: 'Video', url: '#' },
+      { icon: '📄', text: 'Guía: Conectar dominio propio a GitHub Pages', type: 'PDF', url: '#' },
+      { icon: '🔗', text: 'Ejemplo: academiasmfutbol.github.io', type: 'Link', url: '#' },
+    ],
+    exercise: {
+      type: 'checklist',
+      title: 'Checklist de despliegue',
+      subtitle: 'Marca cada paso completado para desplegar tu app en GitHub Pages',
+      items: [
+        'Cuenta de GitHub creada (github.com)',
+        'Repositorio público creado con el nombre de tu app',
+        'Archivo index.html subido al repositorio',
+        'GitHub Pages activado en Settings → Pages',
+        'Branch seleccionada: main / (root)',
+        'URL de GitHub Pages funcionando (puede tardar 1-2 min)',
+        'App probada en móvil desde la URL pública',
+        'URL compartida con al menos una persona',
+      ]
+    },
+    task: {
+      title: 'Tu App en Producción',
+      desc: 'Despliega tu app generada en el módulo 3 en GitHub Pages y comparte la URL pública. La app debe ser accesible desde cualquier dispositivo con internet.',
+      criteria: [
+        'URL pública de GitHub Pages funcionando',
+        'App visible en móvil sin errores',
+        'Código fuente visible en el repositorio público',
+      ],
+      placeholder: 'Pega aquí la URL de tu app en GitHub Pages (ej: tuusuario.github.io/mi-app)',
+      type: 'url'
+    }
+  }
+];
+
+// ═══════════════════════════════════════════════════
+// STORAGE HELPERS
+// ═══════════════════════════════════════════════════
+function load(key, def = {}) {
+  try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; }
+}
+function save(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+
+function getProgress() { return load(KEYS.progress, {}); }
+function getSubmissions() { return load(KEYS.submissions, {}); }
+function getComments() { return load(KEYS.comments, {}); }
+function getStudents() { return load(KEYS.students, []); }
+function getScores() { return load(KEYS.scores, {}); }
+
+function setProgress(p) { save(KEYS.progress, p); }
+function setSubmissions(s) { save(KEYS.submissions, s); }
+function setComments(c) { save(KEYS.comments, c); }
+function setStudents(s) { save(KEYS.students, s); }
+function setScores(s) { save(KEYS.scores, s); }
+
+function ensureStudent(name) {
+  const students = getStudents();
+  if (!students.find(s => s.name === name)) {
+    students.push({ name, joinedAt: new Date().toISOString() });
+    setStudents(students);
+  }
+}
+
+function getStudentProgress(name) {
+  const p = getProgress();
+  if (!p[name]) p[name] = {};
+  return p[name];
+}
+
+function getModuleStatus(name, modId) {
+  const subs = getSubmissions();
+  const scores = getScores();
+  const key = `${name}_${modId}`;
+  if (scores[key] && scores[key].score !== undefined) return 'reviewed';
+  if (subs[key]) return 'submitted';
+  return 'pending';
+}
+
+// ═══════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════
+function setLoginTab(tab) {
+  document.querySelectorAll('.login-tab').forEach((t,i) => t.classList.toggle('active', (i===0&&tab==='student')||(i===1&&tab==='instructor')));
+  document.getElementById('form-student').classList.toggle('hidden', tab !== 'student');
+  document.getElementById('form-instructor').classList.toggle('hidden', tab !== 'instructor');
+}
+
+function loginStudent() {
+  const name = document.getElementById('inp-name').value.trim();
+  const code = document.getElementById('inp-code').value.trim().toUpperCase();
+  const err = document.getElementById('student-error');
+  err.style.display = 'none';
+  if (!name) { err.textContent = 'Introduce tu nombre.'; err.style.display = 'block'; return; }
+  if (code !== TALLER_CODE) { err.style.display = 'block'; return; }
+  STATE.user = { name, role: 'student' };
+  ensureStudent(name);
+  save(KEYS.session, STATE.user);
+  startApp();
+}
+
+function loginInstructor() {
+  const code = document.getElementById('inp-instructor-code').value.trim();
+  const err = document.getElementById('instructor-error');
+  err.style.display = 'none';
+  if (code !== INSTRUCTOR_CODE) { err.style.display = 'block'; return; }
+  STATE.user = { name: 'Samy Martín', role: 'instructor' };
+  save(KEYS.session, STATE.user);
+  startApp();
+}
+
+function logout() {
+  localStorage.removeItem(KEYS.session);
+  STATE.user = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('screen-login').style.display = 'flex';
+  document.getElementById('inp-name').value = '';
+  document.getElementById('inp-code').value = '';
+  document.getElementById('inp-instructor-code').value = '';
+}
+
+function startApp() {
+  document.getElementById('screen-login').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('topbar-user').textContent = STATE.user.name;
+  if (STATE.user.role === 'instructor') {
+    document.getElementById('btn-instructor-panel').style.display = 'block';
+  }
+  showDashboard();
+}
+
+// ═══════════════════════════════════════════════════
+// DASHBOARD
+// ═══════════════════════════════════════════════════
+function showDashboard() {
+  STATE.view = 'dashboard';
+  document.getElementById('module-nav').classList.add('hidden');
+  document.getElementById('screen-module').classList.add('hidden');
+  document.getElementById('screen-instructor').classList.add('hidden');
+  document.getElementById('screen-dashboard').classList.remove('hidden');
+
+  const isInstructor = STATE.user.role === 'instructor';
+  const name = STATE.user.name;
+  let completedCount = 0;
+  let submittedCount = 0;
+
+  if (!isInstructor) {
+    MODULES.forEach(m => {
+      const st = getModuleStatus(name, m.id);
+      if (st === 'reviewed') completedCount++;
+      if (st === 'submitted' || st === 'reviewed') submittedCount++;
+    });
+  }
+
+  const pct = isInstructor ? 100 : Math.round((completedCount / MODULES.length) * 100);
+  const students = getStudents();
+
+  const modCards = MODULES.map(m => {
+    const st = isInstructor ? 'instructor' : getModuleStatus(name, m.id);
+    let badge = '';
+    if (st === 'reviewed') badge = '<span class="mod-status mod-complete">✓ Completado</span>';
+    else if (st === 'submitted') badge = '<span class="mod-status mod-progress">⏳ Entregado</span>';
+    else badge = '<span class="mod-status mod-locked">Pendiente</span>';
+    return `<div class="mod-card" onclick="goModule(${m.id})">
+      <div class="mod-num">MÓDULO ${m.num}</div>
+      ${badge}
+      <div class="mod-name">${m.icon} ${m.title}</div>
+      <div class="mod-desc">${m.subtitle}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('screen-dashboard').innerHTML = `
+    <div class="dashboard-hero">
+      <div class="hero-title">${isInstructor ? 'PANEL GENERAL' : 'BIENVENIDO'}</div>
+      <div class="hero-sub">${isInstructor ? 'Vista de instructor — ' + students.length + ' alumnos registrados' : 'Build-It-Yourself — Taller IA para Clubes de Fútbol'}</div>
+      <div class="hero-meta">
+        ${!isInstructor ? `
+        <div class="hero-stat"><div><div class="stat-val">${completedCount}/${MODULES.length}</div><div class="stat-lbl">Módulos revisados</div></div></div>
+        <div class="hero-stat"><div><div class="stat-val">${submittedCount}</div><div class="stat-lbl">Tareas entregadas</div></div></div>
+        <div class="hero-stat"><div><div class="stat-val">${pct}%</div><div class="stat-lbl">Progreso</div></div></div>
+        ` : `
+        <div class="hero-stat"><div><div class="stat-val">${students.length}</div><div class="stat-lbl">Alumnos</div></div></div>
+        <div class="hero-stat"><div><div class="stat-val">${Object.keys(getSubmissions()).length}</div><div class="stat-lbl">Entregas totales</div></div></div>
+        `}
+      </div>
+      ${!isInstructor ? `<div class="progress-wrap" style="margin-top:1.25rem">
+        <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+      </div>` : ''}
+    </div>
+    <div class="module-cards">${modCards}</div>
+    ${isInstructor ? `<div style="text-align:center;margin-top:1.5rem">
+      <button class="btn-primary" style="width:auto;padding:.7rem 2rem" onclick="showInstructor()">Abrir Panel de Instructor →</button>
+    </div>` : ''}
+  `;
+}
+
+// ═══════════════════════════════════════════════════
+// MODULE VIEW
+// ═══════════════════════════════════════════════════
+function goModule(idx) {
+  STATE.module = idx;
+  STATE.view = 'module';
+  document.getElementById('screen-dashboard').classList.add('hidden');
+  document.getElementById('screen-instructor').classList.add('hidden');
+  document.getElementById('screen-module').classList.remove('hidden');
+  document.getElementById('module-nav').classList.remove('hidden');
+
+  document.querySelectorAll('.mod-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+
+  renderModule(idx);
+}
+
+function renderModule(idx) {
+  const m = MODULES[idx];
+  const name = STATE.user.name;
+  const isInstructor = STATE.user.role === 'instructor';
+  const status = isInstructor ? null : getModuleStatus(name, idx);
+
+  const resourcesHtml = m.resources.map(r => `
+    <a class="resource-link" href="${r.url}" target="_blank">
+      <span class="res-icon">${r.icon}</span> ${r.text}
+      <span class="res-type">${r.type}</span>
+    </a>`).join('');
+
+  const exerciseHtml = buildExercise(m, idx);
+  const taskHtml = buildTask(m, idx, status);
+  const commentsHtml = buildComments(idx);
+
+  document.getElementById('screen-module').innerHTML = `
+    <span class="section-label">Módulo ${m.num} de 04</span>
+    <h2 class="mod-heading">${m.icon} ${m.title}</h2>
+    <p class="mod-subtitle">${m.subtitle}</p>
+
+    <div class="card card-glow">
+      <span class="section-label">Contenido teórico</span>
+      <div class="theory-content">${m.theory}</div>
+    </div>
+
+    <div class="card">
+      <span class="section-label">Recursos</span>
+      <div class="resource-list">${resourcesHtml}</div>
+    </div>
+
+    <div class="card">
+      <span class="section-label">Ejercicio práctico</span>
+      ${exerciseHtml}
+    </div>
+
+    <div class="card">
+      <span class="section-label">Tarea entregable</span>
+      ${taskHtml}
+    </div>
+
+    <div class="card">
+      <span class="section-label">Foro del módulo</span>
+      ${commentsHtml}
+    </div>
+  `;
+
+  initExercise(m, idx);
+}
+
+// ═══════════════════════════════════════════════════
+// EXERCISES
+// ═══════════════════════════════════════════════════
+function buildExercise(m, idx) {
+  const ex = m.exercise;
+  if (ex.type === 'quiz') {
+    return `<div class="exercise-wrap" id="exercise-${idx}">
+      <div class="exercise-title">${ex.title}</div>
+      <div class="exercise-sub">${ex.subtitle}</div>
+      <div id="quiz-body-${idx}"></div>
+    </div>`;
+  }
+  if (ex.type === 'checklist') {
+    const items = ex.items.map((item, i) => `
+      <div class="check-item" id="chk-${idx}-${i}" onclick="toggleCheck(${idx},${i})">
+        <input type="checkbox" id="cb-${idx}-${i}" onclick="event.stopPropagation();toggleCheck(${idx},${i})">
+        <label>${item}</label>
+      </div>`).join('');
+    return `<div class="exercise-wrap" id="exercise-${idx}">
+      <div class="exercise-title">${ex.title}</div>
+      <div class="exercise-sub">${ex.subtitle}</div>
+      <div class="checklist">${items}</div>
+      <div id="checklist-feedback-${idx}"></div>
+    </div>`;
+  }
+  if (ex.type === 'prompt-builder') {
+    const fields = ex.fields.map(f => {
+      if (f.type === 'select') {
+        const opts = f.options.map(o => `<option value="${o}">${o}</option>`).join('');
+        return `<div class="pb-field"><div class="pb-label">${f.label}</div><select class="pb-select" id="pb-${f.id}" onchange="buildPrompt(${idx})">${opts}</select></div>`;
+      }
+      return `<div class="pb-field"><div class="pb-label">${f.label}</div><input class="pb-input" id="pb-${f.id}" placeholder="${f.label}" oninput="buildPrompt(${idx})"></div>`;
+    }).join('');
+    return `<div class="exercise-wrap" id="exercise-${idx}">
+      <div class="exercise-title">${ex.title}</div>
+      <div class="exercise-sub">${ex.subtitle}</div>
+      <div class="prompt-builder">
+        ${fields}
+        <div>
+          <div class="pb-label">Prompt generado</div>
+          <div class="prompt-output" id="prompt-output-${idx}">Configura los campos para generar tu prompt...</div>
+          <button class="btn-copy" id="btn-copy-${idx}" onclick="copyPrompt(${idx})" style="margin-top:.5rem">📋 Copiar prompt</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return '';
+}
+
+let quizState = {};
+
+function initExercise(m, idx) {
+  const ex = m.exercise;
+  if (ex.type === 'quiz') {
+    quizState[idx] = { current: 0, score: 0, done: false };
+    renderQuizQuestion(m, idx);
+  }
+  if (ex.type === 'prompt-builder') {
+    buildPrompt(idx);
+  }
+}
+
+function renderQuizQuestion(m, idx) {
+  const ex = m.exercise;
+  const qs = quizState[idx];
+  const body = document.getElementById(`quiz-body-${idx}`);
+  if (!body) return;
+
+  if (qs.done || qs.current >= ex.questions.length) {
+    const pct = Math.round((qs.score / ex.questions.length) * 100);
+    body.innerHTML = `<div class="feedback-msg ok">
+      ✅ Ejercicio completado — ${qs.score}/${ex.questions.length} respuestas correctas (${pct}%)
+    </div>
+    <button class="btn-reset" onclick="resetQuiz(${idx})">Reiniciar</button>`;
+    return;
+  }
+
+  const q = ex.questions[qs.current];
+  const opts = q.options.map((opt, i) => {
+    const keys = ['A', 'B', 'C', 'D'];
+    return `<div class="quiz-opt" onclick="answerQuiz(${idx},${i})" id="opt-${idx}-${i}">
+      <span class="opt-key">${keys[i]}</span> ${opt}
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div style="font-size:.75rem;color:var(--grey2);margin-bottom:.75rem;font-family:var(--mono)">Pregunta ${qs.current + 1} de ${ex.questions.length}</div>
+    <div style="color:var(--white);font-weight:500;margin-bottom:.75rem;line-height:1.5">${q.q}</div>
+    <div class="quiz-options">${opts}</div>
+    <div id="quiz-feedback-${idx}"></div>
+  `;
+}
+
+function answerQuiz(idx, optIdx) {
+  const m = MODULES[idx];
+  const ex = m.exercise;
+  const qs = quizState[idx];
+  const q = ex.questions[qs.current];
+  const isCorrect = optIdx === q.correct;
+
+  document.querySelectorAll(`[id^="opt-${idx}-"]`).forEach(el => el.classList.add('disabled'));
+  document.getElementById(`opt-${idx}-${optIdx}`).classList.add(isCorrect ? 'correct' : 'wrong');
+  if (!isCorrect) document.getElementById(`opt-${idx}-${q.correct}`).classList.add('correct');
+
+  if (isCorrect) qs.score++;
+
+  const fb = document.getElementById(`quiz-feedback-${idx}`);
+  fb.innerHTML = `<div class="feedback-msg ${isCorrect ? 'ok' : 'fail'}">
+    ${isCorrect ? '✅ Correcto!' : '❌ Incorrecto.'} ${q.explanation}
+  </div>
+  <button class="btn-check" onclick="nextQuizQuestion(${idx})">
+    ${qs.current + 1 < ex.questions.length ? 'Siguiente →' : 'Ver resultado'}
+  </button>`;
+}
+
+function nextQuizQuestion(idx) {
+  quizState[idx].current++;
+  if (quizState[idx].current >= MODULES[idx].exercise.questions.length) {
+    quizState[idx].done = true;
+  }
+  renderQuizQuestion(MODULES[idx], idx);
+}
+
+function resetQuiz(idx) {
+  quizState[idx] = { current: 0, score: 0, done: false };
+  renderQuizQuestion(MODULES[idx], idx);
+}
+
+let checkState = {};
+
+function toggleCheck(modIdx, itemIdx) {
+  const key = `${modIdx}`;
+  if (!checkState[key]) checkState[key] = {};
+  checkState[key][itemIdx] = !checkState[key][itemIdx];
+  const el = document.getElementById(`chk-${modIdx}-${itemIdx}`);
+  const cb = document.getElementById(`cb-${modIdx}-${itemIdx}`);
+  if (el) el.classList.toggle('done', !!checkState[key][itemIdx]);
+  if (cb) cb.checked = !!checkState[key][itemIdx];
+
+  const total = MODULES[modIdx].exercise.items.length;
+  const done = Object.values(checkState[key]).filter(Boolean).length;
+  const fb = document.getElementById(`checklist-feedback-${modIdx}`);
+  if (fb) {
+    if (done === total) {
+      fb.innerHTML = `<div class="feedback-msg ok" style="margin-top:.75rem">✅ ¡Completado! Has marcado todos los pasos.</div>`;
+    } else {
+      fb.innerHTML = `<div style="font-size:.8rem;color:var(--grey2);margin-top:.5rem;font-family:var(--mono)">${done}/${total} pasos completados</div>`;
+    }
+  }
+}
+
+function buildPrompt(idx) {
+  const m = MODULES[idx];
+  const ex = m.exercise;
+  const vals = {};
+  ex.fields.forEach(f => {
+    const el = document.getElementById(`pb-${f.id}`);
+    if (el) vals[f.id] = el.value;
+  });
+
+  const prompt = `Eres un experto desarrollador web. Necesito que generes una aplicación web completa en un solo archivo HTML (con CSS y JavaScript incluidos, sin dependencias externas salvo Google Fonts).
+
+TIPO DE APP: ${vals['app-type'] || 'App de gestión deportiva'}
+USUARIOS: ${vals['users'] || 'Entrenador'}
+FUENTE DE DATOS: ${vals['data'] || 'localStorage'}
+ESTILO VISUAL: ${vals['style'] || 'Dark mode profesional'}
+
+REQUISITOS TÉCNICOS:
+- Vanilla HTML/CSS/JS (sin frameworks ni librerías)
+- Responsive y mobile-first
+- Datos persistidos en localStorage (o conectado a Google Sheets si se especificó)
+- Paleta dark: fondo #0a0a0a, acento verde #4caf50, texto #cccccc
+- Tipografía: DM Sans (cuerpo) via Google Fonts
+
+FUNCIONALIDADES CORE:
+1. Vista principal con listado/dashboard
+2. Formulario para añadir/editar registros
+3. Búsqueda y filtrado básico
+4. Persistencia de datos
+
+CONTEXTO DE NEGOCIO:
+Soy entrenador/gestor de un club de fútbol en España. La app debe ser intuitiva para usar desde el móvil durante los entrenamientos.
+
+Genera el código completo listo para copiar y usar. Incluye datos de ejemplo para demostración.`;
+
+  const output = document.getElementById(`prompt-output-${idx}`);
+  if (output) output.textContent = prompt;
+}
+
+function copyPrompt(idx) {
+  const output = document.getElementById(`prompt-output-${idx}`);
+  if (!output) return;
+  navigator.clipboard.writeText(output.textContent).then(() => {
+    const btn = document.getElementById(`btn-copy-${idx}`);
+    if (btn) { btn.classList.add('copied'); btn.textContent = '✅ Copiado!'; setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '📋 Copiar prompt'; }, 2000); }
+  });
+}
+
+// ═══════════════════════════════════════════════════
+// TASKS
+// ═══════════════════════════════════════════════════
+function buildTask(m, idx, status) {
+  const name = STATE.user.name;
+  const key = `${name}_${idx}`;
+  const subs = getSubmissions();
+  const scores = getScores();
+  const sub = subs[key];
+  const score = scores[key];
+
+  const criteria = m.task.criteria.map(c => `<div class="criteria-item">${c}</div>`).join('');
+  let inputHtml = '';
+  if (m.task.type === 'url') {
+    inputHtml = `<input class="task-url" id="task-input-${idx}" placeholder="${m.task.placeholder}" value="${sub ? sub.content : ''}">`;
+  } else {
+    inputHtml = `<textarea class="task-textarea" id="task-input-${idx}" placeholder="${m.task.placeholder}">${sub ? sub.content : ''}</textarea>`;
+  }
+
+  const statusBadge = status === 'pending'
+    ? '<span class="task-status status-pending">⏳ Pendiente</span>'
+    : status === 'submitted'
+    ? '<span class="task-status status-submitted">📤 Entregada</span>'
+    : '<span class="task-status status-reviewed">✅ Revisada</span>';
+
+  const feedbackHtml = score ? `<div class="task-feedback">
+    <div class="flex items-center gap-2">
+      <div><div class="score">${score.score}<span style="font-size:1rem;color:var(--grey2)">/10</span></div><div class="score-label">Puntuación</div></div>
+    </div>
+    ${score.comment ? `<div class="comment">💬 ${score.comment}</div>` : ''}
+  </div>` : '';
+
+  const submitBtn = STATE.user.role !== 'instructor'
+    ? `<button class="btn-submit" onclick="submitTask(${idx})" ${status === 'reviewed' ? 'disabled' : ''}>
+        ${status === 'pending' ? '📤 Entregar tarea' : status === 'submitted' ? '🔄 Actualizar entrega' : '✅ Revisada por instructor'}
+      </button>` : '';
+
+  return `<div class="task-box">
+    <div class="task-header">
+      <h3>${m.task.title}</h3>
+      ${statusBadge}
+    </div>
+    <div class="task-body">
+      <div class="task-desc">${m.task.desc}</div>
+      <div class="criteria-list">${criteria}</div>
+      ${STATE.user.role !== 'instructor' ? inputHtml : (sub ? `<div class="eval-submission">${sub.content}</div>` : '<p style="color:var(--grey2);font-size:.85rem">Sin entregas aún.</p>')}
+      ${submitBtn}
+      ${feedbackHtml}
+    </div>
+  </div>`;
+}
+
+function submitTask(idx) {
+  const name = STATE.user.name;
+  const key = `${name}_${idx}`;
+  const el = document.getElementById(`task-input-${idx}`);
+  if (!el || !el.value.trim()) { showToast('Escribe o pega tu entrega antes de enviar.'); return; }
+  const subs = getSubmissions();
+  subs[key] = { content: el.value.trim(), submittedAt: new Date().toISOString() };
+  setSubmissions(subs);
+  showToast('✅ Tarea entregada correctamente.');
+  renderModule(idx);
+}
+
+// ═══════════════════════════════════════════════════
+// COMMENTS
+// ═══════════════════════════════════════════════════
+function buildComments(idx) {
+  const comments = getComments();
+  const modComments = comments[idx] || [];
+  const isInstructor = STATE.user.role === 'instructor';
+
+  const commentsList = modComments.length === 0
+    ? '<div class="empty-state" style="padding:1.5rem"><div class="empty-icon">💬</div><p>Sé el primero en comentar.</p></div>'
+    : modComments.map((c, ci) => {
+        const replies = (c.replies || []).map(r => `
+          <div class="reply-item">
+            <span class="reply-author">${r.author}</span>
+            <span>${r.text}</span>
+          </div>`).join('');
+        return `<div class="comment-item ${c.role === 'instructor' ? 'instructor-comment' : ''}">
+          <div class="comment-meta">
+            <span class="comment-author">${c.author}</span>
+            <span class="comment-role ${c.role === 'instructor' ? 'role-instructor' : 'role-student'}">${c.role === 'instructor' ? 'Instructor' : 'Alumno'}</span>
+            <span class="comment-time">${formatTime(c.ts)}</span>
+          </div>
+          <div class="comment-text">${c.text}</div>
+          ${replies ? `<div class="reply-list">${replies}</div>` : ''}
+          ${isInstructor ? `<button class="reply-toggle" onclick="showReplyForm(${idx},${ci})">↩ Responder</button>
+          <div id="reply-form-${idx}-${ci}" class="hidden" style="margin-top:.5rem">
+            <textarea class="comment-input" id="reply-input-${idx}-${ci}" rows="2" placeholder="Tu respuesta..."></textarea>
+            <button class="btn-comment" onclick="submitReply(${idx},${ci})">Enviar respuesta</button>
+          </div>` : ''}
+        </div>`;
+      }).join('');
+
+  return `<div class="comments-section">
+    <div class="comment-list">${commentsList}</div>
+    <div class="comment-form">
+      <textarea class="comment-input" id="comment-input-${idx}" rows="2" placeholder="Escribe tu comentario o pregunta..."></textarea>
+      <button class="btn-comment" onclick="submitComment(${idx})">Enviar comentario</button>
+    </div>
+  </div>`;
+}
+
+function submitComment(idx) {
+  const el = document.getElementById(`comment-input-${idx}`);
+  if (!el || !el.value.trim()) return;
+  const comments = getComments();
+  if (!comments[idx]) comments[idx] = [];
+  comments[idx].push({
+    author: STATE.user.name,
+    role: STATE.user.role,
+    text: el.value.trim(),
+    ts: Date.now(),
+    replies: []
+  });
+  setComments(comments);
+  showToast('Comentario enviado.');
+  renderModule(idx);
+}
+
+function showReplyForm(idx, ci) {
+  const el = document.getElementById(`reply-form-${idx}-${ci}`);
+  if (el) el.classList.toggle('hidden');
+}
+
+function submitReply(idx, ci) {
+  const el = document.getElementById(`reply-input-${idx}-${ci}`);
+  if (!el || !el.value.trim()) return;
+  const comments = getComments();
+  if (!comments[idx] || !comments[idx][ci]) return;
+  if (!comments[idx][ci].replies) comments[idx][ci].replies = [];
+  comments[idx][ci].replies.push({ author: STATE.user.name, text: el.value.trim() });
+  setComments(comments);
+  showToast('Respuesta enviada.');
+  renderModule(idx);
+}
+
+// ═══════════════════════════════════════════════════
+// INSTRUCTOR PANEL
+// ═══════════════════════════════════════════════════
+function showInstructor() {
+  STATE.view = 'instructor';
+  document.getElementById('screen-dashboard').classList.add('hidden');
+  document.getElementById('screen-module').classList.add('hidden');
+  document.getElementById('module-nav').classList.add('hidden');
+  document.getElementById('screen-instructor').classList.remove('hidden');
+  renderInstructor('students');
+}
+
+let instrTab = 'students';
+
+function renderInstructor(tab) {
+  instrTab = tab;
+  const students = getStudents();
+  const subs = getSubmissions();
+  const scores = getScores();
+
+  const tabs = `<div class="panel-tabs">
+    <div class="panel-tab ${tab==='students'?'active':''}" onclick="renderInstructor('students')">👥 Alumnos</div>
+    <div class="panel-tab ${tab==='tasks'?'active':''}" onclick="renderInstructor('tasks')">📝 Evaluaciones</div>
+  </div>`;
+
+  let body = '';
+
+  if (tab === 'students') {
+    if (students.length === 0) {
+      body = `<div class="empty-state"><div class="empty-icon">👥</div><p>Ningún alumno registrado todavía.</p></div>`;
+    } else {
+      body = students.map(st => {
+        const pills = MODULES.map(m => {
+          const st2 = getModuleStatus(st.name, m.id);
+          return `<span class="mod-pill ${st2==='reviewed'?'done':st2==='submitted'?'submitted':''}">${m.num} ${st2==='reviewed'?'✓':st2==='submitted'?'↑':'·'}</span>`;
+        }).join('');
+        return `<div class="student-row">
+          <div class="flex justify-between items-center">
+            <div><div class="student-name">${st.name}</div><div class="student-code">Desde ${formatDate(st.joinedAt)}</div></div>
+          </div>
+          <div class="mod-pills">${pills}</div>
+        </div>`;
+      }).join('');
+    }
+  }
+
+  if (tab === 'tasks') {
+    const pending = [];
+    students.forEach(st => {
+      MODULES.forEach(m => {
+        const key = `${st.name}_${m.id}`;
+        if (subs[key]) {
+          const sc = scores[key];
+          pending.push({ student: st.name, mod: m, key, sub: subs[key], score: sc });
+        }
+      });
+    });
+
+    if (pending.length === 0) {
+      body = `<div class="empty-state"><div class="empty-icon">📝</div><p>No hay entregas pendientes de evaluación.</p></div>`;
+    } else {
+      body = pending.map(({ student, mod, key, sub, score }) => `
+        <div class="eval-card" id="eval-${key}">
+          <div class="eval-card-header">
+            <div>
+              <div class="eval-student">${student}</div>
+              <div class="eval-module">Módulo ${mod.num} — ${mod.title}</div>
+            </div>
+            ${score ? `<span class="task-status status-reviewed">✅ Evaluado: ${score.score}/10</span>` : '<span class="task-status status-submitted">📤 Pendiente</span>'}
+          </div>
+          <div class="eval-submission">${sub.content}</div>
+          <div class="score-input-wrap">
+            <span class="score-label-sm">Nota (1-10):</span>
+            <input class="score-input" type="number" min="1" max="10" id="score-${key}" value="${score ? score.score : ''}" placeholder="—">
+          </div>
+          <textarea class="comment-eval" id="comment-${key}" rows="2" placeholder="Comentario al alumno (opcional)...">${score ? (score.comment || '') : ''}</textarea>
+          <button class="btn-eval" onclick="saveEval('${key}')">💾 Guardar evaluación</button>
+        </div>`).join('');
+    }
+  }
+
+  document.getElementById('screen-instructor').innerHTML = `
+    <span class="section-label">Panel de instructor</span>
+    <h2 class="mod-heading">📊 PANEL INSTRUCTOR</h2>
+    <p class="mod-subtitle" style="margin-bottom:1.5rem">Gestión de alumnos, progreso y evaluaciones</p>
+    ${tabs}
+    ${body}
+  `;
+}
+
+function saveEval(key) {
+  const scoreEl = document.getElementById(`score-${key}`);
+  const commentEl = document.getElementById(`comment-${key}`);
+  const score = parseInt(scoreEl?.value);
+  if (!scoreEl || isNaN(score) || score < 1 || score > 10) { showToast('Introduce una nota entre 1 y 10.'); return; }
+  const scores = getScores();
+  scores[key] = { score, comment: commentEl?.value.trim() || '', evaluatedAt: new Date().toISOString() };
+  setScores(scores);
+  showToast(`✅ Evaluación guardada — ${score}/10`);
+  renderInstructor(instrTab);
+}
+
+// ═══════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+function formatTime(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// ═══════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════
+(function init() {
+  const session = load(KEYS.session);
+  if (session && session.name && session.role) {
+    STATE.user = session;
+    startApp();
+  }
+})();
+</script>
+</body>
+</html>

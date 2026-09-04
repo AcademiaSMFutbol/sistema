@@ -1162,30 +1162,7 @@ function guardarCliente(id) {
 function alumnos() {
   document.getElementById('topbar-actions').innerHTML = '';
   topbarBtn('+ Nuevo alumno', () => modalAlumno());
-  topbarBtn('↓ Exportar PDF', () => {
-    const all = DB.alumnos;
-    const fut = all.filter(a=>esFutbol(a.LINEA||'')); const ext = all.filter(a=>esExtraescolar(a.LINEA||''));
-    const kHtml = `<div class="kpis">
-      <div class="kpi"><div class="kpi-n">${all.length}</div><div class="kpi-l">Total alumnos</div></div>
-      <div class="kpi"><div class="kpi-n">${all.filter(a=>String(a.ACTIVO||'S').toUpperCase().startsWith('S')).length}</div><div class="kpi-l">Activos</div></div>
-      <div class="kpi"><div class="kpi-n">${fut.length}</div><div class="kpi-l">SM Fútbol</div></div>
-      <div class="kpi"><div class="kpi-n">${ext.length}</div><div class="kpi-l">Extraescolares</div></div>
-    </div>`;
-    const fila = a => { const c=DB.clientes.find(x=>String(x.ID_CLIENTE)===String(a.ID_CLIENTE)); return `<tr>
-      <td><strong>${esc(a.NOMBRE||'')} ${esc(a.APELLIDOS||'')}</strong></td>
-      <td>${esc(a.CURSO||'—')}</td><td>${fmtFecha(a.FECHA_NAC)}</td>
-      <td>${c?esc(c.NOMBRE+' '+(c.APELLIDOS||'')):'—'}</td>
-      <td>${esc(a.CENTRO||'—')}</td>
-      <td><span class="badge ${String(a.ACTIVO||'S').toUpperCase().startsWith('S')?'bg':'br'}">${String(a.ACTIVO||'S').toUpperCase().startsWith('S')?'Activo':'Inactivo'}</span></td>
-    </tr>`; };
-    const thd = '<thead><tr><th>Nombre</th><th>Curso</th><th>Fecha nac.</th><th>Cliente</th><th>Centro</th><th>Estado</th></tr></thead>';
-    let body = '';
-    if(fut.length) body += `<div class="section-title">⚽ SM Fútbol (${fut.length})</div><table>${thd}<tbody>${fut.map(fila).join('')}</tbody></table>`;
-    if(ext.length) body += `<div class="section-title">🎨 SM Extraescolares (${ext.length})</div><table>${thd}<tbody>${ext.map(fila).join('')}</tbody></table>`;
-    const sinL = all.filter(a=>!esFutbol(a.LINEA||'')&&!esExtraescolar(a.LINEA||''));
-    if(sinL.length) body += `<div class="section-title">Sin categoría (${sinL.length})</div><table>${thd}<tbody>${sinL.map(fila).join('')}</tbody></table>`;
-    exportarPDF('Registro de alumnos', kHtml + body);
-  }, 'btn-secondary');
+  topbarBtn('↓ Exportar PDF', () => modalExportarAlumnosPDF(), 'btn-secondary');
 
   const futbol = DB.alumnos.filter(a => esFutbol(a.LINEA||''));
   const extra  = DB.alumnos.filter(a => esExtraescolar(a.LINEA||''));
@@ -1328,6 +1305,74 @@ function guardarAlumno(id) {
       loadAllData().then(alumnos);
     })
     .catch(err => showToast('Error: ' + err.message, 'error'));
+}
+
+function modalExportarAlumnosPDF() {
+  const cursos = ['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO'];
+  const opsAct = '<option value="">Todas las actividades</option>'
+    + DB.actividades.map(a => `<option value="${a.ID}">${esc(a.NOMBRE)}</option>`).join('');
+  const opsCurso = '<option value="">Todos los cursos</option>'
+    + cursos.map(c => `<option value="${c}">${c}</option>`).join('');
+  openModal('Filtrar listado de alumnos', `
+    <div class="form-grid">
+      <div class="field"><label>Línea</label>
+        <select id="exp-linea">
+          <option value="">Todas las líneas</option>
+          <option value="FUTBOL">⚽ SM Fútbol</option>
+          <option value="EXTRAESCOLARES">🎒 Extraescolares</option>
+        </select></div>
+      <div class="field"><label>Estado</label>
+        <select id="exp-est">
+          <option value="activos">Solo activos</option>
+          <option value="todos">Todos</option>
+        </select></div>
+      <div class="field"><label>Curso</label><select id="exp-curso">${opsCurso}</select></div>
+      <div class="field"><label>Actividad inscrita</label><select id="exp-act">${opsAct}</select></div>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="ejecutarExportarAlumnosPDF()">↓ Exportar PDF</button>`
+  );
+}
+
+function ejecutarExportarAlumnosPDF() {
+  const linea  = document.getElementById('exp-linea').value;
+  const curso  = document.getElementById('exp-curso').value;
+  const actId  = document.getElementById('exp-act').value;
+  const soloAct = document.getElementById('exp-est').value === 'activos';
+
+  let lista = DB.alumnos;
+  if (soloAct) lista = lista.filter(a => String(a.ACTIVO||'').toUpperCase().startsWith('S'));
+  if (linea === 'FUTBOL') lista = lista.filter(a => esFutbol(a.LINEA||''));
+  else if (linea === 'EXTRAESCOLARES') lista = lista.filter(a => esExtraescolar(a.LINEA||''));
+  if (curso) lista = lista.filter(a => a.CURSO === curso);
+  if (actId) {
+    const ids = new Set(
+      DB.inscripciones
+        .filter(i => String(i.ID_ACTIVIDAD) === actId && String(i.ESTADO||'').toUpperCase() === 'ACTIVA')
+        .map(i => String(i.ID_ALUMNO))
+    );
+    lista = lista.filter(a => ids.has(String(a.ID_ALUMNO)));
+  }
+
+  const actNombre = actId ? (DB.actividades.find(a => String(a.ID) === actId)?.NOMBRE || '') : '';
+  const titulo    = 'Alumnos' + (linea ? (linea === 'FUTBOL' ? ' — SM Fútbol' : ' — Extraescolares') : '')
+                  + (actNombre ? ' — ' + actNombre : '') + (curso ? ' — ' + curso : '');
+  const kHtml = `<div class="kpis"><div class="kpi"><div class="kpi-n">${lista.length}</div><div class="kpi-l">Alumnos</div></div></div>`;
+  const thd   = '<thead><tr><th>Nombre</th><th>Curso</th><th>Fecha nac.</th><th>Tutor</th><th>Centro</th><th>Estado</th></tr></thead>';
+  const fila  = a => {
+    const c = DB.clientes.find(x => String(x.ID_CLIENTE) === String(a.ID_CLIENTE));
+    return `<tr>
+      <td><strong>${esc(a.NOMBRE||'')} ${esc(a.APELLIDOS||'')}</strong></td>
+      <td>${esc(a.CURSO||'—')}</td><td>${fmtFecha(a.FECHA_NAC)}</td>
+      <td>${c ? esc(c.NOMBRE+' '+(c.APELLIDOS||'')) : '—'}</td>
+      <td>${esc(a.CENTRO||'—')}</td>
+      <td><span class="badge ${String(a.ACTIVO||'S').toUpperCase().startsWith('S')?'bg':'br'}">${String(a.ACTIVO||'S').toUpperCase().startsWith('S')?'Activo':'Inactivo'}</span></td>
+    </tr>`;
+  };
+
+  if (!lista.length) { showToast('Sin alumnos con ese filtro','error'); return; }
+  closeModal();
+  exportarPDF(titulo, kHtml + `<table>${thd}<tbody>${lista.map(fila).join('')}</tbody></table>`);
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -1987,7 +2032,7 @@ function modalRegistroCompleto() {
     + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="rc-cli-modo" value="existente" checked onchange="onRcCliModo()"> Cliente existente</label>'
     + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="rc-cli-modo" value="nuevo" onchange="onRcCliModo()"> Nuevo cliente</label>'
     + '</div>'
-    + '<div id="rc-cli-existente"><select id="rc-cli-sel" style="width:100%"><option value="">— Selecciona cliente —</option>' + opsCli + '</select></div>'
+    + '<div id="rc-cli-existente"><select id="rc-cli-sel" style="width:100%" onchange="onRcCliChange()"><option value="">— Selecciona cliente —</option>' + opsCli + '</select></div>'
     + '<div id="rc-cli-nuevo" style="display:none"><div class="form-grid">'
     + '<div class="field"><label>Nombre <span class="req">*</span></label><input id="rc-cn-nombre" class="upper" placeholder="Nombre"></div>'
     + '<div class="field"><label>Apellidos</label><input id="rc-cn-apellidos" class="upper" placeholder="Apellidos"></div>'
@@ -1995,8 +2040,8 @@ function modalRegistroCompleto() {
     + '<div class="field"><label>Teléfono</label><input id="rc-cn-tel" type="tel" placeholder="600 000 000"></div>'
     + '</div></div></div>'
     + '<div><div style="font-size:13px;font-weight:700;border-bottom:2px solid var(--green);padding-bottom:6px;margin-bottom:12px">🎒 Alumnos e inscripciones</div>'
-    + '<div id="rc-alumnos-cont"></div>'
-    + '<button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:16px" onclick="addAluCard()">+ Añadir otro alumno</button></div>'
+    + '<div id="rc-alumnos-cont"><p style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">Selecciona un cliente para continuar</p></div>'
+    + '<button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:16px" onclick="addAluCard()">+ Añadir alumno nuevo</button></div>'
     + '<div style="border-top:1px solid var(--border);padding-top:14px">'
     + '<div style="font-size:13px;font-weight:700;margin-bottom:10px">💳 Condiciones de pago</div>'
     + '<div class="form-grid">'
@@ -2011,13 +2056,82 @@ function modalRegistroCompleto() {
     '<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>'
     + '<button class="btn btn-primary" id="rc-save-btn" onclick="guardarRegistroCompleto()">Guardar todo</button>'
   );
-  addAluCard();
 }
 
 function onRcCliModo() {
   const modo = document.querySelector('input[name="rc-cli-modo"]:checked')?.value;
   document.getElementById('rc-cli-existente').style.display = modo === 'existente' ? '' : 'none';
   document.getElementById('rc-cli-nuevo').style.display    = modo === 'nuevo'      ? '' : 'none';
+  const cont = document.getElementById('rc-alumnos-cont');
+  if (!cont) return;
+  if (modo === 'nuevo') {
+    cont.innerHTML = '';
+    _rcAluCount = 0; _rcActCount = {};
+    addAluCard();
+  } else {
+    const selVal = document.getElementById('rc-cli-sel')?.value;
+    if (selVal) { onRcCliChange(); } else {
+      cont.innerHTML = '<p style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">Selecciona un cliente para continuar</p>';
+    }
+  }
+}
+
+function onRcCliChange() {
+  const cliId = document.getElementById('rc-cli-sel')?.value;
+  const cont  = document.getElementById('rc-alumnos-cont');
+  if (!cont) return;
+  cont.innerHTML = '';
+  _rcAluCount = 0; _rcActCount = {};
+  if (!cliId) {
+    cont.innerHTML = '<p style="font-size:13px;color:var(--text3);text-align:center;padding:16px 0">Selecciona un cliente para continuar</p>';
+    return;
+  }
+  const existentes = DB.alumnos.filter(a => String(a.ID_CLIENTE) === String(cliId) && String(a.ACTIVO||'').toUpperCase().startsWith('S'));
+  if (existentes.length) {
+    cont.insertAdjacentHTML('beforeend',
+      '<div id="rc-alu-chips" style="margin-bottom:12px">'
+      + '<div style="font-size:12px;font-weight:600;color:var(--text3);margin-bottom:8px">Alumnos de esta familia — haz clic para inscribir:</div>'
+      + '<div style="display:flex;flex-wrap:wrap;gap:8px">'
+      + existentes.map(a =>
+          '<button type="button" onclick="toggleAluExistente(\'' + a.ID_ALUMNO + '\',\'' + esc((a.NOMBRE+' '+(a.APELLIDOS||'')).trim()) + '\')" '
+          + 'id="chip-alu-' + a.ID_ALUMNO + '" '
+          + 'style="padding:6px 14px;border:1.5px solid var(--border2);border-radius:20px;background:var(--bg2);cursor:pointer;font-size:12px;transition:all .15s">'
+          + esc((a.NOMBRE + ' ' + (a.APELLIDOS||'')).trim()) + '</button>'
+        ).join('')
+      + '</div></div>'
+    );
+  }
+}
+
+function _aluCardExistenteHtml(idx, aluId, nombre) {
+  return '<div class="alu-card" data-alu="' + idx + '" data-alu-existing="' + aluId + '" style="border:1.5px solid var(--green);border-radius:10px;padding:14px;margin-bottom:12px;position:relative">'
+    + '<input type="hidden" class="alu-id-existente" value="' + aluId + '">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'
+    + '<div style="font-size:14px;font-weight:700">' + esc(nombre) + '</div>'
+    + '<span class="badge badge-green" style="font-size:10px">alumno existente</span>'
+    + '</div>'
+    + '<div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--text2)">Actividades a inscribir</div>'
+    + '<div class="rc-act-list" data-alu="' + idx + '"></div>'
+    + '<button type="button" class="btn btn-secondary" style="width:100%;margin-top:4px;font-size:12px" onclick="addRcAct(' + idx + ')">+ Añadir actividad</button>'
+    + '<div class="rc-bono-warn" data-alu="' + idx + '" style="display:none;margin-top:8px;padding:8px 12px;background:#fff8e1;border:1px solid #ffc107;border-radius:6px;font-size:12px;color:#7d6608">'
+    + '⚠️ Bono + recogida detectados. Para facturación se usará el precio del bono.</div>'
+    + '</div>';
+}
+
+function toggleAluExistente(aluId, nombre) {
+  const chip    = document.getElementById('chip-alu-' + aluId);
+  const existing = document.querySelector('.alu-card[data-alu-existing="' + aluId + '"]');
+  if (existing) {
+    existing.remove();
+    if (chip) { chip.style.background = 'var(--bg2)'; chip.style.borderColor = 'var(--border2)'; }
+    return;
+  }
+  const cont = document.getElementById('rc-alumnos-cont');
+  if (!cont) return;
+  const idx = _rcAluCount++;
+  cont.insertAdjacentHTML('beforeend', _aluCardExistenteHtml(idx, aluId, nombre));
+  if (chip) { chip.style.background = '#e8f5e9'; chip.style.borderColor = 'var(--green)'; }
+  addRcAct(idx);
 }
 
 function addAluCard() {
@@ -2130,32 +2244,43 @@ async function guardarRegistroCompleto() {
     let totalIns = 0;
 
     for (const card of aluCards) {
-      const nombre    = card.querySelector('.alu-nombre')?.value.trim();
-      const apellidos = card.querySelector('.alu-apellidos')?.value.trim() || '';
-      const linea     = card.querySelector('.alu-linea')?.value;
-      if (!nombre) throw new Error('El nombre del alumno es obligatorio');
-      if (!linea)  throw new Error('Selecciona la línea para el alumno ' + nombre);
+      const existingAluId = card.querySelector('.alu-id-existente')?.value;
+      let aluId;
 
-      await writeToSheet('ALUMNOS', {
-        NOMBRE:          nombre,
-        APELLIDOS:       apellidos,
-        LINEA:           linea,
-        CENTRO:          esExtraescolar(linea) ? (card.querySelector('.alu-centro')?.value.trim() || '') : '',
-        FECHA_NAC:       card.querySelector('.alu-fnac')?.value || '',
-        CURSO:           card.querySelector('.alu-curso')?.value || '',
-        ID_CLIENTE:      cliId,
-        'CESIÓN_IMAGEN': card.querySelector('.alu-img')?.value || 'SÍ',
-        ACTIVO:          'SÍ',
-      }, null);
-      await loadAllData();
+      if (existingAluId) {
+        aluId = existingAluId;
+      } else {
+        const nombre    = card.querySelector('.alu-nombre')?.value.trim();
+        const apellidos = card.querySelector('.alu-apellidos')?.value.trim() || '';
+        const linea     = card.querySelector('.alu-linea')?.value;
+        if (!nombre) throw new Error('El nombre del alumno es obligatorio');
+        if (!linea)  throw new Error('Selecciona la línea para el alumno ' + nombre);
 
-      const fullName = (nombre + ' ' + apellidos).trim().toUpperCase();
-      const newAlu   = DB.alumnos.find(a =>
-        String(a.ID_CLIENTE) === String(cliId) &&
-        (a.NOMBRE + ' ' + (a.APELLIDOS||'')).trim().toUpperCase() === fullName
-      );
-      if (!newAlu) throw new Error('No se pudo recuperar el alumno creado: ' + nombre);
-      const aluId = newAlu.ID_ALUMNO;
+        await writeToSheet('ALUMNOS', {
+          NOMBRE:          nombre,
+          APELLIDOS:       apellidos,
+          LINEA:           linea,
+          CENTRO:          esExtraescolar(linea) ? (card.querySelector('.alu-centro')?.value.trim() || '') : '',
+          FECHA_NAC:       card.querySelector('.alu-fnac')?.value || '',
+          CURSO:           card.querySelector('.alu-curso')?.value || '',
+          ID_CLIENTE:      cliId,
+          'CESIÓN_IMAGEN': card.querySelector('.alu-img')?.value || 'SÍ',
+          ACTIVO:          'SÍ',
+        }, null);
+        await loadAllData();
+
+        const fullName = (nombre + ' ' + apellidos).trim().toUpperCase();
+        const newAlu   = DB.alumnos.find(a =>
+          String(a.ID_CLIENTE) === String(cliId) &&
+          (a.NOMBRE + ' ' + (a.APELLIDOS||'')).trim().toUpperCase() === fullName
+        );
+        if (!newAlu) throw new Error('No se pudo recuperar el alumno creado: ' + nombre);
+        aluId = newAlu.ID_ALUMNO;
+      }
+
+      const aluLinea = existingAluId
+        ? (DB.alumnos.find(a => String(a.ID_ALUMNO) === String(existingAluId))?.LINEA || '')
+        : (card.querySelector('.alu-linea')?.value || '');
 
       const insRows = [...card.querySelectorAll('.ins-act-entry')].map(entry => {
         const actId = entry.querySelector('.rc-act-sel')?.value;
@@ -2167,7 +2292,7 @@ async function guardarRegistroCompleto() {
         return {
           ID_ALUMNO:       aluId,
           ID_ACTIVIDAD:    actId,
-          LINEA:           act?.LINEA || linea,
+          LINEA:           act?.LINEA || aluLinea,
           DIAS_SEMANA:     act?.DIAS_SEMANA || '',
           GRUPO:           act?.NUM_GRUPOS ? String(act.NUM_GRUPOS) : '',
           HORARIO:         hIni && hFin ? hIni + '-' + hFin : hIni || hFin || '',
@@ -2180,7 +2305,7 @@ async function guardarRegistroCompleto() {
         };
       }).filter(Boolean);
 
-      if (!insRows.length) throw new Error('Añade al menos una actividad para ' + nombre);
+      if (!insRows.length) throw new Error('Añade al menos una actividad para el alumno seleccionado');
       for (const row of insRows) { await writeToSheet('INSCRIPCIONES', row, null); totalIns++; }
     }
 

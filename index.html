@@ -1245,7 +1245,7 @@ function modalAlumno(a) {
       <div class="field"><label>Curso escolar</label>
         <select id="a-curso">
           <option value="">— Selecciona —</option>
-          ${['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO']
+          ${['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO','AULA ENCLAVE']
             .map(c=>`<option value="${c}" ${a.CURSO===c?'selected':''}>${c}</option>`).join('')}
         </select></div>
       <div class="field span2"><label>Cliente (familia) <span class="req">*</span></label>
@@ -1308,7 +1308,7 @@ function guardarAlumno(id) {
 }
 
 function modalExportarAlumnosPDF() {
-  const cursos = ['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO'];
+  const cursos = ['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO','AULA ENCLAVE'];
   const opsAct = '<option value="">Todas las actividades</option>'
     + DB.actividades.map(a => `<option value="${a.ID}">${esc(a.NOMBRE)}</option>`).join('');
   const opsCurso = '<option value="">Todos los cursos</option>'
@@ -1628,7 +1628,7 @@ function confirmarPreinsc(id) {
       <div class="field"><label>Curso escolar</label>
         <select id="cp-curso">
           <option value="">— Selecciona —</option>
-          ${['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO']
+          ${['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO','AULA ENCLAVE']
             .map(c=>`<option value="${c}">${c}</option>`).join('')}
         </select></div>
     </div>`,
@@ -1995,7 +1995,7 @@ function _rcActEntryHtml(aluIdx, actIdx) {
 }
 
 function _aluCardHtml(aluIdx) {
-  const cursos = ['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO'];
+  const cursos = ['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO','AULA ENCLAVE'];
   const opsCursos = cursos.map(c => '<option value="' + c + '">' + c + '</option>').join('');
   return '<div class="alu-card" data-alu="' + aluIdx + '" style="border:1.5px solid var(--border2);border-radius:10px;padding:14px;margin-bottom:12px;position:relative">'
     + (aluIdx > 0 ? '<button type="button" onclick="quitarAluCard(' + aluIdx + ')" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--text3)" title="Eliminar alumno">×</button>' : '')

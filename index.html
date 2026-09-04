@@ -1023,6 +1023,35 @@ function dashboard() {
         </div>
       </div>
     </div>
+
+    ${(() => {
+      const porActividad = DB.actividades
+        .map(a => ({
+          nombre: a.NOMBRE,
+          linea:  a.LINEA || '',
+          n: DB.inscripciones.filter(i => String(i.ID_ACTIVIDAD) === String(a.ID) && String(i.ESTADO||'').toUpperCase() === 'ACTIVA').length,
+        }))
+        .filter(x => x.n > 0)
+        .sort((a, b) => b.n - a.n);
+      if (!porActividad.length) return '';
+      const maxN = porActividad[0].n || 1;
+      const filas = porActividad.map(x => {
+        const pct = Math.round((x.n / maxN) * 100);
+        const esF = esFutbol(x.linea);
+        return '<tr>'
+          + '<td style="max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(x.nombre) + '</td>'
+          + '<td>' + (esF ? '<span class="badge badge-green" style="font-size:10px">⚽</span>' : '<span class="badge badge-blue" style="font-size:10px">🎒</span>') + '</td>'
+          + '<td style="width:160px"><div style="background:var(--border);border-radius:4px;height:8px;overflow:hidden"><div style="background:' + (esF ? 'var(--green)' : 'var(--blue)') + ';width:' + pct + '%;height:100%;border-radius:4px"></div></div></td>'
+          + '<td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:700;padding-left:8px">' + x.n + '</td>'
+          + '</tr>';
+      }).join('');
+      return '<div class="card" style="margin-top:0">'
+        + '<div class="card-title">Inscritos por actividad <span style="font-size:11px;font-weight:400;color:var(--text3)">(inscripciones activas)</span></div>'
+        + '<div class="table-wrap"><table style="font-size:13px">'
+        + '<thead><tr><th>Actividad</th><th>Línea</th><th style="min-width:120px"></th><th style="text-align:right">Alumnos</th></tr></thead>'
+        + '<tbody>' + filas + '</tbody>'
+        + '</table></div></div>';
+    })()}
   `);
 }
 
@@ -1629,7 +1658,7 @@ function rechazarPreinsc(id) {
 // ══════════════════════════════════════════════════════════════════════════
 function inscripciones() {
   document.getElementById('topbar-actions').innerHTML = '';
-  topbarBtn('+ Nueva inscripción', () => modalInscripcion());
+  topbarBtn('+ Nueva inscripción', () => modalRegistroCompleto());
   topbarBtn('↓ Exportar PDF', () => {
     const all = DB.inscripciones;
     const act2 = all.filter(i=>String(i.ESTADO||'').toUpperCase()==='ACTIVA').length;
@@ -1896,6 +1925,274 @@ function toggleDescuentoIns() {
   const sel = document.getElementById('i-dto-sel')?.value;
   const wrap = document.getElementById('wrap-dto-custom');
   if (wrap) wrap.style.display = sel === 'custom' ? '' : 'none';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  REGISTRO COMPLETO: cliente + alumnos + inscripciones en un único modal
+// ══════════════════════════════════════════════════════════════════════════
+let _rcAluCount = 0;
+let _rcActCount = {};
+
+function _rcActEntryHtml(aluIdx, actIdx) {
+  const opsAct = DB.actividades
+    .filter(a => String(a.ACTIVA||'').toUpperCase().startsWith('S'))
+    .map(a => '<option value="' + a.ID + '">' + esc(a.NOMBRE) + '</option>').join('');
+  return '<div class="ins-act-entry" data-alu="' + aluIdx + '" data-act="' + actIdx + '" style="border:1px solid var(--border2);border-radius:8px;padding:10px;margin-bottom:6px;position:relative">'
+    + '<button type="button" onclick="quitarRcAct(' + aluIdx + ',' + actIdx + ')" style="position:absolute;top:6px;right:6px;background:none;border:none;cursor:pointer;font-size:16px;color:var(--text3)">×</button>'
+    + '<div style="display:grid;grid-template-columns:1fr 85px 85px;gap:8px;align-items:end;padding-right:24px">'
+    + '<div><label style="font-size:12px;font-weight:600">Actividad <span class="req">*</span></label>'
+    + '<select class="rc-act-sel" onchange="onRcActChange(' + aluIdx + ',' + actIdx + ')" style="width:100%">'
+    + '<option value="">— Selecciona —</option>' + opsAct + '</select></div>'
+    + '<div><label style="font-size:12px;font-weight:600">Inicio</label><input type="time" class="rc-hora-ini"></div>'
+    + '<div><label style="font-size:12px;font-weight:600">Fin</label><input type="time" class="rc-hora-fin"></div></div>'
+    + '<div class="rc-act-info" style="font-size:11px;color:var(--text3);margin-top:5px;min-height:14px"></div>'
+    + '</div>';
+}
+
+function _aluCardHtml(aluIdx) {
+  const cursos = ['INFANTIL 3 AÑOS','INFANTIL 4 AÑOS','INFANTIL 5 AÑOS','1º PRIMARIA','2º PRIMARIA','3º PRIMARIA','4º PRIMARIA','5º PRIMARIA','6º PRIMARIA','1º ESO','2º ESO','3º ESO','4º ESO'];
+  const opsCursos = cursos.map(c => '<option value="' + c + '">' + c + '</option>').join('');
+  return '<div class="alu-card" data-alu="' + aluIdx + '" style="border:1.5px solid var(--border2);border-radius:10px;padding:14px;margin-bottom:12px;position:relative">'
+    + (aluIdx > 0 ? '<button type="button" onclick="quitarAluCard(' + aluIdx + ')" style="position:absolute;top:10px;right:10px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--text3)" title="Eliminar alumno">×</button>' : '')
+    + '<div style="font-size:12px;font-weight:700;color:var(--green);margin-bottom:10px;text-transform:uppercase;letter-spacing:.5px">Alumno ' + (aluIdx + 1) + '</div>'
+    + '<div class="form-grid" style="margin-bottom:8px">'
+    + '<div class="field"><label>Nombre <span class="req">*</span></label><input class="upper alu-nombre" placeholder="Nombre"></div>'
+    + '<div class="field"><label>Apellidos</label><input class="upper alu-apellidos" placeholder="Apellidos"></div>'
+    + '<div class="field"><label>Línea <span class="req">*</span></label><select class="alu-linea" onchange="onAluLineaChange(' + aluIdx + ')">'
+    + '<option value="">— Selecciona —</option><option value="SM FÚTBOL">⚽ SM Fútbol</option><option value="EXTRAESCOLARES">🎒 SM Extraescolares</option></select></div>'
+    + '<div class="field alu-centro-wrap" style="display:none"><label>Centro escolar</label><input class="upper alu-centro" placeholder="Centro"></div>'
+    + '<div class="field"><label>Fecha nac.</label><input type="date" class="alu-fnac"></div>'
+    + '<div class="field"><label>Curso</label><select class="alu-curso"><option value="">— Curso —</option>' + opsCursos + '</select></div>'
+    + '<div class="field"><label>Cesión imagen</label><select class="alu-img"><option value="SÍ">Sí</option><option value="NO">No</option></select></div>'
+    + '</div>'
+    + '<div style="font-size:12px;font-weight:600;margin:10px 0 6px;color:var(--text2)">Actividades</div>'
+    + '<div class="rc-act-list" data-alu="' + aluIdx + '"></div>'
+    + '<button type="button" class="btn btn-secondary" style="width:100%;margin-top:4px;font-size:12px" onclick="addRcAct(' + aluIdx + ')">+ Añadir actividad</button>'
+    + '<div class="rc-bono-warn" data-alu="' + aluIdx + '" style="display:none;margin-top:8px;padding:8px 12px;background:#fff8e1;border:1px solid #ffc107;border-radius:6px;font-size:12px;color:#7d6608">'
+    + '⚠️ Bono + recogida detectados. Para facturación se usará el precio del bono.</div>'
+    + '</div>';
+}
+
+function modalRegistroCompleto() {
+  _rcAluCount = 0;
+  _rcActCount = {};
+  const opsCli = DB.clientes.map(c =>
+    '<option value="' + c.ID_CLIENTE + '">' + esc(c.NOMBRE + ' ' + (c.APELLIDOS||'')) + ' (' + esc(c.EMAIL||'') + ')</option>'
+  ).join('');
+  openModal('Nueva inscripción',
+    '<div style="display:grid;gap:0">'
+    + '<div style="margin-bottom:16px">'
+    + '<div style="font-size:13px;font-weight:700;border-bottom:2px solid var(--green);padding-bottom:6px;margin-bottom:12px">👤 Cliente / Tutor</div>'
+    + '<div style="display:flex;gap:16px;margin-bottom:10px">'
+    + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="rc-cli-modo" value="existente" checked onchange="onRcCliModo()"> Cliente existente</label>'
+    + '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="radio" name="rc-cli-modo" value="nuevo" onchange="onRcCliModo()"> Nuevo cliente</label>'
+    + '</div>'
+    + '<div id="rc-cli-existente"><select id="rc-cli-sel" style="width:100%"><option value="">— Selecciona cliente —</option>' + opsCli + '</select></div>'
+    + '<div id="rc-cli-nuevo" style="display:none"><div class="form-grid">'
+    + '<div class="field"><label>Nombre <span class="req">*</span></label><input id="rc-cn-nombre" class="upper" placeholder="Nombre"></div>'
+    + '<div class="field"><label>Apellidos</label><input id="rc-cn-apellidos" class="upper" placeholder="Apellidos"></div>'
+    + '<div class="field"><label>Email <span class="req">*</span></label><input id="rc-cn-email" type="email" placeholder="email@ejemplo.com"></div>'
+    + '<div class="field"><label>Teléfono</label><input id="rc-cn-tel" type="tel" placeholder="600 000 000"></div>'
+    + '</div></div></div>'
+    + '<div><div style="font-size:13px;font-weight:700;border-bottom:2px solid var(--green);padding-bottom:6px;margin-bottom:12px">🎒 Alumnos e inscripciones</div>'
+    + '<div id="rc-alumnos-cont"></div>'
+    + '<button type="button" class="btn btn-secondary" style="width:100%;margin-bottom:16px" onclick="addAluCard()">+ Añadir otro alumno</button></div>'
+    + '<div style="border-top:1px solid var(--border);padding-top:14px">'
+    + '<div style="font-size:13px;font-weight:700;margin-bottom:10px">💳 Condiciones de pago</div>'
+    + '<div class="form-grid">'
+    + '<div class="field"><label>Descuento</label><select id="rc-dto-sel" onchange="toggleDescuentoRc()">'
+    + '<option value="0">Sin descuento</option><option value="10">10% — 2.º hermano/a</option><option value="custom">Personalizado</option>'
+    + '</select><div id="rc-dto-custom-wrap" style="display:none;margin-top:6px"><input id="rc-dto" type="number" min="0" max="100" step="1" placeholder="% descuento"></div></div>'
+    + '<div class="field"><label>Forma de pago</label><select id="rc-fpago"><option value="">—</option>'
+    + ['BIZUM','TRANSFERENCIA','TARJETA'].map(f => '<option value="' + f + '">' + f + '</option>').join('')
+    + '</select></div>'
+    + '<div class="field"><label>Fecha de alta</label><input id="rc-falta" type="date" value="' + new Date().toISOString().slice(0,10) + '"></div>'
+    + '</div></div></div>',
+    '<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>'
+    + '<button class="btn btn-primary" id="rc-save-btn" onclick="guardarRegistroCompleto()">Guardar todo</button>'
+  );
+  addAluCard();
+}
+
+function onRcCliModo() {
+  const modo = document.querySelector('input[name="rc-cli-modo"]:checked')?.value;
+  document.getElementById('rc-cli-existente').style.display = modo === 'existente' ? '' : 'none';
+  document.getElementById('rc-cli-nuevo').style.display    = modo === 'nuevo'      ? '' : 'none';
+}
+
+function addAluCard() {
+  const cont = document.getElementById('rc-alumnos-cont');
+  if (!cont) return;
+  const idx = _rcAluCount++;
+  cont.insertAdjacentHTML('beforeend', _aluCardHtml(idx));
+  const card = cont.querySelector('.alu-card[data-alu="' + idx + '"]');
+  if (card) {
+    card.querySelectorAll('.upper').forEach(el => {
+      el.addEventListener('input', function() {
+        const p = this.selectionStart;
+        this.value = this.value.toUpperCase();
+        try { this.setSelectionRange(p, p); } catch(_) {}
+      });
+    });
+  }
+  addRcAct(idx);
+}
+
+function quitarAluCard(idx) {
+  document.querySelector('.alu-card[data-alu="' + idx + '"]')?.remove();
+}
+
+function onAluLineaChange(idx) {
+  const card = document.querySelector('.alu-card[data-alu="' + idx + '"]');
+  if (!card) return;
+  const wrap = card.querySelector('.alu-centro-wrap');
+  if (wrap) wrap.style.display = esExtraescolar(card.querySelector('.alu-linea')?.value||'') ? '' : 'none';
+}
+
+function addRcAct(aluIdx) {
+  const list = document.querySelector('.rc-act-list[data-alu="' + aluIdx + '"]');
+  if (!list) return;
+  if (!_rcActCount[aluIdx]) _rcActCount[aluIdx] = 0;
+  list.insertAdjacentHTML('beforeend', _rcActEntryHtml(aluIdx, _rcActCount[aluIdx]++));
+}
+
+function quitarRcAct(aluIdx, actIdx) {
+  document.querySelector('.ins-act-entry[data-alu="' + aluIdx + '"][data-act="' + actIdx + '"]')?.remove();
+  _verificarBonoRc(aluIdx);
+}
+
+function onRcActChange(aluIdx, actIdx) {
+  const entry = document.querySelector('.ins-act-entry[data-alu="' + aluIdx + '"][data-act="' + actIdx + '"]');
+  if (!entry) return;
+  const actId = entry.querySelector('.rc-act-sel')?.value;
+  const act   = actId ? DB.actividades.find(a => String(a.ID) === actId) : null;
+  const info  = entry.querySelector('.rc-act-info');
+  if (info) info.textContent = _infoActividad(act);
+  _verificarBonoRc(aluIdx);
+}
+
+function _verificarBonoRc(aluIdx) {
+  const card = document.querySelector('.alu-card[data-alu="' + aluIdx + '"]');
+  if (!card) return;
+  const acts = [...card.querySelectorAll('.rc-act-sel')]
+    .map(s => DB.actividades.find(a => String(a.ID) === s.value)).filter(Boolean);
+  const hayTemp = acts.some(a => /recogida.*(temprana|madrugad)/i.test(sinTildes(a.NOMBRE||'')));
+  const hayTard = acts.some(a => /recogida.*tard/i.test(sinTildes(a.NOMBRE||'')));
+  const hayBono = acts.some(a => /bono/i.test(sinTildes(a.NOMBRE||'')));
+  const warn = card.querySelector('.rc-bono-warn');
+  if (warn) warn.style.display = (hayBono && (hayTemp || hayTard)) ? '' : 'none';
+}
+
+function toggleDescuentoRc() {
+  const wrap = document.getElementById('rc-dto-custom-wrap');
+  if (wrap) wrap.style.display = document.getElementById('rc-dto-sel')?.value === 'custom' ? '' : 'none';
+}
+
+async function guardarRegistroCompleto() {
+  const btn = document.getElementById('rc-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+  const resetBtn = () => { if (btn) { btn.disabled = false; btn.textContent = 'Guardar todo'; } };
+
+  try {
+    const modo = document.querySelector('input[name="rc-cli-modo"]:checked')?.value;
+    let cliId;
+
+    if (modo === 'nuevo') {
+      const cliNombre = document.getElementById('rc-cn-nombre')?.value.trim();
+      const cliEmail  = (document.getElementById('rc-cn-email')?.value.trim()||'').toLowerCase();
+      if (!cliNombre || !cliEmail) throw new Error('Nombre y email del cliente son obligatorios');
+      if (DB.clientes.find(c => (c.EMAIL||'').toLowerCase() === cliEmail))
+        throw new Error('Ya existe un cliente con ese email (' + cliEmail + ')');
+      await writeToSheet('CLIENTES', {
+        NOMBRE:     cliNombre,
+        APELLIDOS:  document.getElementById('rc-cn-apellidos')?.value.trim() || '',
+        EMAIL:      cliEmail,
+        'TELÉFONO': document.getElementById('rc-cn-tel')?.value.trim() || '',
+        ACTIVO:     'SÍ',
+        FECHA_ALTA: new Date().toISOString().slice(0,10),
+      }, null);
+      await loadAllData();
+      const newCli = DB.clientes.find(c => (c.EMAIL||'').toLowerCase() === cliEmail);
+      if (!newCli) throw new Error('No se pudo recuperar el cliente creado');
+      cliId = newCli.ID_CLIENTE;
+    } else {
+      cliId = document.getElementById('rc-cli-sel')?.value;
+      if (!cliId) throw new Error('Selecciona un cliente');
+    }
+
+    const aluCards = [...document.querySelectorAll('.alu-card')];
+    if (!aluCards.length) throw new Error('Añade al menos un alumno');
+
+    const dtoSel = document.getElementById('rc-dto-sel').value;
+    const dto    = dtoSel === 'custom' ? (document.getElementById('rc-dto')?.value || '0') : dtoSel;
+    const fpago  = document.getElementById('rc-fpago').value;
+    const falta  = document.getElementById('rc-falta').value;
+    let totalIns = 0;
+
+    for (const card of aluCards) {
+      const nombre    = card.querySelector('.alu-nombre')?.value.trim();
+      const apellidos = card.querySelector('.alu-apellidos')?.value.trim() || '';
+      const linea     = card.querySelector('.alu-linea')?.value;
+      if (!nombre) throw new Error('El nombre del alumno es obligatorio');
+      if (!linea)  throw new Error('Selecciona la línea para el alumno ' + nombre);
+
+      await writeToSheet('ALUMNOS', {
+        NOMBRE:          nombre,
+        APELLIDOS:       apellidos,
+        LINEA:           linea,
+        CENTRO:          esExtraescolar(linea) ? (card.querySelector('.alu-centro')?.value.trim() || '') : '',
+        FECHA_NAC:       card.querySelector('.alu-fnac')?.value || '',
+        CURSO:           card.querySelector('.alu-curso')?.value || '',
+        ID_CLIENTE:      cliId,
+        'CESIÓN_IMAGEN': card.querySelector('.alu-img')?.value || 'SÍ',
+        ACTIVO:          'SÍ',
+      }, null);
+      await loadAllData();
+
+      const fullName = (nombre + ' ' + apellidos).trim().toUpperCase();
+      const newAlu   = DB.alumnos.find(a =>
+        String(a.ID_CLIENTE) === String(cliId) &&
+        (a.NOMBRE + ' ' + (a.APELLIDOS||'')).trim().toUpperCase() === fullName
+      );
+      if (!newAlu) throw new Error('No se pudo recuperar el alumno creado: ' + nombre);
+      const aluId = newAlu.ID_ALUMNO;
+
+      const insRows = [...card.querySelectorAll('.ins-act-entry')].map(entry => {
+        const actId = entry.querySelector('.rc-act-sel')?.value;
+        if (!actId) return null;
+        const act  = DB.actividades.find(a => String(a.ID) === actId);
+        const hIni = entry.querySelector('.rc-hora-ini')?.value || '';
+        const hFin = entry.querySelector('.rc-hora-fin')?.value || '';
+        const t    = sinTildes(act?.TIPO || '');
+        return {
+          ID_ALUMNO:       aluId,
+          ID_ACTIVIDAD:    actId,
+          LINEA:           act?.LINEA || linea,
+          DIAS_SEMANA:     act?.DIAS_SEMANA || '',
+          GRUPO:           act?.NUM_GRUPOS ? String(act.NUM_GRUPOS) : '',
+          HORARIO:         hIni && hFin ? hIni + '-' + hFin : hIni || hFin || '',
+          TIPO_PRECIO:     (t.includes('SUELTA') || t.includes('ANUAL')) ? 'PAGO_ÚNICO' : 'MENSUALIDAD',
+          PRECIO_ACORDADO: act?.PRECIO || '',
+          DESCUENTO:       dto,
+          FORMA_PAGO:      fpago,
+          FECHA_ALTA:      falta,
+          ESTADO:          'ACTIVA',
+        };
+      }).filter(Boolean);
+
+      if (!insRows.length) throw new Error('Añade al menos una actividad para ' + nombre);
+      for (const row of insRows) { await writeToSheet('INSCRIPCIONES', row, null); totalIns++; }
+    }
+
+    await loadAllData();
+    showToast(aluCards.length + ' alumno(s), ' + totalIns + ' inscripción(es) creadas');
+    closeModal();
+    inscripciones();
+
+  } catch (err) {
+    showToast(err.message || 'Error al guardar', 'error');
+    resetBtn();
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════

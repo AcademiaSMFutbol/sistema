@@ -2365,7 +2365,7 @@ function _renderCom() {
       ? 'mailto:'+encodeURIComponent(f.email)+'?subject='+encodeURIComponent('SM Academia — Pago '+f.mes)+'&body='+encodeURIComponent(_comMsgEmail(f))
       : '';
     return '<tr>'
-      +'<td><strong>'+esc(f.nombre)+'</strong>'+(f.email?'<br><span style="font-size:11px;color:var(--text3)">'+esc(f.email)+'</span>':'')+'</td>'
+      +'<td><strong>'+esc(f.nombre)+'</strong>'+(f.pagoParcial?'<span style="margin-left:6px;font-size:10px;background:#fff3cd;color:#856404;padding:1px 6px;border-radius:10px">⚠ parcial</span>':'')+(f.email?'<br><span style="font-size:11px;color:var(--text3)">'+esc(f.email)+'</span>':'')+'</td>'
       +'<td style="font-size:12px">'+f.alumnos.map(a=>esc((a.NOMBRE+' '+(a.APELLIDOS||'')).trim())).join('<br>')+'</td>'
       +'<td style="font-variant-numeric:tabular-nums;font-weight:700">'+fmtEur(f.importe)+'</td>'
       +'<td style="font-family:monospace;font-size:12px;color:var(--blue)">'+esc(f.concepto)+'</td>'
@@ -2442,8 +2442,19 @@ function _comFamilias() {
   return Object.entries(byCliente).map(([cliId, data]) => {
     const cli = DB.clientes.find(c=>String(c.ID_CLIENTE)===cliId);
     if (!cli) return null;
-    const alumnos = [...data.aluIds].map(id=>DB.alumnos.find(a=>String(a.ID_ALUMNO)===id)).filter(Boolean);
-    const { importe, concepto } = _comImporte(cliId, [...data.aluIds], data.inscs);
+    const aluIds = [...data.aluIds];
+
+    // Excluir familias que ya han pagado este mes (PAGADO sin PENDIENTE)
+    const pagosDelMes = DB.pagos.filter(p => {
+      const esCli = String(p.ID_CLIENTE)===cliId || aluIds.includes(String(p.ID_ALUMNO));
+      return esCli && (!_comFiltros.mes || String(p.MES||'').toUpperCase()===_comFiltros.mes.toUpperCase());
+    });
+    const tienePagado   = pagosDelMes.some(p => String(p.ESTADO||'').toUpperCase()==='PAGADO');
+    const tienePendiente= pagosDelMes.some(p => String(p.ESTADO||'').toUpperCase()==='PENDIENTE');
+    if (tienePagado && !tienePendiente) return null; // ya pagó
+
+    const alumnos = aluIds.map(id=>DB.alumnos.find(a=>String(a.ID_ALUMNO)===id)).filter(Boolean);
+    const { importe, concepto } = _comImporte(cliId, aluIds, data.inscs);
     const apellido = (cli.APELLIDOS||cli.NOMBRE||'').split(' ')[0].toUpperCase();
     const mesAbrev = (_comFiltros.mes||'').split(' ')[0].slice(0,3).toUpperCase();
     return {
@@ -2454,6 +2465,7 @@ function _comFamilias() {
       importe,
       concepto: concepto || ('SM '+mesAbrev+' '+apellido),
       mes:      _comFiltros.mes,
+      pagoParcial: tienePagado && tienePendiente,
     };
   }).filter(Boolean).sort((a,b)=>a.nombre.localeCompare(b.nombre));
 }

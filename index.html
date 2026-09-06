@@ -2333,6 +2333,7 @@ let _comFiltros = { linea: 'EXTRAESCOLARES', actIds: new Set(), mes: '' };
 function comunicacion() {
   if (!isAdmin()) { render('<div class="stub"><div class="stub-icon">🔒</div><h2>Acceso restringido</h2></div>'); return; }
   document.getElementById('topbar-actions').innerHTML = '';
+  topbarBtn('💳 Generar pagos', () => modalGenerarPagosMasivo(), 'btn-secondary');
   if (!_comFiltros.mes) _comFiltros.mes = _comMesActual();
   _renderCom();
 }
@@ -2539,6 +2540,138 @@ function _comMsgEjemplo() {
     +'📌 Concepto para la transferencia:\n*SM [MES] [APELLIDO]*\n\n'
     +'⏰ Plazo de pago: del 1 al 10 de cada mes.\n\n'
     +'¡Muchas gracias! 🙏\nSM Academia';
+}
+
+// ── Generación masiva de pagos ────────────────────────────────────────────
+let _gmData = [];
+
+function modalGenerarPagosMasivo() {
+  _gmData = [];
+  const actsOk = DB.actividades.filter(a => {
+    const lineaOk = !_comFiltros.linea
+      || (_comFiltros.linea==='EXTRAESCOLARES' && esExtraescolar(a.LINEA||''))
+      || (_comFiltros.linea==='FUTBOL' && esFutbol(a.LINEA||''));
+    const actOk = !_comFiltros.actIds.size || _comFiltros.actIds.has(String(a.ID));
+    return lineaOk && actOk && String(a.ACTIVA||'').toUpperCase().startsWith('S');
+  });
+  const actIdsSet = new Set(actsOk.map(a=>String(a.ID)));
+  const inscsRel = DB.inscripciones.filter(i =>
+    actIdsSet.has(String(i.ID_ACTIVIDAD)) && String(i.ESTADO||'').toUpperCase()==='ACTIVA'
+  );
+  const byCliente = {};
+  for (const ins of inscsRel) {
+    const alu = DB.alumnos.find(a=>String(a.ID_ALUMNO)===String(ins.ID_ALUMNO));
+    if (!alu) continue;
+    const cliId = String(alu.ID_CLIENTE);
+    if (!byCliente[cliId]) byCliente[cliId] = { aluIds: new Set(), inscs: [] };
+    byCliente[cliId].aluIds.add(String(alu.ID_ALUMNO));
+    byCliente[cliId].inscs.push(ins);
+  }
+  const preview = [];
+  for (const [cliId, data] of Object.entries(byCliente)) {
+    const cli = DB.clientes.find(c=>String(c.ID_CLIENTE)===cliId);
+    if (!cli) continue;
+    const aluIds = [...data.aluIds];
+    // Saltar si ya existe cualquier pago este mes para esta familia
+    const yaTiene = DB.pagos.some(p => {
+      const esCli = String(p.ID_CLIENTE)===cliId || aluIds.includes(String(p.ID_ALUMNO));
+      const esMes = !_comFiltros.mes || String(p.MES||'').toUpperCase()===_comFiltros.mes.toUpperCase();
+      return esCli && esMes;
+    });
+    if (yaTiene) continue;
+    // Calcular por alumno con regla bono
+    const perAlu = aluIds.map(aluId => {
+      const aluIns = data.inscs.filter(i=>String(i.ID_ALUMNO)===aluId)
+        .map(i=>({ ins:i, act: DB.actividades.find(a=>String(a.ID)===String(i.ID_ACTIVIDAD)) }))
+        .filter(x=>x.act);
+      const bonoX  = aluIns.find(x=>/bono/i.test(sinTildes(x.act.NOMBRE||'')));
+      const hayRec = aluIns.some(x=>/recogida/i.test(sinTildes(x.act.NOMBRE||'')));
+      const billable = bonoX && hayRec ? [bonoX] : aluIns;
+      let raw = 0, post = 0;
+      for (const {ins,act} of billable) {
+        const p = parseFloat(ins.PRECIO_ACORDADO||act.PRECIO||0);
+        const d = parseFloat(ins.DESCUENTO||0)/100;
+        raw += p; post += p*(1-d);
+      }
+      return { aluId, billable, raw, post };
+    });
+    perAlu.sort((a,b)=>b.post-a.post);
+    perAlu.forEach(({aluId,billable,raw,post},idx) => {
+      const hermPct  = idx > 0 ? 0.10 : 0;
+      const final    = post*(1-hermPct);
+      const descEur  = raw-final;
+      const servicios= billable.map(x=>x.act.NOMBRE).join(' + ');
+      const insId    = billable[0]?.ins?.ID_INSCRIPCION||billable[0]?.ins?.ID||'';
+      const linea    = billable[0]?.act?.LINEA||'';
+      const alu      = DB.alumnos.find(a=>String(a.ID_ALUMNO)===aluId);
+      _gmData.push({ cliId, aluId, servicios, insId, linea, importeRaw: raw, descEur, total: final });
+      preview.push({
+        familia: (cli.NOMBRE+' '+(cli.APELLIDOS||'')).trim(),
+        alumno:  alu ? (alu.NOMBRE+' '+(alu.APELLIDOS||'')).trim() : aluId,
+        servicios, total: final, hermano: idx > 0
+      });
+    });
+  }
+  if (!_gmData.length) {
+    showToast('Todas las familias ya tienen pago registrado para este mes', 'info');
+    return;
+  }
+  const totalGral = preview.reduce((s,p)=>s+p.total,0);
+  const bodyHtml = ''
+    +'<p style="margin-bottom:12px">Se crearán <strong>'+_gmData.length+' pagos PENDIENTES</strong> para <strong>'+esc(_comFiltros.mes)+'</strong>. '
+    +'Familias con pago ya registrado este mes quedan excluidas.</p>'
+    +'<div class="table-wrap"><table style="font-size:12px"><thead><tr><th>Familia</th><th>Alumno</th><th>Actividad/es</th><th>Importe</th></tr></thead><tbody>'
+    +preview.map(p=>
+      '<tr><td>'+esc(p.familia)+'</td>'
+      +'<td>'+esc(p.alumno)+(p.hermano?' <span style="font-size:10px;color:var(--green)">-10%</span>':'')+'</td>'
+      +'<td style="font-size:11px;color:var(--text3)">'+esc(p.servicios)+'</td>'
+      +'<td style="font-weight:700;font-variant-numeric:tabular-nums">'+fmtEur(p.total)+'</td></tr>'
+    ).join('')
+    +'</tbody></table></div>'
+    +'<div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:8px;display:flex;justify-content:space-between;align-items:center">'
+    +'<span>Total</span><strong style="font-size:16px">'+fmtEur(totalGral)+'</strong></div>';
+  openModal(
+    'Generar pagos — '+esc(_comFiltros.mes),
+    bodyHtml,
+    '<button class="btn" onclick="ejecutarGenerarPagosMasivo()">Generar '+_gmData.length+' pagos</button>'
+    +'<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>',
+    true
+  );
+}
+
+async function ejecutarGenerarPagosMasivo() {
+  const btns = document.querySelectorAll('#modal-footer .btn');
+  btns.forEach(b=>b.disabled=true);
+  const hoy = new Date().toISOString().slice(0,10);
+  let ok = 0;
+  try {
+    for (const r of _gmData) {
+      await writeToSheet('PAGOS', {
+        ID_ALUMNO:      r.aluId,
+        ID_CLIENTE:     r.cliId,
+        ID_INSCRIPCION: r.insId,
+        LINEA:          r.linea,
+        SERVICIO:       r.servicios,
+        MES:            _comFiltros.mes,
+        IMPORTE:        r.importeRaw.toFixed(2),
+        DESC_EUR:       r.descEur.toFixed(2),
+        TOTAL_ESPERADO: r.total.toFixed(2),
+        TOTAL_RECIBIDO: '0',
+        'MÉTODO':       '',
+        ESTADO:         'PENDIENTE',
+        FECHA:          hoy,
+        NOTAS:          'Generado automáticamente',
+      }, null);
+      ok++;
+    }
+    await loadAllData();
+    closeModal();
+    showToast(ok+' pagos generados correctamente');
+    _renderCom();
+  } catch(e) {
+    showToast(e.message||'Error al generar pagos','error');
+    btns.forEach(b=>b.disabled=false);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════

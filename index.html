@@ -2334,7 +2334,7 @@ function comunicacion() {
   if (!isAdmin()) { render('<div class="stub"><div class="stub-icon">🔒</div><h2>Acceso restringido</h2></div>'); return; }
   document.getElementById('topbar-actions').innerHTML = '';
   if (!_comFiltros.mes) _comFiltros.mes = _comMesActual();
-  try { _renderCom(); } catch(e) { render('<div class="card" style="padding:20px;color:red"><b>Error Comunicación:</b> '+esc(e.message)+'<br><pre style="font-size:11px;white-space:pre-wrap">'+esc(e.stack||'')+'</pre></div>'); }
+  _renderCom();
 }
 
 function _comMesActual() {
@@ -2359,7 +2359,7 @@ function _renderCom() {
   const familias = _comFamilias();
 
   const rows = familias.map(f => {
-    const tel = (f.telefono||'').replace(/\D/g,'');
+    const tel = String(f.telefono||'').replace(/\D/g,'');
     const wa  = tel ? 'https://wa.me/'+(tel.length===9?'34'+tel:tel)+'?text='+encodeURIComponent(_comMsgWA(f)) : '';
     const emailHref = f.email
       ? 'mailto:'+encodeURIComponent(f.email)+'?subject='+encodeURIComponent('SM Academia — Pago '+f.mes)+'&body='+encodeURIComponent(_comMsgEmail(f))

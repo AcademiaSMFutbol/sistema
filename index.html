@@ -2333,7 +2333,6 @@ let _comFiltros = { linea: 'EXTRAESCOLARES', actIds: new Set(), mes: '' };
 function comunicacion() {
   if (!isAdmin()) { render('<div class="stub"><div class="stub-icon">🔒</div><h2>Acceso restringido</h2></div>'); return; }
   document.getElementById('topbar-actions').innerHTML = '';
-  topbarBtn('💳 Generar pagos', () => modalGenerarPagosMasivo(), 'btn-secondary');
   if (!_comFiltros.mes) _comFiltros.mes = _comMesActual();
   _renderCom();
 }
@@ -2544,15 +2543,51 @@ function _comMsgEjemplo() {
 
 // ── Generación masiva de pagos ────────────────────────────────────────────
 let _gmData = [];
+let _gmMes  = '';
+let _gmLinea= 'EXTRAESCOLARES';
 
 function modalGenerarPagosMasivo() {
-  _gmData = [];
+  _gmMes   = _comMesActual();
+  _gmLinea = 'EXTRAESCOLARES';
+  _renderGmFiltros();
+}
+
+function _renderGmFiltros() {
+  const meses = [...new Set(
+    [_gmMes, ...(DB.pagos.map(p=>String(p.MES||'')).filter(Boolean))]
+  )].filter(Boolean);
+  const opsMes = meses.map(m=>'<option value="'+m+'"'+(m===_gmMes?' selected':'')+'>'+m+'</option>').join('');
+  const bodyHtml = ''
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Línea</label>'
+    +'<select id="gm-linea" style="width:100%">'
+    +'<option value="EXTRAESCOLARES"'+(_gmLinea==='EXTRAESCOLARES'?' selected':'')+'>🎒 Extraescolares</option>'
+    +'<option value="FUTBOL"'+(_gmLinea==='FUTBOL'?' selected':'')+'>⚽ SM Fútbol</option>'
+    +'<option value=""'+(_gmLinea===''?' selected':'')+'>Todas</option>'
+    +'</select></div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Mes</label>'
+    +'<select id="gm-mes" style="width:100%">'+opsMes+'</select></div>'
+    +'</div>'
+    +'<p style="font-size:12px;color:var(--text3)">Se generarán pagos PENDIENTES para todas las familias con inscripciones activas en la línea seleccionada que no tengan ya un pago registrado para ese mes.</p>';
+  openModal(
+    'Generar pagos masivo',
+    bodyHtml,
+    '<button class="btn" onclick="_gmPreview()">Ver preview</button>'
+    +'<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>'
+  );
+}
+
+function _gmPreview() {
+  _gmLinea = document.getElementById('gm-linea')?.value ?? _gmLinea;
+  _gmMes   = (document.getElementById('gm-mes')?.value || '').trim();
+  if (!_gmMes) { showToast('Selecciona un mes','error'); return; }
+  _gmData  = [];
+
   const actsOk = DB.actividades.filter(a => {
-    const lineaOk = !_comFiltros.linea
-      || (_comFiltros.linea==='EXTRAESCOLARES' && esExtraescolar(a.LINEA||''))
-      || (_comFiltros.linea==='FUTBOL' && esFutbol(a.LINEA||''));
-    const actOk = !_comFiltros.actIds.size || _comFiltros.actIds.has(String(a.ID));
-    return lineaOk && actOk && String(a.ACTIVA||'').toUpperCase().startsWith('S');
+    const lineaOk = !_gmLinea
+      || (_gmLinea==='EXTRAESCOLARES' && esExtraescolar(a.LINEA||''))
+      || (_gmLinea==='FUTBOL' && esFutbol(a.LINEA||''));
+    return lineaOk && String(a.ACTIVA||'').toUpperCase().startsWith('S');
   });
   const actIdsSet = new Set(actsOk.map(a=>String(a.ID)));
   const inscsRel = DB.inscripciones.filter(i =>
@@ -2572,14 +2607,11 @@ function modalGenerarPagosMasivo() {
     const cli = DB.clientes.find(c=>String(c.ID_CLIENTE)===cliId);
     if (!cli) continue;
     const aluIds = [...data.aluIds];
-    // Saltar si ya existe cualquier pago este mes para esta familia
     const yaTiene = DB.pagos.some(p => {
       const esCli = String(p.ID_CLIENTE)===cliId || aluIds.includes(String(p.ID_ALUMNO));
-      const esMes = !_comFiltros.mes || String(p.MES||'').toUpperCase()===_comFiltros.mes.toUpperCase();
-      return esCli && esMes;
+      return esCli && String(p.MES||'').toUpperCase()===_gmMes.toUpperCase();
     });
     if (yaTiene) continue;
-    // Calcular por alumno con regla bono
     const perAlu = aluIds.map(aluId => {
       const aluIns = data.inscs.filter(i=>String(i.ID_ALUMNO)===aluId)
         .map(i=>({ ins:i, act: DB.actividades.find(a=>String(a.ID)===String(i.ID_ACTIVIDAD)) }))
@@ -2613,13 +2645,13 @@ function modalGenerarPagosMasivo() {
     });
   }
   if (!_gmData.length) {
-    showToast('Todas las familias ya tienen pago registrado para este mes', 'info');
+    showToast('Todas las familias ya tienen pago registrado para '+_gmMes, 'info');
     return;
   }
   const totalGral = preview.reduce((s,p)=>s+p.total,0);
   const bodyHtml = ''
-    +'<p style="margin-bottom:12px">Se crearán <strong>'+_gmData.length+' pagos PENDIENTES</strong> para <strong>'+esc(_comFiltros.mes)+'</strong>. '
-    +'Familias con pago ya registrado este mes quedan excluidas.</p>'
+    +'<p style="margin-bottom:12px">Se crearán <strong>'+_gmData.length+' pagos PENDIENTES</strong> para <strong>'+esc(_gmMes)+'</strong> · '+esc(_gmLinea||'Todas las líneas')+'.<br>'
+    +'<span style="font-size:12px;color:var(--text3)">Familias con pago ya registrado este mes quedan excluidas.</span></p>'
     +'<div class="table-wrap"><table style="font-size:12px"><thead><tr><th>Familia</th><th>Alumno</th><th>Actividad/es</th><th>Importe</th></tr></thead><tbody>'
     +preview.map(p=>
       '<tr><td>'+esc(p.familia)+'</td>'
@@ -2631,10 +2663,10 @@ function modalGenerarPagosMasivo() {
     +'<div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:8px;display:flex;justify-content:space-between;align-items:center">'
     +'<span>Total</span><strong style="font-size:16px">'+fmtEur(totalGral)+'</strong></div>';
   openModal(
-    'Generar pagos — '+esc(_comFiltros.mes),
+    'Generar pagos — '+esc(_gmMes),
     bodyHtml,
     '<button class="btn" onclick="ejecutarGenerarPagosMasivo()">Generar '+_gmData.length+' pagos</button>'
-    +'<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>',
+    +'<button class="btn btn-secondary" onclick="_renderGmFiltros()">← Atrás</button>',
     true
   );
 }
@@ -2652,7 +2684,7 @@ async function ejecutarGenerarPagosMasivo() {
         ID_INSCRIPCION: r.insId,
         LINEA:          r.linea,
         SERVICIO:       r.servicios,
-        MES:            _comFiltros.mes,
+        MES:            _gmMes,
         IMPORTE:        r.importeRaw.toFixed(2),
         DESC_EUR:       r.descEur.toFixed(2),
         TOTAL_ESPERADO: r.total.toFixed(2),
@@ -2667,7 +2699,7 @@ async function ejecutarGenerarPagosMasivo() {
     await loadAllData();
     closeModal();
     showToast(ok+' pagos generados correctamente');
-    _renderCom();
+    pagos();
   } catch(e) {
     showToast(e.message||'Error al generar pagos','error');
     btns.forEach(b=>b.disabled=false);
@@ -2761,6 +2793,7 @@ function pagos(filtro) {
   _pgFiltro = filtro || _pgFiltro || 'TODOS';
   document.getElementById('topbar-actions').innerHTML = '';
   topbarBtn('+ Registrar pago', () => modalPago());
+  topbarBtn('💳 Generar masivo', () => modalGenerarPagosMasivo(), 'btn-secondary');
 
   const diaHoy = new Date().getDate();
   const reclamacionActiva = diaHoy >= 11;

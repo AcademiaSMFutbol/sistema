@@ -277,6 +277,9 @@ tr:hover td{background:#f8f8f8}
         <div class="nav-item" onclick="navigate('facturas')" data-page="facturas">
           <span class="nav-icon">🧾</span><span>Facturas</span>
         </div>
+        <div class="nav-item" onclick="navigate('comunicacion')" data-page="comunicacion">
+          <span class="nav-icon">📨</span><span>Comunicación</span>
+        </div>
       </div>
 
       <div class="nav-section" id="nav-futbol">
@@ -744,6 +747,7 @@ const PAGE_META = {
   'fiscal':             { title: 'Fiscal',               sub: 'Resúmenes trimestrales y anuales' },
   'ampa-socios':        { title: 'Socios AMPA',          sub: 'Gestión del padrón de socios' },
   'portal-familia':     { title: 'Portal Familia',       sub: 'Inscripciones, pagos y asistencias' },
+  'comunicacion':       { title: 'Comunicación',          sub: 'Mensajes y avisos a familias' },
   'configuracion':      { title: 'Configuración',        sub: 'Ajustes del sistema' },
 };
 
@@ -769,6 +773,7 @@ const MODULES = {
   'fiscal':             fiscal,
   'ampa-socios':        ampaSocios,
   'portal-familia':     portalFamilia,
+  'comunicacion':       comunicacion,
   'configuracion':      configuracion,
 };
 
@@ -2318,6 +2323,202 @@ async function guardarRegistroCompleto() {
     showToast(err.message || 'Error al guardar', 'error');
     resetBtn();
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  MÓDULO: COMUNICACIÓN
+// ══════════════════════════════════════════════════════════════════════════
+let _comFiltros = { linea: 'EXTRAESCOLARES', actIds: new Set(), mes: '' };
+
+function comunicacion() {
+  if (!isAdmin()) { render('<div class="stub"><div class="stub-icon">🔒</div><h2>Acceso restringido</h2></div>'); return; }
+  document.getElementById('topbar-actions').innerHTML = '';
+  if (!_comFiltros.mes) _comFiltros.mes = _comMesActual();
+  _renderCom();
+}
+
+function _comMesActual() {
+  return new Date().toLocaleString('es-ES',{month:'long'}).toUpperCase() + ' ' + new Date().getFullYear();
+}
+
+function _renderCom() {
+  const actsLinea = DB.actividades.filter(a =>
+    (!_comFiltros.linea || (_comFiltros.linea==='EXTRAESCOLARES'&&esExtraescolar(a.LINEA||'')) || (_comFiltros.linea==='FUTBOL'&&esFutbol(a.LINEA||'')))
+    && String(a.ACTIVA||'').toUpperCase().startsWith('S')
+  );
+
+  const meses = [...new Set(DB.pagos.map(p=>String(p.MES||'')).filter(Boolean))].sort().reverse();
+  if (!meses.includes(_comFiltros.mes) && meses.length) _comFiltros.mes = meses[0];
+  const opsMes = meses.map(m=>'<option value="'+m+'"'+(m===_comFiltros.mes?' selected':'')+'>'+m+'</option>').join('');
+
+  const chipsHtml = actsLinea.map(a=>{
+    const sel = _comFiltros.actIds.has(String(a.ID));
+    return '<button type="button" onclick="_comToggleAct(\''+a.ID+'\')" style="padding:5px 12px;border:1.5px solid '+(sel?'var(--green)':'var(--border2)')+';border-radius:20px;background:'+(sel?'#e8f5e9':'var(--bg2)')+';cursor:pointer;font-size:12px;transition:all .15s">'+esc(a.NOMBRE)+'</button>';
+  }).join('');
+
+  const familias = _comFamilias();
+
+  const rows = familias.map(f => {
+    const tel = (f.telefono||'').replace(/\D/g,'');
+    const wa  = tel ? 'https://wa.me/'+(tel.length===9?'34'+tel:tel)+'?text='+encodeURIComponent(_comMsgWA(f)) : '';
+    const emailHref = f.email
+      ? 'mailto:'+encodeURIComponent(f.email)+'?subject='+encodeURIComponent('SM Academia — Pago '+f.mes)+'&body='+encodeURIComponent(_comMsgEmail(f))
+      : '';
+    return '<tr>'
+      +'<td><strong>'+esc(f.nombre)+'</strong>'+(f.email?'<br><span style="font-size:11px;color:var(--text3)">'+esc(f.email)+'</span>':'')+'</td>'
+      +'<td style="font-size:12px">'+f.alumnos.map(a=>esc((a.NOMBRE+' '+(a.APELLIDOS||'')).trim())).join('<br>')+'</td>'
+      +'<td style="font-variant-numeric:tabular-nums;font-weight:700">'+fmtEur(f.importe)+'</td>'
+      +'<td style="font-family:monospace;font-size:12px;color:var(--blue)">'+esc(f.concepto)+'</td>'
+      +'<td style="white-space:nowrap">'
+      +(wa?'<a href="'+wa+'" target="_blank" class="btn btn-sm" style="background:#25D366;color:#fff;margin-right:4px">📲 WA</a>':'<span style="font-size:11px;color:var(--text3)">Sin tel.</span> ')
+      +(emailHref?'<a href="'+emailHref+'" class="btn btn-sm btn-secondary">✉ Email</a>':'')
+      +'</td></tr>';
+  }).join('') || '<tr><td colspan="5"><div class="empty"><div class="empty-icon">🔍</div><p>Sin familias para ese filtro</p></div></td></tr>';
+
+  const ejMsg = familias[0] ? _comMsgWA(familias[0]) : _comMsgEjemplo();
+
+  render('<div style="display:grid;gap:16px">'
+    +'<div class="card" style="padding:16px 20px">'
+    +'<div style="display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:start">'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Línea</label>'
+    +'<select style="width:100%" onchange="_comSetLinea(this.value)">'
+    +'<option value="EXTRAESCOLARES"'+(_comFiltros.linea==='EXTRAESCOLARES'?' selected':'')+'>🎒 Extraescolares</option>'
+    +'<option value="FUTBOL"'+(_comFiltros.linea==='FUTBOL'?' selected':'')+'>⚽ SM Fútbol</option>'
+    +'<option value=""'+(!_comFiltros.linea?' selected':'')+'>Todas</option>'
+    +'</select></div>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Actividades <span style="font-weight:400;color:var(--text3)">(ninguna = todas las de la línea)</span></label>'
+    +'<div style="display:flex;flex-wrap:wrap;gap:6px">'+(chipsHtml||'<span style="font-size:12px;color:var(--text3)">Sin actividades</span>')+'</div></div>'
+    +'</div>'
+    +'<div style="display:flex;gap:16px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">'
+    +'<div><label style="font-size:12px;font-weight:600">Mes / período</label><br>'
+    +'<select style="min-width:200px" onchange="_comSetMes(this.value)">'+opsMes+'</select></div>'
+    +'<div style="margin-left:auto;text-align:right">'
+    +'<div style="font-size:28px;font-weight:700;color:var(--green)">'+familias.length+'</div>'
+    +'<div style="font-size:12px;color:var(--text3)">familias · '+fmtEur(familias.reduce((s,f)=>s+f.importe,0))+' total</div>'
+    +'</div></div></div>'
+    +'<div class="card" style="padding:14px 20px">'
+    +'<div class="card-title" style="margin-bottom:8px">Vista previa del mensaje <span style="font-size:11px;font-weight:400;color:var(--text3)">'+(familias[0]?'— '+familias[0].nombre:'— ejemplo')+'</span></div>'
+    +'<pre style="font-size:12px;line-height:1.65;white-space:pre-wrap;background:var(--bg2);padding:12px;border-radius:8px;border:1px solid var(--border);margin:0">'+esc(ejMsg)+'</pre>'
+    +'</div>'
+    +'<div class="card" style="padding:14px 20px">'
+    +'<div class="table-wrap"><table style="font-size:13px">'
+    +'<thead><tr><th>Familia</th><th>Alumno/s</th><th>Importe</th><th>Concepto transferencia</th><th>Enviar</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'</table></div></div>'
+    +'</div>');
+}
+
+function _comSetLinea(v) { _comFiltros.linea = v; _comFiltros.actIds = new Set(); _renderCom(); }
+function _comSetMes(v)   { _comFiltros.mes   = v; _renderCom(); }
+function _comToggleAct(id) {
+  if (_comFiltros.actIds.has(id)) _comFiltros.actIds.delete(id); else _comFiltros.actIds.add(id);
+  _renderCom();
+}
+
+function _comFamilias() {
+  const actsOk = DB.actividades.filter(a => {
+    const lineaOk = !_comFiltros.linea
+      || (_comFiltros.linea==='EXTRAESCOLARES' && esExtraescolar(a.LINEA||''))
+      || (_comFiltros.linea==='FUTBOL' && esFutbol(a.LINEA||''));
+    const actOk = !_comFiltros.actIds.size || _comFiltros.actIds.has(String(a.ID));
+    return lineaOk && actOk && String(a.ACTIVA||'').toUpperCase().startsWith('S');
+  });
+  const actIdsSet = new Set(actsOk.map(a=>String(a.ID)));
+
+  const inscsRel = DB.inscripciones.filter(i =>
+    actIdsSet.has(String(i.ID_ACTIVIDAD)) && String(i.ESTADO||'').toUpperCase()==='ACTIVA'
+  );
+
+  const byCliente = {};
+  for (const ins of inscsRel) {
+    const alu = DB.alumnos.find(a=>String(a.ID_ALUMNO)===String(ins.ID_ALUMNO));
+    if (!alu) continue;
+    const cliId = String(alu.ID_CLIENTE);
+    if (!byCliente[cliId]) byCliente[cliId] = { aluIds: new Set(), inscs: [] };
+    byCliente[cliId].aluIds.add(String(alu.ID_ALUMNO));
+    byCliente[cliId].inscs.push(ins);
+  }
+
+  return Object.entries(byCliente).map(([cliId, data]) => {
+    const cli = DB.clientes.find(c=>String(c.ID_CLIENTE)===cliId);
+    if (!cli) return null;
+    const alumnos = [...data.aluIds].map(id=>DB.alumnos.find(a=>String(a.ID_ALUMNO)===id)).filter(Boolean);
+    const { importe, concepto } = _comImporte(cliId, [...data.aluIds], data.inscs);
+    const apellido = (cli.APELLIDOS||cli.NOMBRE||'').split(' ')[0].toUpperCase();
+    const mesAbrev = (_comFiltros.mes||'').split(' ')[0].slice(0,3).toUpperCase();
+    return {
+      cliId, alumnos,
+      nombre:   (cli.NOMBRE+' '+(cli.APELLIDOS||'')).trim(),
+      email:    cli.EMAIL||'',
+      telefono: cli['TELÉFONO']||cli.TELEFONO||'',
+      importe,
+      concepto: concepto || ('SM '+mesAbrev+' '+apellido),
+      mes:      _comFiltros.mes,
+    };
+  }).filter(Boolean).sort((a,b)=>a.nombre.localeCompare(b.nombre));
+}
+
+function _comImporte(cliId, aluIds, inscsRel) {
+  // Primero: pagos pendientes existentes para este mes
+  const pend = DB.pagos.filter(p => {
+    const esCli = String(p.ID_CLIENTE)===String(cliId) || aluIds.includes(String(p.ID_ALUMNO));
+    const esMes = !_comFiltros.mes || String(p.MES||'').toUpperCase()===_comFiltros.mes.toUpperCase();
+    return esCli && esMes && String(p.ESTADO||'').toUpperCase()==='PENDIENTE';
+  });
+  if (pend.length) {
+    const total = pend.reduce((s,p)=>s+(parseFloat(p.TOTAL_ESPERADO||p.IMPORTE||0)),0);
+    const cpts  = [...new Set(pend.map(p=>p.SERVICIO).filter(Boolean))];
+    return { importe: total, concepto: cpts.join(' + ') };
+  }
+  // Si no hay pagos pendientes: calcular desde inscripciones con regla bono
+  let total = 0; const cpts = [];
+  for (const aluId of aluIds) {
+    const aluIns = inscsRel.filter(i=>String(i.ID_ALUMNO)===aluId)
+      .map(i=>({ ins:i, act: DB.actividades.find(a=>String(a.ID)===String(i.ID_ACTIVIDAD)) }))
+      .filter(x=>x.act);
+    const bonoX  = aluIns.find(x=>/bono/i.test(sinTildes(x.act.NOMBRE||'')));
+    const hayRec = aluIns.some(x=>/recogida/i.test(sinTildes(x.act.NOMBRE||'')));
+    if (bonoX && hayRec) {
+      const p = parseFloat(bonoX.ins.PRECIO_ACORDADO||bonoX.act.PRECIO||0);
+      const d = parseFloat(bonoX.ins.DESCUENTO||0);
+      total += p*(1-d/100);
+      cpts.push(bonoX.act.NOMBRE);
+    } else {
+      for (const {ins,act} of aluIns) {
+        const p = parseFloat(ins.PRECIO_ACORDADO||act.PRECIO||0);
+        const d = parseFloat(ins.DESCUENTO||0);
+        total += p*(1-d/100);
+        cpts.push(act.NOMBRE);
+      }
+    }
+  }
+  return { importe: total, concepto: [...new Set(cpts)].join(' + ') };
+}
+
+function _comMsgWA(f) {
+  const tutor = f.nombre.split(' ')[0];
+  return 'Hola '+tutor+' 👋\n\n'
+    +'Te recordamos que el pago de *'+fmtEur(f.importe)+'* correspondiente a *'+(f.mes||'este mes')+'* está pendiente.\n\n'
+    +'📌 Concepto para la transferencia:\n*'+f.concepto+'*\n\n'
+    +'⏰ Plazo de pago: del 1 al 10 de cada mes.\n\n'
+    +'¡Muchas gracias! 🙏\nSM Academia';
+}
+
+function _comMsgEmail(f) {
+  const tutor = f.nombre.split(' ')[0];
+  return 'Hola '+tutor+',\n\n'
+    +'Te recordamos que el pago de '+fmtEur(f.importe)+' correspondiente a '+(f.mes||'este mes')+' está pendiente.\n\n'
+    +'Concepto de pago: '+f.concepto+'\n\n'
+    +'El plazo de pago es del 1 al 10 de cada mes.\n\n'
+    +'Gracias,\nSM Academia';
+}
+
+function _comMsgEjemplo() {
+  return 'Hola [Nombre] 👋\n\n'
+    +'Te recordamos que el pago de *[importe]* correspondiente a *[mes]* está pendiente.\n\n'
+    +'📌 Concepto para la transferencia:\n*SM [MES] [APELLIDO]*\n\n'
+    +'⏰ Plazo de pago: del 1 al 10 de cada mes.\n\n'
+    +'¡Muchas gracias! 🙏\nSM Academia';
 }
 
 // ══════════════════════════════════════════════════════════════════════════

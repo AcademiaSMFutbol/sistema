@@ -2444,13 +2444,17 @@ function _comFamilias() {
     if (!cli) return null;
     const aluIds = [...data.aluIds];
 
-    // Excluir familias que ya han pagado este mes (PAGADO sin PENDIENTE)
+    // Excluir familias que ya han pagado este mes (PAGADO/PAGADA sin PENDIENTE/PARCIAL)
+    const _esPagado = s => ['PAGADO','PAGADA'].includes(String(s||'').toUpperCase());
+    const _esPendiente = s => ['PENDIENTE','PARCIAL'].includes(String(s||'').toUpperCase());
     const pagosDelMes = DB.pagos.filter(p => {
       const esCli = String(p.ID_CLIENTE)===cliId || aluIds.includes(String(p.ID_ALUMNO));
-      return esCli && (!_comFiltros.mes || String(p.MES||'').toUpperCase()===_comFiltros.mes.toUpperCase());
+      const mesPago = sinTildes(String(p.MES||''));
+      const mesFiltro = sinTildes(_comFiltros.mes||'');
+      return esCli && (!mesFiltro || mesPago===mesFiltro);
     });
-    const tienePagado   = pagosDelMes.some(p => String(p.ESTADO||'').toUpperCase()==='PAGADO');
-    const tienePendiente= pagosDelMes.some(p => String(p.ESTADO||'').toUpperCase()==='PENDIENTE');
+    const tienePagado   = pagosDelMes.some(p => _esPagado(p.ESTADO));
+    const tienePendiente= pagosDelMes.some(p => _esPendiente(p.ESTADO));
     if (tienePagado && !tienePendiente) return null; // ya pagó
 
     const alumnos = aluIds.map(id=>DB.alumnos.find(a=>String(a.ID_ALUMNO)===id)).filter(Boolean);

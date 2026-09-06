@@ -2334,7 +2334,7 @@ function comunicacion() {
   if (!isAdmin()) { render('<div class="stub"><div class="stub-icon">🔒</div><h2>Acceso restringido</h2></div>'); return; }
   document.getElementById('topbar-actions').innerHTML = '';
   if (!_comFiltros.mes) _comFiltros.mes = _comMesActual();
-  _renderCom();
+  try { _renderCom(); } catch(e) { render('<div class="card" style="padding:20px;color:red"><b>Error Comunicación:</b> '+esc(e.message)+'<br><pre style="font-size:11px;white-space:pre-wrap">'+esc(e.stack||'')+'</pre></div>'); }
 }
 
 function _comMesActual() {

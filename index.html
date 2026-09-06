@@ -2470,29 +2470,37 @@ function _comImporte(cliId, aluIds, inscsRel) {
     const cpts  = [...new Set(pend.map(p=>p.SERVICIO).filter(Boolean))];
     return { importe: total, concepto: cpts.join(' + ') };
   }
-  // Si no hay pagos pendientes: calcular desde inscripciones con regla bono
-  let total = 0; const cpts = [];
-  for (const aluId of aluIds) {
+  // Calcular desde inscripciones con regla bono; luego descuento hermanos al 2º+
+  const perAlu = aluIds.map(aluId => {
     const aluIns = inscsRel.filter(i=>String(i.ID_ALUMNO)===aluId)
       .map(i=>({ ins:i, act: DB.actividades.find(a=>String(a.ID)===String(i.ID_ACTIVIDAD)) }))
       .filter(x=>x.act);
     const bonoX  = aluIns.find(x=>/bono/i.test(sinTildes(x.act.NOMBRE||'')));
     const hayRec = aluIns.some(x=>/recogida/i.test(sinTildes(x.act.NOMBRE||'')));
+    let sub = 0; const cpts = [];
     if (bonoX && hayRec) {
       const p = parseFloat(bonoX.ins.PRECIO_ACORDADO||bonoX.act.PRECIO||0);
       const d = parseFloat(bonoX.ins.DESCUENTO||0);
-      total += p*(1-d/100);
+      sub = p*(1-d/100);
       cpts.push(bonoX.act.NOMBRE);
     } else {
       for (const {ins,act} of aluIns) {
         const p = parseFloat(ins.PRECIO_ACORDADO||act.PRECIO||0);
         const d = parseFloat(ins.DESCUENTO||0);
-        total += p*(1-d/100);
+        sub += p*(1-d/100);
         cpts.push(act.NOMBRE);
       }
     }
-  }
-  return { importe: total, concepto: [...new Set(cpts)].join(' + ') };
+    return { sub, cpts };
+  });
+  // Ordenar de mayor a menor: el 2º y siguientes reciben 10% dto. hermanos
+  perAlu.sort((a,b)=>b.sub-a.sub);
+  let total = 0; const allCpts = [];
+  perAlu.forEach(({ sub, cpts }, idx) => {
+    total += idx === 0 ? sub : sub * 0.90;
+    allCpts.push(...cpts);
+  });
+  return { importe: total, concepto: [...new Set(allCpts)].join(' + ') };
 }
 
 function _comMsgWA(f) {

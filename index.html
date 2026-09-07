@@ -887,6 +887,17 @@ ${htmlBody}
 
 // Formatear fecha ISO a DD/MM/AAAA
 function sinTildes(s) { return String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase(); }
+function _mesNorm(m) {
+  const s = sinTildes((m||'').trim());
+  const iso = s.match(/^(\d{4})-(\d{2})/);
+  if (iso) return iso[1]+'-'+iso[2];
+  const meses = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO',
+                 'JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
+  for (let i = 0; i < meses.length; i++) {
+    if (s.includes(meses[i])) { const y = s.match(/\d{4}/); if (y) return y[0]+'-'+(String(i+1).padStart(2,'0')); }
+  }
+  return s;
+}
 function esFutbol(l)       { const u=sinTildes(l); return u.includes('FUTBOL'); }
 function esExtraescolar(l) { return sinTildes(l).includes('EXTRAESCOLAR'); }
 function diasInscripcion(i) {
@@ -2450,9 +2461,8 @@ function _comFamilias() {
     const _esPendiente = s => ['PENDIENTE','PARCIAL'].includes(String(s||'').toUpperCase());
     const pagosDelMes = DB.pagos.filter(p => {
       const esCli = String(p.ID_CLIENTE)===cliId || aluIds.includes(String(p.ID_ALUMNO));
-      const mesPago = sinTildes(String(p.MES||''));
-      const mesFiltro = sinTildes(_comFiltros.mes||'');
-      return esCli && (!mesFiltro || mesPago===mesFiltro);
+      const mesFiltro = _mesNorm(_comFiltros.mes);
+      return esCli && (!mesFiltro || _mesNorm(p.MES)===mesFiltro);
     });
     const tienePagado   = pagosDelMes.some(p => _esPagado(p.ESTADO));
     const tienePendiente= pagosDelMes.some(p => _esPendiente(p.ESTADO));
@@ -2612,9 +2622,10 @@ function _gmPreview() {
     const cli = DB.clientes.find(c=>String(c.ID_CLIENTE)===cliId);
     if (!cli) continue;
     const aluIds = [...data.aluIds];
+    const mesFiltroNorm = _mesNorm(_gmMes);
     const yaTiene = DB.pagos.some(p => {
       const esCli = String(p.ID_CLIENTE)===cliId || aluIds.includes(String(p.ID_ALUMNO));
-      return esCli && String(p.MES||'').toUpperCase()===_gmMes.toUpperCase();
+      return esCli && _mesNorm(p.MES)===mesFiltroNorm;
     });
     if (yaTiene) continue;
     const perAlu = aluIds.map(aluId => {

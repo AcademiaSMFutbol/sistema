@@ -2341,6 +2341,19 @@ async function guardarRegistroCompleto() {
 //  MÓDULO: COMUNICACIÓN
 // ══════════════════════════════════════════════════════════════════════════
 let _comFiltros = { linea: 'EXTRAESCOLARES', actIds: new Set(), mes: '' };
+let _comTipo = 'COBRO';   // COBRO | INICIO | SUSPENSION | CAMBIO | PRESENTACION
+let _comNota = '';
+
+const _COM_BIZUM = '625 46 82 96';
+const _COM_IBAN  = 'ES__ ____ ____ ____ ____ ____'; // rellenar con IBAN real
+
+const _COM_TIPOS = {
+  COBRO:       { label: 'Cobro mensual',       icon: '💶', needsMes: true,  needsFinanciero: true  },
+  INICIO:      { label: 'Inicio de curso',     icon: '🎒', needsMes: false, needsFinanciero: false },
+  SUSPENSION:  { label: 'Suspensión de clases',icon: '⚠️', needsMes: false, needsFinanciero: false },
+  CAMBIO:      { label: 'Aviso / Cambio',      icon: '📢', needsMes: false, needsFinanciero: false },
+  PRESENTACION:{ label: 'Presentación curso',  icon: '📋', needsMes: false, needsFinanciero: false },
+};
 
 function comunicacion() {
   if (!isAdmin()) { render('<div class="stub"><div class="stub-icon">🔒</div><h2>Acceso restringido</h2></div>'); return; }
@@ -2354,13 +2367,14 @@ function _comMesActual() {
 }
 
 function _renderCom() {
+  const cfg = _COM_TIPOS[_comTipo] || _COM_TIPOS.COBRO;
   const actsLinea = DB.actividades.filter(a =>
     (!_comFiltros.linea || (_comFiltros.linea==='EXTRAESCOLARES'&&esExtraescolar(a.LINEA||'')) || (_comFiltros.linea==='FUTBOL'&&esFutbol(a.LINEA||'')))
     && String(a.ACTIVA||'').toUpperCase().startsWith('S')
   );
 
   const meses = [...new Set(DB.pagos.map(p=>String(p.MES||'')).filter(Boolean))].sort().reverse();
-  if (!meses.includes(_comFiltros.mes) && meses.length) _comFiltros.mes = meses[0];
+  if (cfg.needsMes && !meses.includes(_comFiltros.mes) && meses.length) _comFiltros.mes = meses[0];
   const opsMes = meses.map(m=>'<option value="'+m+'"'+(m===_comFiltros.mes?' selected':'')+'>'+m+'</option>').join('');
 
   const chipsHtml = actsLinea.map(a=>{
@@ -2368,29 +2382,55 @@ function _renderCom() {
     return '<button type="button" onclick="_comToggleAct(\''+a.ID+'\')" style="padding:5px 12px;border:1.5px solid '+(sel?'var(--green)':'var(--border2)')+';border-radius:20px;background:'+(sel?'#e8f5e9':'var(--bg2)')+';cursor:pointer;font-size:12px;transition:all .15s">'+esc(a.NOMBRE)+'</button>';
   }).join('');
 
-  const familias = _comFamilias();
+  const familias = cfg.needsMes ? _comFamilias() : _comTodasFamilias();
 
+  const tipoOps = Object.entries(_COM_TIPOS).map(([k,v])=>'<option value="'+k+'"'+(k===_comTipo?' selected':'')+'>'+v.icon+' '+v.label+'</option>').join('');
+
+  const emailSubject = {
+    COBRO:       'SM Academia — Pago '+_comFiltros.mes,
+    INICIO:      'SM Academia — Bienvenida al nuevo curso',
+    SUSPENSION:  'SM Academia — Suspensión de actividad',
+    CAMBIO:      'SM Academia — Aviso importante',
+    PRESENTACION:'SM Academia — Presentación del curso',
+  }[_comTipo] || 'SM Academia';
+
+  const cols = cfg.needsFinanciero ? 5 : 3;
   const rows = familias.map(f => {
     const tel = String(f.telefono||'').replace(/\D/g,'');
     const wa  = tel ? 'https://wa.me/'+(tel.length===9?'34'+tel:tel)+'?text='+encodeURIComponent(_comMsgWA(f)) : '';
     const emailHref = f.email
-      ? 'mailto:'+encodeURIComponent(f.email)+'?subject='+encodeURIComponent('SM Academia — Pago '+f.mes)+'&body='+encodeURIComponent(_comMsgEmail(f))
+      ? 'mailto:'+encodeURIComponent(f.email)+'?subject='+encodeURIComponent(emailSubject)+'&body='+encodeURIComponent(_comMsgEmail(f))
       : '';
     return '<tr>'
       +'<td><strong>'+esc(f.nombre)+'</strong>'+(f.pagoParcial?'<span style="margin-left:6px;font-size:10px;background:#fff3cd;color:#856404;padding:1px 6px;border-radius:10px">⚠ parcial</span>':'')+(f.email?'<br><span style="font-size:11px;color:var(--text3)">'+esc(f.email)+'</span>':'')+'</td>'
       +'<td style="font-size:12px">'+f.alumnos.map(a=>esc((a.NOMBRE+' '+(a.APELLIDOS||'')).trim())).join('<br>')+'</td>'
-      +'<td style="font-variant-numeric:tabular-nums;font-weight:700">'+fmtEur(f.importe)+'</td>'
-      +'<td style="font-family:monospace;font-size:12px;color:var(--blue)">'+esc(f.concepto)+'</td>'
+      +(cfg.needsFinanciero
+        ?'<td style="font-variant-numeric:tabular-nums;font-weight:700">'+fmtEur(f.importe)+'</td>'
+         +'<td style="font-family:monospace;font-size:12px;color:var(--blue)">'+esc(f.concepto)+'</td>'
+        :'')
       +'<td style="white-space:nowrap">'
       +(wa?'<a href="'+wa+'" target="_blank" class="btn btn-sm" style="background:#25D366;color:#fff;margin-right:4px">📲 WA</a>':'<span style="font-size:11px;color:var(--text3)">Sin tel.</span> ')
       +(emailHref?'<a href="'+emailHref+'" class="btn btn-sm btn-secondary">✉ Email</a>':'')
       +'</td></tr>';
-  }).join('') || '<tr><td colspan="5"><div class="empty"><div class="empty-icon">🔍</div><p>Sin familias para ese filtro</p></div></td></tr>';
+  }).join('') || '<tr><td colspan="'+cols+'"><div class="empty"><div class="empty-icon">🔍</div><p>Sin familias para ese filtro</p></div></td></tr>';
 
   const ejMsg = familias[0] ? _comMsgWA(familias[0]) : _comMsgEjemplo();
+  const totalStr = cfg.needsFinanciero
+    ? fmtEur(familias.reduce((s,f)=>s+f.importe,0))+' total'
+    : familias.length+' familias';
 
   render('<div style="display:grid;gap:16px">'
     +'<div class="card" style="padding:16px 20px">'
+    // — Tipo de comunicación
+    +'<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--border)">'
+    +'<label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Tipo de comunicación</label>'
+    +'<select style="min-width:240px" onchange="_comSetTipo(this.value)">'+tipoOps+'</select>'
+    +(!cfg.needsFinanciero
+      ? '<div style="margin-top:10px"><label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Nota adicional <span style="font-weight:400;color:var(--text3)">(se añade al mensaje)</span></label>'
+        +'<textarea rows="2" style="width:100%;font-size:12px;resize:vertical" placeholder="Ej: La actividad del miércoles 10 queda suspendida por obras..." oninput="_comNota=this.value;_renderCom()" >'+esc(_comNota)+'</textarea></div>'
+      : '')
+    +'</div>'
+    // — Filtros de línea y actividades
     +'<div style="display:grid;grid-template-columns:180px 1fr;gap:16px;align-items:start">'
     +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Línea</label>'
     +'<select style="width:100%" onchange="_comSetLinea(this.value)">'
@@ -2398,23 +2438,31 @@ function _renderCom() {
     +'<option value="FUTBOL"'+(_comFiltros.linea==='FUTBOL'?' selected':'')+'>⚽ SM Fútbol</option>'
     +'<option value=""'+(!_comFiltros.linea?' selected':'')+'>Todas</option>'
     +'</select></div>'
-    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Actividades <span style="font-weight:400;color:var(--text3)">(ninguna = todas las de la línea)</span></label>'
+    +'<div><label style="font-size:12px;font-weight:600;display:block;margin-bottom:6px">Actividades <span style="font-weight:400;color:var(--text3)">(ninguna = todas)</span></label>'
     +'<div style="display:flex;flex-wrap:wrap;gap:6px">'+(chipsHtml||'<span style="font-size:12px;color:var(--text3)">Sin actividades</span>')+'</div></div>'
     +'</div>'
-    +'<div style="display:flex;gap:16px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">'
-    +'<div><label style="font-size:12px;font-weight:600">Mes / período</label><br>'
-    +'<select style="min-width:200px" onchange="_comSetMes(this.value)">'+opsMes+'</select></div>'
-    +'<div style="margin-left:auto;text-align:right">'
-    +'<div style="font-size:28px;font-weight:700;color:var(--green)">'+familias.length+'</div>'
-    +'<div style="font-size:12px;color:var(--text3)">familias · '+fmtEur(familias.reduce((s,f)=>s+f.importe,0))+' total</div>'
-    +'</div></div></div>'
+    // — Mes (solo para cobro)
+    +(cfg.needsMes
+      ?'<div style="display:flex;gap:16px;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">'
+        +'<div><label style="font-size:12px;font-weight:600">Mes / período</label><br>'
+        +'<select style="min-width:200px" onchange="_comSetMes(this.value)">'+opsMes+'</select></div>'
+        +'<div style="margin-left:auto;text-align:right">'
+        +'<div style="font-size:28px;font-weight:700;color:var(--green)">'+familias.length+'</div>'
+        +'<div style="font-size:12px;color:var(--text3)">familias · '+fmtEur(familias.reduce((s,f)=>s+f.importe,0))+' total</div>'
+        +'</div></div>'
+      :'<div style="margin-top:10px;text-align:right;font-size:13px;color:var(--text3)">'+familias.length+' familias</div>')
+    +'</div>'
+    // — Vista previa mensaje
     +'<div class="card" style="padding:14px 20px">'
     +'<div class="card-title" style="margin-bottom:8px">Vista previa del mensaje <span style="font-size:11px;font-weight:400;color:var(--text3)">'+(familias[0]?'— '+familias[0].nombre:'— ejemplo')+'</span></div>'
     +'<pre style="font-size:12px;line-height:1.65;white-space:pre-wrap;background:var(--bg2);padding:12px;border-radius:8px;border:1px solid var(--border);margin:0">'+esc(ejMsg)+'</pre>'
     +'</div>'
+    // — Tabla
     +'<div class="card" style="padding:14px 20px">'
     +'<div class="table-wrap"><table style="font-size:13px">'
-    +'<thead><tr><th>Familia</th><th>Alumno/s</th><th>Importe</th><th>Concepto transferencia</th><th>Enviar</th></tr></thead>'
+    +'<thead><tr><th>Familia</th><th>Alumno/s</th>'
+    +(cfg.needsFinanciero?'<th>Importe</th><th>Concepto transferencia</th>':'')
+    +'<th>Enviar</th></tr></thead>'
     +'<tbody>'+rows+'</tbody>'
     +'</table></div></div>'
     +'</div>');
@@ -2422,9 +2470,45 @@ function _renderCom() {
 
 function _comSetLinea(v) { _comFiltros.linea = v; _comFiltros.actIds = new Set(); _renderCom(); }
 function _comSetMes(v)   { _comFiltros.mes   = v; _renderCom(); }
+function _comSetTipo(v)  { _comTipo = v; _comNota = ''; _renderCom(); }
 function _comToggleAct(id) {
   if (_comFiltros.actIds.has(id)) _comFiltros.actIds.delete(id); else _comFiltros.actIds.add(id);
   _renderCom();
+}
+
+function _comTodasFamilias() {
+  const actsOk = DB.actividades.filter(a => {
+    const lineaOk = !_comFiltros.linea
+      || (_comFiltros.linea==='EXTRAESCOLARES' && esExtraescolar(a.LINEA||''))
+      || (_comFiltros.linea==='FUTBOL' && esFutbol(a.LINEA||''));
+    const actOk = !_comFiltros.actIds.size || _comFiltros.actIds.has(String(a.ID));
+    return lineaOk && actOk && String(a.ACTIVA||'').toUpperCase().startsWith('S');
+  });
+  const actIdsSet = new Set(actsOk.map(a=>String(a.ID)));
+  const inscsRel = DB.inscripciones.filter(i =>
+    actIdsSet.has(String(i.ID_ACTIVIDAD)) && String(i.ESTADO||'').toUpperCase()==='ACTIVA'
+  );
+  const byCliente = {};
+  for (const ins of inscsRel) {
+    const alu = DB.alumnos.find(a=>String(a.ID_ALUMNO)===String(ins.ID_ALUMNO));
+    if (!alu) continue;
+    const cliId = String(alu.ID_CLIENTE);
+    if (!byCliente[cliId]) byCliente[cliId] = { aluIds: new Set(), inscs: [] };
+    byCliente[cliId].aluIds.add(String(alu.ID_ALUMNO));
+    byCliente[cliId].inscs.push(ins);
+  }
+  return Object.entries(byCliente).map(([cliId, data]) => {
+    const cli = DB.clientes.find(c=>String(c.ID_CLIENTE)===cliId);
+    if (!cli) return null;
+    const alumnos = [...data.aluIds].map(id=>DB.alumnos.find(a=>String(a.ID_ALUMNO)===id)).filter(Boolean);
+    return {
+      cliId, alumnos,
+      nombre:   (cli.NOMBRE+' '+(cli.APELLIDOS||'')).trim(),
+      email:    cli.EMAIL||'',
+      telefono: cli['TELÉFONO']||cli.TELEFONO||'',
+      importe: 0, concepto: '', mes: '', pagoParcial: false,
+    };
+  }).filter(Boolean).sort((a,b)=>a.nombre.localeCompare(b.nombre));
 }
 
 function _comFamilias() {
@@ -2532,28 +2616,112 @@ function _comImporte(cliId, aluIds, inscsRel) {
 
 function _comMsgWA(f) {
   const tutor = f.nombre.split(' ')[0];
-  return 'Hola '+tutor+' 👋\n\n'
-    +'Te recordamos que el pago de *'+fmtEur(f.importe)+'* correspondiente a *'+(f.mes||'este mes')+'* está pendiente.\n\n'
-    +'📌 Concepto para la transferencia:\n*'+f.concepto+'*\n\n'
-    +'⏰ Plazo de pago: del 1 al 10 de cada mes.\n\n'
-    +'¡Muchas gracias! 🙏\nSM Academia';
+  const nota = (_comNota||'').trim();
+  switch (_comTipo) {
+    case 'COBRO':
+      return 'Hola '+tutor+' 👋\n\n'
+        +'Te recordamos que el pago de *'+fmtEur(f.importe)+'* correspondiente a *'+(f.mes||'este mes')+'* está pendiente.\n\n'
+        +'📌 *Concepto:* '+f.concepto+'\n\n'
+        +'💳 *Formas de pago:*\n'
+        +'• Transferencia: '+_COM_IBAN+'\n'
+        +'• Bizum: '+_COM_BIZUM+'\n\n'
+        +'⏰ Plazo: del 1 al 10 de cada mes.\n\n'
+        +'¡Muchas gracias! 🙏\nSM Academia';
+    case 'INICIO':
+      return 'Hola '+tutor+' 👋\n\n'
+        +'¡Bienvenido/a al nuevo curso de *SM Academia*! 🎉\n\n'
+        +'Para poder disfrutar de las actividades, por favor completa estos pasos:\n\n'
+        +'1️⃣ *Registro como socio/a AMPA* _(obligatorio para cualquier actividad)_\n'
+        +'   Cuota anual: *20 €*\n\n'
+        +'2️⃣ *Inscripción en actividades* (si aún no lo has hecho)\n'
+        +'   🌐 smacademia.github.io/smAPP360/\n\n'
+        +'3️⃣ *Pago de cuotas*\n'
+        +'   • AMPA: 20 €/anual\n'
+        +'   • Actividades: según tarifa acordada\n'
+        +'   • Bizum: '+_COM_BIZUM+'\n'
+        +'   • Transferencia: '+_COM_IBAN+'\n\n'
+        +'4️⃣ *Acceso a tu área privada*\n'
+        +'   🌐 smacademia.github.io/smAPP360/\n'
+        +'   _(datos, facturas y seguimiento de tu hijo/a)_\n\n'
+        +(nota?'📢 '+nota+'\n\n':'')
+        +'¡Estamos a tu disposición para cualquier duda! 😊\n'
+        +'SM Academia · 📲 '+_COM_BIZUM;
+    case 'SUSPENSION':
+      return 'Hola '+tutor+' 👋\n\n'
+        +'⚠️ Te comunicamos que la actividad queda *suspendida* temporalmente.\n\n'
+        +(nota?'📅 '+nota+'\n\n':'📅 [Fecha y motivo]\n\n')
+        +'Disculpad las molestias. ¡Nos vemos pronto! 👋\n'
+        +'SM Academia · 📲 '+_COM_BIZUM;
+    case 'CAMBIO':
+      return 'Hola '+tutor+' 👋\n\n'
+        +'📢 Te informamos de un *cambio* en nuestras actividades:\n\n'
+        +(nota?nota+'\n\n':'[Descripción del cambio]\n\n')
+        +'Para más información: 📲 '+_COM_BIZUM+'\n\n'
+        +'¡Gracias por tu comprensión! 🙏\nSM Academia';
+    case 'PRESENTACION':
+      return 'Hola '+tutor+' 👋\n\n'
+        +'¡Ya está aquí el nuevo curso de *SM Academia*! 🎒⚽\n\n'
+        +(nota?nota+'\n\n':'📅 Inicio: [fecha]\n📍 Lugar: [lugar]\n🕑 Horarios: [horarios]\n\n')
+        +'Para inscribirte o más info:\n'
+        +'🌐 smacademia.github.io/smAPP360/\n'
+        +'📲 '+_COM_BIZUM+'\n\n'
+        +'¡Esperamos verte! 🙏\nSM Academia';
+    default:
+      return '';
+  }
 }
 
 function _comMsgEmail(f) {
   const tutor = f.nombre.split(' ')[0];
-  return 'Hola '+tutor+',\n\n'
-    +'Te recordamos que el pago de '+fmtEur(f.importe)+' correspondiente a '+(f.mes||'este mes')+' está pendiente.\n\n'
-    +'Concepto de pago: '+f.concepto+'\n\n'
-    +'El plazo de pago es del 1 al 10 de cada mes.\n\n'
-    +'Gracias,\nSM Academia';
+  const nota = (_comNota||'').trim();
+  switch (_comTipo) {
+    case 'COBRO':
+      return 'Hola '+tutor+',\n\n'
+        +'Te recordamos que el pago de '+fmtEur(f.importe)+' correspondiente a '+(f.mes||'este mes')+' está pendiente.\n\n'
+        +'Concepto de pago: '+f.concepto+'\n\n'
+        +'Formas de pago:\n'
+        +'• Transferencia: '+_COM_IBAN+'\n'
+        +'• Bizum: '+_COM_BIZUM+'\n\n'
+        +'El plazo de pago es del 1 al 10 de cada mes.\n\n'
+        +'Gracias,\nSM Academia';
+    case 'INICIO':
+      return 'Hola '+tutor+',\n\n'
+        +'Te damos la bienvenida al nuevo curso de SM Academia.\n\n'
+        +'Para poder disfrutar de las actividades, es necesario completar los siguientes pasos:\n\n'
+        +'1. Registro como socio/a AMPA (obligatorio)\n'
+        +'   Cuota anual: 20 €\n\n'
+        +'2. Inscripción en actividades (si aún no lo has hecho)\n'
+        +'   https://smacademia.github.io/smAPP360/\n\n'
+        +'3. Pago de cuotas\n'
+        +'   - AMPA: 20 €/anual\n'
+        +'   - Actividades: según tarifa acordada\n'
+        +'   - Transferencia: '+_COM_IBAN+'\n'
+        +'   - Bizum: '+_COM_BIZUM+'\n\n'
+        +'4. Acceso a tu área privada\n'
+        +'   https://smacademia.github.io/smAPP360/\n'
+        +'   (datos, facturas y seguimiento)\n\n'
+        +(nota?nota+'\n\n':'')
+        +'Quedamos a tu disposición para cualquier consulta.\n\n'
+        +'Un saludo,\nSM Academia\n'+_COM_BIZUM;
+    default:
+      return _comMsgWA(f).replace(/\*([^*]+)\*/g,'$1').replace(/_([^_]+)_/g,'$1');
+  }
 }
 
 function _comMsgEjemplo() {
-  return 'Hola [Nombre] 👋\n\n'
-    +'Te recordamos que el pago de *[importe]* correspondiente a *[mes]* está pendiente.\n\n'
-    +'📌 Concepto para la transferencia:\n*SM [MES] [APELLIDO]*\n\n'
-    +'⏰ Plazo de pago: del 1 al 10 de cada mes.\n\n'
-    +'¡Muchas gracias! 🙏\nSM Academia';
+  const cfg = _COM_TIPOS[_comTipo] || _COM_TIPOS.COBRO;
+  const nota = (_comNota||'').trim();
+  if (_comTipo === 'COBRO') {
+    return 'Hola [Nombre] 👋\n\n'
+      +'Te recordamos que el pago de *[importe]* correspondiente a *[mes]* está pendiente.\n\n'
+      +'📌 *Concepto:* SM [MES] [APELLIDO]\n\n'
+      +'💳 *Formas de pago:*\n'
+      +'• Transferencia: '+_COM_IBAN+'\n'
+      +'• Bizum: '+_COM_BIZUM+'\n\n'
+      +'⏰ Plazo: del 1 al 10 de cada mes.\n\n'
+      +'¡Muchas gracias! 🙏\nSM Academia';
+  }
+  return _comMsgWA({ nombre: '[Nombre]', importe: 0, concepto: '', mes: '' });
 }
 
 // ── Generación masiva de pagos ────────────────────────────────────────────

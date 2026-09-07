@@ -900,6 +900,9 @@ function _mesNorm(m) {
 }
 function esFutbol(l)       { const u=sinTildes(l); return u.includes('FUTBOL'); }
 function esExtraescolar(l) { return sinTildes(l).includes('EXTRAESCOLAR'); }
+function esBonoUsos(nombre){ const n=sinTildes(nombre||''); return n.includes('BONO') && n.includes('USO') && !n.includes('RECOGIDA'); }
+function bonoCapacidad(nombre){ const m=sinTildes(nombre||'').match(/(\d+)/); return m?parseInt(m[1]):10; }
+function bonoUsosCont(insc){ const m=String(insc.OBSERVACIONES||'').match(/USOS:(\d+)/i); return m?parseInt(m[1]):0; }
 function diasInscripcion(i) {
   const raw = i.DIAS_SEMANA || i.DIA_SEMANA || '';
   return String(raw).split(',').map(d => sinTildes(d.trim())).filter(Boolean);
@@ -983,12 +986,9 @@ function dashboard() {
   const preinscPendientes  = DB.preinscripciones.filter(p => String(p.ESTADO||'').toUpperCase() === 'RECIBIDA').length;
 
   const mesActual = new Date().toLocaleString('es-ES', { month:'long', year:'numeric' });
+  const _mesHoyK = new Date().toISOString().slice(0,7);
   const ingresosMes = DB.pagos
-    .filter(p => {
-      const mes = String(p.MES||'').toLowerCase();
-      return mes.includes(new Date().toLocaleString('es-ES',{month:'long'}).toLowerCase()) &&
-             String(p.ESTADO||'').toUpperCase() === 'PAGADO';
-    })
+    .filter(p => _mesNorm(p.MES) === _mesHoyK && String(p.ESTADO||'').toUpperCase() === 'PAGADO')
     .reduce((s,p) => s + (parseFloat(p.TOTAL_RECIBIDO)||0), 0);
 
   render(`
@@ -2341,11 +2341,14 @@ async function guardarRegistroCompleto() {
 //  MÓDULO: COMUNICACIÓN
 // ══════════════════════════════════════════════════════════════════════════
 let _comFiltros = { linea: 'EXTRAESCOLARES', actIds: new Set(), mes: '' };
-let _comTipo = 'COBRO';   // COBRO | INICIO | SUSPENSION | CAMBIO | PRESENTACION
-let _comNota = '';
+let _comTipo      = 'COBRO';
+let _comNota      = '';
+let _comMsgCustom = null;
+let _comLastEjMsg = '';
 
-const _COM_BIZUM = '625 46 82 96';
-const _COM_IBAN  = 'ES69 0182 5036 7102 0163 5388';
+const _COM_BIZUM     = '625 46 82 96';
+const _COM_IBAN      = 'ES69 0182 5036 7102 0163 5388';
+const _COM_IBAN_AMPA = 'ES43 0049 1306 0823 1023 0054'; // concepto: nombre+apellidos+curso del alumno
 
 const _COM_TIPOS = {
   COBRO:       { label: 'Cobro mensual',       icon: '💶', needsMes: true,  needsFinanciero: true  },
@@ -2397,7 +2400,7 @@ function _renderCom() {
   const cols = cfg.needsFinanciero ? 5 : 3;
   const rows = familias.map(f => {
     const tel = String(f.telefono||'').replace(/\D/g,'');
-    const wa  = tel ? 'https://wa.me/'+(tel.length===9?'34'+tel:tel)+'?text='+encodeURIComponent(_comMsgWA(f)) : '';
+    const wa  = tel ? 'https://wa.me/'+(tel.length===9?'34'+tel:tel)+'?text='+encodeURIComponent(_comGetMsg(f)) : '';
     const emailHref = f.email
       ? 'mailto:'+encodeURIComponent(f.email)+'?subject='+encodeURIComponent(emailSubject)+'&body='+encodeURIComponent(_comMsgEmail(f))
       : '';
@@ -2414,7 +2417,10 @@ function _renderCom() {
       +'</td></tr>';
   }).join('') || '<tr><td colspan="'+cols+'"><div class="empty"><div class="empty-icon">🔍</div><p>Sin familias para ese filtro</p></div></td></tr>';
 
-  const ejMsg = familias[0] ? _comMsgWA(familias[0]) : _comMsgEjemplo();
+  const ejMsg = _comMsgCustom
+    ? _comGetMsg(familias[0] || { nombre:'[Nombre]', importe:0, concepto:'', mes:'' })
+    : (familias[0] ? _comMsgWA(familias[0]) : _comMsgEjemplo());
+  _comLastEjMsg = familias[0] ? _comMsgWA(familias[0]) : _comMsgEjemplo();
   const totalStr = cfg.needsFinanciero
     ? fmtEur(familias.reduce((s,f)=>s+f.importe,0))+' total'
     : familias.length+' familias';
@@ -2454,7 +2460,14 @@ function _renderCom() {
     +'</div>'
     // — Vista previa mensaje
     +'<div class="card" style="padding:14px 20px">'
-    +'<div class="card-title" style="margin-bottom:8px">Vista previa del mensaje <span style="font-size:11px;font-weight:400;color:var(--text3)">'+(familias[0]?'— '+familias[0].nombre:'— ejemplo')+'</span></div>'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
+    +'<div class="card-title" style="margin:0">Vista previa'
+    +(_comMsgCustom?' <span style="font-size:11px;background:var(--blue);color:#fff;padding:1px 8px;border-radius:10px;vertical-align:middle">✎ personalizado</span>':'')
+    +'<span style="font-size:11px;font-weight:400;color:var(--text3)"> — '+(familias[0]?familias[0].nombre:'ejemplo')+'</span></div>'
+    +'<div style="display:flex;gap:6px">'
+    +(_comMsgCustom?'<button class="btn btn-sm btn-secondary" onclick="_comRestaurarMsg()">↺ Original</button>':'')
+    +'<button class="btn btn-sm btn-secondary" onclick="_comAbrirEditorMsg()">✏️ Editar</button>'
+    +'</div></div>'
     +'<pre style="font-size:12px;line-height:1.65;white-space:pre-wrap;background:var(--bg2);padding:12px;border-radius:8px;border:1px solid var(--border);margin:0">'+esc(ejMsg)+'</pre>'
     +'</div>'
     // — Tabla
@@ -2465,12 +2478,14 @@ function _renderCom() {
     +'<th>Enviar</th></tr></thead>'
     +'<tbody>'+rows+'</tbody>'
     +'</table></div></div>'
+    // — Bonos activos
+    +_renderBonosPanel()
     +'</div>');
 }
 
 function _comSetLinea(v) { _comFiltros.linea = v; _comFiltros.actIds = new Set(); _renderCom(); }
 function _comSetMes(v)   { _comFiltros.mes   = v; _renderCom(); }
-function _comSetTipo(v)  { _comTipo = v; _comNota = ''; _renderCom(); }
+function _comSetTipo(v)  { _comTipo = v; _comNota = ''; _comMsgCustom = null; _renderCom(); }
 function _comToggleAct(id) {
   if (_comFiltros.actIds.has(id)) _comFiltros.actIds.delete(id); else _comFiltros.actIds.add(id);
   _renderCom();
@@ -2573,7 +2588,7 @@ function _comImporte(cliId, aluIds, inscsRel) {
   // Primero: pagos pendientes existentes para este mes
   const pend = DB.pagos.filter(p => {
     const esCli = String(p.ID_CLIENTE)===String(cliId) || aluIds.includes(String(p.ID_ALUMNO));
-    const esMes = !_comFiltros.mes || String(p.MES||'').toUpperCase()===_comFiltros.mes.toUpperCase();
+    const esMes = !_comFiltros.mes || _mesNorm(p.MES)===_mesNorm(_comFiltros.mes);
     return esCli && esMes && String(p.ESTADO||'').toUpperCase()==='PENDIENTE';
   });
   if (pend.length) {
@@ -2586,8 +2601,10 @@ function _comImporte(cliId, aluIds, inscsRel) {
     const aluIns = inscsRel.filter(i=>String(i.ID_ALUMNO)===aluId)
       .map(i=>({ ins:i, act: DB.actividades.find(a=>String(a.ID)===String(i.ID_ACTIVIDAD)) }))
       .filter(x=>x.act);
-    const bonoX  = aluIns.find(x=>/bono/i.test(sinTildes(x.act.NOMBRE||'')));
-    const hayRec = aluIns.some(x=>/recogida/i.test(sinTildes(x.act.NOMBRE||'')));
+    // Excluir bonos de sesiones (prepago) del cobro mensual
+    const aluInsMens = aluIns.filter(x=>!esBonoUsos(x.act.NOMBRE||''));
+    const bonoX  = aluInsMens.find(x=>/bono/i.test(sinTildes(x.act.NOMBRE||'')));
+    const hayRec = aluInsMens.some(x=>/recogida/i.test(sinTildes(x.act.NOMBRE||'')));
     let sub = 0; const cpts = [];
     if (bonoX && hayRec) {
       const p = parseFloat(bonoX.ins.PRECIO_ACORDADO||bonoX.act.PRECIO||0);
@@ -2595,7 +2612,7 @@ function _comImporte(cliId, aluIds, inscsRel) {
       sub = p*(1-d/100);
       cpts.push(bonoX.act.NOMBRE);
     } else {
-      for (const {ins,act} of aluIns) {
+      for (const {ins,act} of aluInsMens) {
         const p = parseFloat(ins.PRECIO_ACORDADO||act.PRECIO||0);
         const d = parseFloat(ins.DESCUENTO||0);
         sub += p*(1-d/100);
@@ -2632,11 +2649,12 @@ function _comMsgWA(f) {
         +'¡Bienvenido/a al nuevo curso de *SM Academia*! 🎉\n\n'
         +'Para poder disfrutar de las actividades, por favor completa estos pasos:\n\n'
         +'1️⃣ *Registro como socio/a AMPA* _(obligatorio para cualquier actividad)_\n'
-        +'   Cuota anual: *20 €*\n\n'
+        +'   • Cuota anual: *20 €*\n'
+        +'   • Transferencia AMPA: '+_COM_IBAN_AMPA+'\n'
+        +'   • Concepto: nombre + apellidos + curso del alumno/a\n\n'
         +'2️⃣ *Inscripción en actividades* (si aún no lo has hecho)\n'
         +'   🌐 smacademia.github.io/smAPP360/\n\n'
-        +'3️⃣ *Pago de cuotas*\n'
-        +'   • AMPA: 20 €/anual\n'
+        +'3️⃣ *Pago de actividades*\n'
         +'   • Actividades: según tarifa acordada\n'
         +'   • Bizum: '+_COM_BIZUM+'\n'
         +'   • Transferencia: '+_COM_IBAN+'\n\n'
@@ -2722,6 +2740,84 @@ function _comMsgEjemplo() {
       +'¡Muchas gracias! 🙏\nSM Academia';
   }
   return _comMsgWA({ nombre: '[Nombre]', importe: 0, concepto: '', mes: '' });
+}
+
+function _comGetMsg(f) {
+  if (!_comMsgCustom) return _comMsgWA(f);
+  const tutor = f.nombre.split(' ')[0];
+  return _comMsgCustom
+    .replace(/\{NOMBRE\}/g, tutor)
+    .replace(/\{FAMILIA\}/g, f.nombre)
+    .replace(/\{IMPORTE\}/g, fmtEur(f.importe||0))
+    .replace(/\{MES\}/g, f.mes||'')
+    .replace(/\{CONCEPTO\}/g, f.concepto||'');
+}
+
+function _comAbrirEditorMsg() {
+  openModal(
+    '✏️ Editar mensaje',
+    '<textarea id="com-msg-ta" style="width:100%;height:300px;font-size:12px;line-height:1.65;resize:vertical;font-family:monospace">'+esc(_comLastEjMsg)+'</textarea>'
+    +'<p style="font-size:11px;color:var(--text3);margin-top:8px">Variables: <code>{NOMBRE}</code> · <code>{FAMILIA}</code> · <code>{IMPORTE}</code> · <code>{MES}</code> · <code>{CONCEPTO}</code></p>',
+    '<button class="btn" onclick="_comAplicarMsgEditor()">Usar este mensaje</button>'
+    +'<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>'
+  );
+}
+function _comAplicarMsgEditor() {
+  const ta = document.getElementById('com-msg-ta');
+  if (ta) { _comMsgCustom = ta.value; closeModal(); _renderCom(); }
+}
+function _comRestaurarMsg() { _comMsgCustom = null; _renderCom(); }
+
+function _renderBonosPanel() {
+  const bonoInscs = DB.inscripciones.filter(i =>
+    String(i.ESTADO||'').toUpperCase()==='ACTIVA' &&
+    esBonoUsos(DB.actividades.find(a=>String(a.ID)===String(i.ID_ACTIVIDAD))?.NOMBRE||'')
+  );
+  if (!bonoInscs.length) return '';
+  const rows = bonoInscs.map(ins => {
+    const act = DB.actividades.find(a=>String(a.ID)===String(ins.ID_ACTIVIDAD));
+    const alu = DB.alumnos.find(a=>String(a.ID_ALUMNO)===String(ins.ID_ALUMNO));
+    const cli = alu ? DB.clientes.find(c=>String(c.ID_CLIENTE)===String(alu.ID_CLIENTE)) : null;
+    const cap  = bonoCapacidad(act?.NOMBRE||'');
+    const usos = bonoUsosCont(ins);
+    const rest = cap - usos;
+    const alerta = rest <= 2;
+    const color  = alerta ? 'var(--red)' : rest <= 4 ? 'var(--amber)' : 'var(--green)';
+    return '<tr'+(alerta?' style="background:rgba(220,53,69,.06)"':'')+'>'
+      +'<td><strong>'+esc((alu?(alu.NOMBRE+' '+(alu.APELLIDOS||'')).trim():'—'))+'</strong>'
+      +(cli?'<br><span style="font-size:11px;color:var(--text3)">'+esc((cli.NOMBRE+' '+(cli.APELLIDOS||'')).trim())+'</span>':'')+'</td>'
+      +'<td style="font-size:12px">'+esc(act?.NOMBRE||'—')+'</td>'
+      +'<td style="text-align:center">'
+      +'<div style="font-size:18px;font-weight:700;color:'+color+'">'+(rest)+'</div>'
+      +'<div style="font-size:10px;color:var(--text3)">de '+cap+' restantes</div>'
+      +'</td>'
+      +'<td style="text-align:center">'
+      +'<div style="font-size:12px;color:var(--text3);margin-bottom:4px">'+usos+' / '+cap+' usados</div>'
+      +(alerta?'<span style="font-size:11px;background:var(--red);color:#fff;padding:1px 8px;border-radius:10px">⚠ Renovar</span>':'')
+      +'</td>'
+      +'<td><button class="btn btn-sm" onclick="_comRegistrarUsoBono(\''+esc(String(ins.ID_INSCRIPCION||ins.ID))+'\','+usos+','+cap+')">+1 Uso</button></td>'
+      +'</tr>';
+  }).join('');
+  return '<div class="card" style="padding:14px 20px;margin-top:0">'
+    +'<div class="card-title" style="margin-bottom:8px">🎫 Bonos de usos activos</div>'
+    +'<div class="table-wrap"><table style="font-size:13px">'
+    +'<thead><tr><th>Alumno/a</th><th>Bono</th><th style="text-align:center">Restantes</th><th style="text-align:center">Estado</th><th>Acción</th></tr></thead>'
+    +'<tbody>'+rows+'</tbody>'
+    +'</table></div></div>';
+}
+
+async function _comRegistrarUsoBono(inscId, usoActual, capacidad) {
+  if (usoActual >= capacidad) { showToast('Bono agotado — crea una nueva inscripción','error'); return; }
+  const insc = DB.inscripciones.find(i=>String(i.ID_INSCRIPCION||i.ID)===String(inscId));
+  if (!insc) return;
+  const obsActual = String(insc.OBSERVACIONES||'').replace(/USOS:\d+;?\s*/i,'').trim();
+  const nuevaObs  = 'USOS:'+(usoActual+1)+(obsActual?'; '+obsActual:'');
+  try {
+    await writeToSheet('INSCRIPCIONES', { OBSERVACIONES: nuevaObs }, inscId);
+    insc.OBSERVACIONES = nuevaObs;
+    showToast('Uso registrado ('+(usoActual+1)+'/'+capacidad+')'+(usoActual+1>=capacidad-2?' — ⚠ quedan '+(capacidad-usoActual-1)+' usos':''));
+    _renderCom();
+  } catch(e) { showToast('Error: '+e.message,'error'); }
 }
 
 // ── Generación masiva de pagos ────────────────────────────────────────────
@@ -3036,7 +3132,7 @@ function pagos(filtro) {
 
   const totalEsperado = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE').reduce((s,p)=>s+(parseFloat(p.TOTAL_ESPERADO||p.IMPORTE)||0),0);
   const totalCobr     = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+(parseFloat(p.TOTAL_RECIBIDO)||0),0);
-  const nPendMes      = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE'&&String(p.MES||'').startsWith(mesActK)).length;
+  const nPendMes      = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE'&&_mesNorm(p.MES)===mesActK).length;
 
   const bannerReclamacion = reclamacionActiva && nPendMes > 0
     ? `<div style="background:#e7f7e8;border:1px solid #25D366;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px">
@@ -4665,7 +4761,7 @@ function extraResumen() {
   const kAltasMes = insExtras.filter(i => String(i.FECHA_ALTA||'').startsWith(mesActK)).length;
 
   // KPI: pagos mes actual — solo cobros del AMPA como entidad (LINEA='AMPA')
-  const pagosMes = DB.pagos.filter(p => String(p.MES||'').startsWith(mesActK) && p.LINEA === 'AMPA');
+  const pagosMes = DB.pagos.filter(p => _mesNorm(p.MES) === mesActK && p.LINEA === 'AMPA');
   const cobradoMes  = pagosMes.filter(p => String(p.ESTADO||'').toUpperCase()==='PAGADO')
     .reduce((s,p) => s+(parseFloat(p.TOTAL_RECIBIDO)||0), 0);
   const pendienteMes = pagosMes.filter(p => String(p.ESTADO||'').toUpperCase()==='PENDIENTE')

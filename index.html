@@ -2780,22 +2780,26 @@ function _renderBonosPanel() {
     const cli = alu ? DB.clientes.find(c=>String(c.ID_CLIENTE)===String(alu.ID_CLIENTE)) : null;
     const cap  = bonoCapacidad(act?.NOMBRE||'');
     const usos = bonoUsosCont(ins);
-    const rest = cap - usos;
-    const alerta = rest <= 2;
-    const color  = alerta ? 'var(--red)' : rest <= 4 ? 'var(--amber)' : 'var(--green)';
-    return '<tr'+(alerta?' style="background:rgba(220,53,69,.06)"':'')+'>'
+    const rest    = cap - usos;
+    const agotado = rest <= 0;
+    const alerta  = !agotado && rest <= 2;
+    const color   = agotado ? 'var(--text3)' : alerta ? 'var(--red)' : rest <= 4 ? 'var(--amber)' : 'var(--green)';
+    return '<tr'+(agotado?' style="opacity:.6;background:rgba(0,0,0,.03)"':alerta?' style="background:rgba(220,53,69,.06)"':'')+'>'
       +'<td><strong>'+esc((alu?(alu.NOMBRE+' '+(alu.APELLIDOS||'')).trim():'—'))+'</strong>'
       +(cli?'<br><span style="font-size:11px;color:var(--text3)">'+esc((cli.NOMBRE+' '+(cli.APELLIDOS||'')).trim())+'</span>':'')+'</td>'
       +'<td style="font-size:12px">'+esc(act?.NOMBRE||'—')+'</td>'
       +'<td style="text-align:center">'
-      +'<div style="font-size:18px;font-weight:700;color:'+color+'">'+(rest)+'</div>'
+      +'<div style="font-size:18px;font-weight:700;color:'+color+'">'+(agotado?'0':rest)+'</div>'
       +'<div style="font-size:10px;color:var(--text3)">de '+cap+' restantes</div>'
       +'</td>'
       +'<td style="text-align:center">'
       +'<div style="font-size:12px;color:var(--text3);margin-bottom:4px">'+usos+' / '+cap+' usados</div>'
-      +(alerta?'<span style="font-size:11px;background:var(--red);color:#fff;padding:1px 8px;border-radius:10px">⚠ Renovar</span>':'')
+      +(agotado?'<span style="font-size:11px;background:var(--text3);color:#fff;padding:1px 8px;border-radius:10px">Agotado</span>'
+               :alerta?'<span style="font-size:11px;background:var(--red);color:#fff;padding:1px 8px;border-radius:10px">⚠ Renovar</span>':'')
       +'</td>'
-      +'<td><button class="btn btn-sm" onclick="_comRegistrarUsoBono(\''+esc(String(ins.ID_INSCRIPCION||ins.ID))+'\','+usos+','+cap+')">+1 Uso</button></td>'
+      +'<td>'+(agotado?'<span style="font-size:11px;color:var(--text3)">Renovar inscripción</span>'
+                      :'<button class="btn btn-sm" onclick="_comRegistrarUsoBono(\''+esc(String(ins.ID_INSCRIPCION||ins.ID))+'\','+usos+','+cap+')">+1 Uso manual</button>')
+      +'</td>'
       +'</tr>';
   }).join('');
   return '<div class="card" style="padding:14px 20px;margin-top:0">'
@@ -5066,22 +5070,35 @@ function cargarListaExtra() {
   const prev = DB.asistenciasExtra.find(a => String(a.ID_ACTIVIDAD)===actId && String(a.FECHA)===fecha);
   const prevIds = prev ? String(prev.ALUMNOS_PRESENTES||'').split(',').filter(Boolean) : [];
 
+  const actObj   = DB.actividades.find(a => String(a.ID) === actId);
+  const esBono   = actObj && esBonoUsos(actObj.NOMBRE || '');
+  const bonoCap  = esBono ? bonoCapacidad(actObj.NOMBRE) : 0;
+
   cont.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <span style="font-size:13px;color:var(--text3)">${alumnos.length} alumnos${diaHoy?' · '+diaHoy.charAt(0)+diaHoy.slice(1).toLowerCase():''}</span>
+      <span style="font-size:13px;color:var(--text3)">${alumnos.length} alumnos${diaHoy?' · '+diaHoy.charAt(0)+diaHoy.slice(1).toLowerCase():''}${esBono?' · 🎫 Bono usos (auto-contador)':''}</span>
       <div>
         <button class="btn btn-sm btn-secondary" onclick="marcarTodosExtra(true)">✓ Todos</button>
         <button class="btn btn-sm btn-secondary" style="margin-left:4px" onclick="marcarTodosExtra(false)">✗ Ninguno</button>
       </div>
     </div>
     <div id="lista-checks-extra" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-      ${alumnos.map(a=>`
+      ${alumnos.map(a => {
+        const insc  = inscs.find(i => String(i.ID_ALUMNO) === String(a.ID_ALUMNO));
+        const usos  = esBono && insc ? bonoUsosCont(insc) : -1;
+        const rest  = esBono ? bonoCap - usos : -1;
+        const bonoHtml = esBono && insc
+          ? `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'var(--green)'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`
+          : '';
+        return `
         <label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;cursor:pointer;border:1px solid var(--border2);font-size:13px;${prevIds.includes(String(a.ID_ALUMNO))?'background:var(--g4)':''}">
           <input type="checkbox" data-id="${a.ID_ALUMNO}" ${prevIds.includes(String(a.ID_ALUMNO))||!prev?'checked':''} style="width:16px;height:16px">
           <span>${esc(a.NOMBRE)} ${esc(a.APELLIDOS||'')}</span>
-        </label>`).join('')}
+          ${bonoHtml}
+        </label>`;
+      }).join('')}
     </div>
-    ${prev ? '<div class="badge badge-amber" style="margin-top:8px">⚠️ Ya existe asistencia para esta fecha — guardar la sobreescribirá</div>' : ''}
+    ${prev ? '<div class="badge badge-amber" style="margin-top:8px">⚠️ Ya existe asistencia para esta fecha — guardar sobreescribirá y no sumará usos ya contados</div>' : ''}
   `;
   if(wrap) wrap.style.display = '';
 }
@@ -5113,7 +5130,36 @@ function guardarAsistenciaExtra() {
   };
 
   writeToSheet('ASISTENCIAS_EXTRA', row, prev?.ID||null)
-  .then(()=>{ showToast(`Asistencia guardada — ${presentes.length}/${checks.length} presentes`); loadAllData().then(asistenciasExtra); })
+  .then(async () => {
+    // Auto-incrementar usos de bono para alumnos recién marcados presentes
+    const act = DB.actividades.find(a => String(a.ID) === actId);
+    if (act && esBonoUsos(act.NOMBRE || '')) {
+      const prevIds   = prev ? String(prev.ALUMNOS_PRESENTES||'').split(',').filter(Boolean) : [];
+      const nuevos    = presentes.filter(id => !prevIds.includes(id));
+      const cap       = bonoCapacidad(act.NOMBRE);
+      const avisos    = [];
+      for (const aluId of nuevos) {
+        const insc = DB.inscripciones.find(i =>
+          String(i.ID_ALUMNO)===aluId && String(i.ID_ACTIVIDAD)===actId &&
+          String(i.ESTADO||'').toUpperCase()==='ACTIVA'
+        );
+        if (!insc) continue;
+        const usos = bonoUsosCont(insc);
+        if (usos >= cap) { avisos.push(`Bono agotado para alumno ${aluId}`); continue; }
+        const obsBase  = String(insc.OBSERVACIONES||'').replace(/USOS:\d+;?\s*/i,'').trim();
+        const nuevaObs = 'USOS:'+(usos+1)+(obsBase?'; '+obsBase:'');
+        try {
+          await writeToSheet('INSCRIPCIONES',{OBSERVACIONES:nuevaObs}, insc.ID_INSCRIPCION||insc.ID);
+          insc.OBSERVACIONES = nuevaObs;
+          const restantes = cap - (usos+1);
+          if (restantes <= 2) avisos.push(`⚠ Bono: quedan ${restantes} uso${restantes===1?'':'s'} — ${DB.alumnos.find(a=>String(a.ID)===aluId)?.NOMBRE||aluId}`);
+        } catch(e) { /* best-effort */ }
+      }
+      avisos.forEach(m => showToast(m, 'warn'));
+    }
+    showToast(`Asistencia guardada — ${presentes.length}/${checks.length} presentes`);
+    loadAllData().then(asistenciasExtra);
+  })
   .catch(err=>showToast('Error: '+err.message,'error'));
 }
 

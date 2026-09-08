@@ -3893,7 +3893,8 @@ function personal() {
   topbarBtn('+ Nuevo trabajador', () => modalPersonal());
   topbarBtn('👨‍👩‍👧 Crear accesos familias', _generarAccesosFamilias, 'btn-secondary');
 
-  const trabajadores = DB.personal.filter(p => String(p.ROL||'').toUpperCase() !== 'AMPA');
+  const trabajadores = DB.personal.filter(p => !['AMPA','FAMILIA'].includes(String(p.ROL||'').toUpperCase()));
+  const familias     = DB.personal.filter(p => String(p.ROL||'').toUpperCase() === 'FAMILIA');
 
   function _certCell(raw) {
     const cert = String(raw||'').trim();
@@ -3904,7 +3905,7 @@ function personal() {
     return badge + '<span style="font-size:11px;color:var(--text3);margin-left:6px" title="' + esc(cert) + '">' + esc(cert.length > 24 ? cert.slice(0,22)+'…' : cert) + '</span>';
   }
 
-  const rows = trabajadores.map(p => {
+  const rowsTrab = trabajadores.map(p => {
     const pJson = JSON.stringify(p).replace(/'/g,"&#39;");
     return `<tr>
       <td class="mono">${esc(p.ID_MONITOR)}</td>
@@ -3920,16 +3921,43 @@ function personal() {
     </tr>`;
   }).join('') || `<tr><td colspan="10"><div class="empty"><div class="empty-icon">👤</div><p>Sin trabajadores registrados</p></div></td></tr>`;
 
+  const rowsFam = familias.map(p => {
+    const pJson = JSON.stringify(p).replace(/'/g,"&#39;");
+    const cli = DB.clientes.find(c => String(c.EMAIL||'').toLowerCase() === String(p.EMAIL||'').toLowerCase());
+    return `<tr>
+      <td><strong>${esc(p.NOMBRE)} ${esc(p.APELLIDOS||'')}</strong>
+        ${cli?'<br><span style="font-size:11px;color:var(--text3)">'+esc((cli.NOMBRE+' '+(cli.APELLIDOS||'')).trim())+'</span>':''}
+      </td>
+      <td style="font-size:12px">${esc(p.EMAIL||'—')}</td>
+      <td class="mono" style="font-size:12px">${esc(p.USERNAME||'—')}</td>
+      <td>${badgeActivo(p.ACTIVO)}</td>
+      <td><button class="btn btn-sm btn-secondary" onclick='modalPersonal(${pJson})'>Editar</button></td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="5"><div class="empty"><div class="empty-icon">👨‍👩‍👧</div><p>Sin accesos de familia — usa el botón de la barra superior</p></div></td></tr>`;
+
   render(`
-    <div class="card" style="padding:14px 20px">
+    <div class="card" style="padding:14px 20px;margin-bottom:16px">
       <div class="table-toolbar">
-        <input class="search-input" id="q-per" placeholder="Buscar…" oninput="filterTable('q-per','tbl-per')">
+        <input class="search-input" id="q-per" placeholder="Buscar trabajador…" oninput="filterTable('q-per','tbl-per')">
         <span class="text-muted">${trabajadores.length} trabajadores</span>
       </div>
       <div class="table-wrap">
         <table id="tbl-per">
           <thead><tr><th>ID</th><th>Nombre</th><th>Rol</th><th>Email</th><th>Teléfono</th><th>DNI</th><th>Alta</th><th>Cert. delitos</th><th>Estado</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
+          <tbody>${rowsTrab}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card" style="padding:14px 20px">
+      <div class="table-toolbar">
+        <div class="card-title" style="margin:0">👨‍👩‍👧 Accesos familia</div>
+        <input class="search-input" id="q-fam" placeholder="Buscar familia…" oninput="filterTable('q-fam','tbl-fam')" style="margin-left:auto">
+        <span class="text-muted">${familias.length} accesos</span>
+      </div>
+      <div class="table-wrap">
+        <table id="tbl-fam">
+          <thead><tr><th>Nombre</th><th>Email</th><th>Usuario</th><th>Estado</th><th></th></tr></thead>
+          <tbody>${rowsFam}</tbody>
         </table>
       </div>
     </div>`);

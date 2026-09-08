@@ -4052,17 +4052,17 @@ function modalNomina(n) {
       <div class="field"><label>Año</label>
         <input id="n-anyo" type="number" value="${esc(n.AÑO||new Date().getFullYear())}"></div>
       <div class="field"><label>Salario bruto (€)</label>
-        <input id="n-bruto" type="number" step="0.01" value="${esc(n.BRUTO||'')}"></div>
+        <input id="n-bruto" type="number" step="0.01" value="${esc(String(n.BRUTO||'').replace(',','.'))}"></div>
       <div class="field"><label>SS trabajador (€)</label>
-        <input id="n-ss-t" type="number" step="0.01" value="${esc(n.SS_TRABAJADOR||'')}"></div>
+        <input id="n-ss-t" type="number" step="0.01" value="${esc(String(n.SS_TRABAJADOR||'').replace(',','.'))}"></div>
       <div class="field"><label>IRPF (€)</label>
-        <input id="n-irpf" type="number" step="0.01" value="${esc(n.IRPF||'')}"></div>
+        <input id="n-irpf" type="number" step="0.01" value="${esc(String(n.IRPF||'').replace(',','.'))}"></div>
       <div class="field"><label>Neto (€)</label>
-        <input id="n-neto" type="number" step="0.01" value="${esc(n.NETO||'')}"></div>
+        <input id="n-neto" type="number" step="0.01" value="${esc(String(n.NETO||'').replace(',','.'))}"></div>
       <div class="field"><label>SS empresa (€)</label>
-        <input id="n-ss-e" type="number" step="0.01" value="${esc(n.SS_EMPRESA||'')}"></div>
+        <input id="n-ss-e" type="number" step="0.01" value="${esc(String(n.SS_EMPRESA||'').replace(',','.'))}"></div>
       <div class="field"><label>Coste total empresa (€)</label>
-        <input id="n-coste" type="number" step="0.01" value="${esc(n.COSTE_TOTAL||'')}"></div>
+        <input id="n-coste" type="number" step="0.01" value="${esc(String(n.COSTE_TOTAL||'').replace(',','.'))}"></div>
       <div class="field span2"><label>Link PDF nómina (Drive)</label>
         <input id="n-pdf" type="url" placeholder="https://drive.google.com/…" value="${esc(n.PDF_DRIVE||'')}"></div>
     </div>`,
@@ -4100,17 +4100,17 @@ function gastos() {
 
   const totalMes = DB.gastos
     .filter(g => { const f=new Date(g.FECHA||''); const n=new Date(); return f.getMonth()===n.getMonth()&&f.getFullYear()===n.getFullYear(); })
-    .reduce((s,g)=>s+(parseFloat(g.IMPORTE)||0),0);
+    .reduce((s,g)=>s+(parseFloat(g.TOTAL)||0),0);
 
   const rows = DB.gastos.map(g => `
     <tr>
       <td>${fmtFecha(g.FECHA)}</td>
       <td>${esc(g.CONCEPTO||'—')}</td>
-      <td>${fmtEur(g.IMPORTE)}</td>
-      <td><span class="badge badge-gray">${esc(g.CATEGORIA||'—')}</span></td>
+      <td>${fmtEur(g.TOTAL)}</td>
+      <td><span class="badge badge-gray">${esc(g['CATEGORÍA']||'—')}</span></td>
       <td>${g.LINEA==='FUTBOL'?'<span class="badge badge-green">⚽</span>':g.LINEA==='EXTRAESCOLARES'?'<span class="badge badge-blue">🎒</span>':g.LINEA==='DOMESTICO'?'<span class="badge badge-amber">🏠</span>':'<span class="badge badge-gray">General</span>'}</td>
       <td>${esc(g.PROVEEDOR||'—')}</td>
-      <td>${g.FACTURA_PDF?`<a href="${esc(g.FACTURA_PDF)}" target="_blank" class="btn btn-sm btn-secondary">📎</a>`:'—'}</td>
+      <td>${g.FACTURA_REF?`<a href="${esc(g.FACTURA_REF)}" target="_blank" class="btn btn-sm btn-secondary">📎</a>`:'—'}</td>
       <td><button class="btn btn-sm btn-secondary" onclick='modalGasto(${JSON.stringify(g)})'>Editar</button></td>
     </tr>`).join('') || `<tr><td colspan="8"><div class="empty"><div class="empty-icon">📉</div><p>Sin gastos registrados</p></div></td></tr>`;
 
@@ -4118,7 +4118,7 @@ function gastos() {
     <div class="kpis" style="margin-bottom:16px">
       <div class="kpi"><div class="kpi-n">${DB.gastos.length}</div><div class="kpi-l">Total registros</div></div>
       <div class="kpi"><div class="kpi-n" style="color:var(--red)">${fmtEur(totalMes)}</div><div class="kpi-l">Gastos este mes</div></div>
-      <div class="kpi"><div class="kpi-n" style="color:var(--red)">${fmtEur(DB.gastos.reduce((s,g)=>s+(parseFloat(g.IMPORTE)||0),0))}</div><div class="kpi-l">Total gastos</div></div>
+      <div class="kpi"><div class="kpi-n" style="color:var(--red)">${fmtEur(DB.gastos.reduce((s,g)=>s+(parseFloat(g.TOTAL)||0),0))}</div><div class="kpi-l">Total gastos</div></div>
     </div>
     <div class="card" style="padding:14px 20px">
       <div class="table-toolbar">
@@ -4142,12 +4142,12 @@ function modalGasto(g) {
       <div class="field"><label>Fecha <span class="req">*</span></label>
         <input id="g-fecha" type="date" value="${esc(g.FECHA||new Date().toISOString().slice(0,10))}"></div>
       <div class="field"><label>Importe (€) <span class="req">*</span></label>
-        <input id="g-imp" type="number" step="0.01" value="${esc(g.IMPORTE||'')}"></div>
+        <input id="g-imp" type="number" step="0.01" value="${esc(String(g.TOTAL||'').replace(',','.'))}"></div>
       <div class="field span2"><label>Concepto <span class="req">*</span></label>
         <input id="g-conc" class="upper" value="${esc(g.CONCEPTO||'')}"></div>
       <div class="field"><label>Categoría</label>
         <select id="g-cat">
-          ${['MATERIAL','ALQUILER','SEGURO','TRANSPORTE','PUBLICIDAD','SUMINISTROS','OTROS'].map(c=>`<option value="${c}" ${g.CATEGORIA===c?'selected':''}>${c}</option>`).join('')}
+          ${['MATERIAL','ALQUILER','SEGURO','TRANSPORTE','PUBLICIDAD','SUMINISTROS','OTROS'].map(c=>`<option value="${c}" ${g['CATEGORÍA']===c?'selected':''}>${c}</option>`).join('')}
         </select></div>
       <div class="field"><label>Línea</label>
         <select id="g-linea">
@@ -4159,7 +4159,7 @@ function modalGasto(g) {
       <div class="field"><label>Proveedor</label>
         <input id="g-prov" class="upper" value="${esc(g.PROVEEDOR||'')}"></div>
       <div class="field"><label>Link factura (Drive)</label>
-        <input id="g-pdf" type="url" placeholder="https://drive.google.com/…" value="${esc(g.FACTURA_PDF||'')}"></div>
+        <input id="g-pdf" type="url" placeholder="https://drive.google.com/…" value="${esc(g.FACTURA_REF||'')}"></div>
       <div class="field span2"><label>Notas</label><textarea id="g-notas">${esc(g.NOTAS||'')}</textarea></div>
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -4168,16 +4168,17 @@ function modalGasto(g) {
 
 function guardarGasto(id) {
   const fecha = document.getElementById('g-fecha').value;
-  const imp   = document.getElementById('g-imp').value;
+  const impRaw = document.getElementById('g-imp').value;
+  const imp    = parseFloat(String(impRaw).replace(',','.'));
   const conc  = document.getElementById('g-conc').value.trim();
-  if (!fecha||!imp||!conc) { showToast('Fecha, importe y concepto son obligatorios','error'); return; }
+  if (!fecha||isNaN(imp)||imp<=0||!conc) { showToast('Fecha, importe y concepto son obligatorios','error'); return; }
   const row = {
-    FECHA: fecha, IMPORTE: imp, CONCEPTO: conc,
-    CATEGORIA: document.getElementById('g-cat').value,
-    LINEA:     document.getElementById('g-linea').value,
-    PROVEEDOR: document.getElementById('g-prov').value.trim(),
-    FACTURA_PDF: document.getElementById('g-pdf').value.trim(),
-    NOTAS:     document.getElementById('g-notas').value.trim(),
+    FECHA: fecha, TOTAL: imp, CONCEPTO: conc,
+    'CATEGORÍA': document.getElementById('g-cat').value,
+    LINEA:       document.getElementById('g-linea').value,
+    PROVEEDOR:   document.getElementById('g-prov').value.trim(),
+    FACTURA_REF: document.getElementById('g-pdf').value.trim(),
+    NOTAS:       document.getElementById('g-notas').value.trim(),
   };
   writeToSheet('GASTOS', row, id)
     .then(()=>{ showToast('Gasto guardado'); closeModal(); loadAllData().then(gastos); })
@@ -4244,7 +4245,7 @@ function modalMovimiento(m) {
       <div class="field span2"><label>Concepto <span class="req">*</span></label>
         <input id="b-conc" class="upper" value="${esc(m.CONCEPTO||'')}"></div>
       <div class="field"><label>Importe (€) <span class="req">*</span></label>
-        <input id="b-imp" type="number" step="0.01" value="${esc(m.IMPORTE||'')}"></div>
+        <input id="b-imp" type="number" step="0.01" value="${esc(String(m.IMPORTE||'').replace(',','.'))}"></div>
       <div class="field"><label>Notas</label>
         <input id="b-notas" value="${esc(m.NOTAS||'')}"></div>
     </div>`,
@@ -4253,10 +4254,10 @@ function modalMovimiento(m) {
 }
 
 function guardarMovimiento(id) {
-  const fecha = document.getElementById('b-fecha').value;
-  const conc  = document.getElementById('b-conc').value.trim();
-  const imp   = document.getElementById('b-imp').value;
-  if (!fecha||!conc||!imp) { showToast('Fecha, concepto e importe son obligatorios','error'); return; }
+  const fecha  = document.getElementById('b-fecha').value;
+  const conc   = document.getElementById('b-conc').value.trim();
+  const imp    = parseFloat(String(document.getElementById('b-imp').value).replace(',','.'));
+  if (!fecha||!conc||isNaN(imp)||imp<=0) { showToast('Fecha, concepto e importe son obligatorios','error'); return; }
   const row = {
     FECHA:    fecha,
     TIPO:     document.getElementById('b-tipo').value,
@@ -4288,7 +4289,7 @@ function fiscal() {
       .reduce((s,p)=>s+(parseFloat(p.TOTAL_RECIBIDO)||0),0);
   });
 
-  const gastosTotales = DB.gastos.reduce((s,g)=>s+(parseFloat(g.IMPORTE)||0),0);
+  const gastosTotales = DB.gastos.reduce((s,g)=>s+(parseFloat(g.TOTAL)||0),0);
   const ingresosTotal = ingresosPorTrimestre.reduce((s,v)=>s+v,0);
   const beneficio = ingresosTotal - gastosTotales;
 

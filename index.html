@@ -2351,11 +2351,12 @@ const _COM_IBAN      = 'ES69 0182 5036 7102 0163 5388';
 const _COM_IBAN_AMPA = 'ES43 0049 1306 0823 1023 0054'; // concepto: nombre+apellidos+curso del alumno
 
 const _COM_TIPOS = {
-  COBRO:       { label: 'Cobro mensual',       icon: '💶', needsMes: true,  needsFinanciero: true  },
-  INICIO:      { label: 'Inicio de curso',     icon: '🎒', needsMes: false, needsFinanciero: false },
-  SUSPENSION:  { label: 'Suspensión de clases',icon: '⚠️', needsMes: false, needsFinanciero: false },
-  CAMBIO:      { label: 'Aviso / Cambio',      icon: '📢', needsMes: false, needsFinanciero: false },
-  PRESENTACION:{ label: 'Presentación curso',  icon: '📋', needsMes: false, needsFinanciero: false },
+  COBRO:        { label: 'Cobro mensual',        icon: '💶', needsMes: true,  needsFinanciero: true  },
+  INICIO:       { label: 'Inicio de curso',      icon: '🎒', needsMes: false, needsFinanciero: false },
+  AREA_PRIVADA: { label: 'Acceso área privada',  icon: '🔐', needsMes: false, needsFinanciero: false },
+  SUSPENSION:   { label: 'Suspensión de clases', icon: '⚠️', needsMes: false, needsFinanciero: false },
+  CAMBIO:       { label: 'Aviso / Cambio',       icon: '📢', needsMes: false, needsFinanciero: false },
+  PRESENTACION: { label: 'Presentación curso',   icon: '📋', needsMes: false, needsFinanciero: false },
 };
 
 function comunicacion() {
@@ -2669,6 +2670,23 @@ function _comMsgWA(f) {
         +(nota?'📢 '+nota+'\n\n':'')
         +'¡Estamos a tu disposición para cualquier duda! 😊\n'
         +'SM Academia · 📲 '+_COM_BIZUM;
+    case 'AREA_PRIVADA': {
+      const _famPer = DB.personal.find(p => String(p.ROL||'').toUpperCase()==='FAMILIA' && String(p.EMAIL||'').toLowerCase()===String(f.email||'').toLowerCase());
+      const _usuario = _famPer ? (String(_famPer.USERNAME||_famPer.EMAIL||'')) : f.email||'[tu email]';
+      const _clave   = _famPer ? (String(_famPer.PASSWORD||'')) : '[clave provisional]';
+      return 'Hola '+tutor+' 👋\n\n'
+        +'¡Ya puedes acceder a tu *área privada* de SM Academia! 🏫\n\n'
+        +'🔗 *smacademia.github.io/smAPP360/*\n\n'
+        +'📧 *Usuario:* '+_usuario+'\n'
+        +'🔑 *Contraseña:* '+_clave+'\n\n'
+        +'Desde tu área podrás ver:\n'
+        +'✅ Datos de tus hijos/as\n'
+        +'✅ Facturas y pagos\n'
+        +'✅ Asistencias y seguimiento\n\n'
+        +(nota?'📌 '+nota+'\n\n':'')
+        +'_Puedes cambiar la contraseña desde tu perfil una vez dentro._\n\n'
+        +'Para cualquier duda: 📲 '+_COM_BIZUM+'\nSM Academia 🎒';
+    }
     case 'SUSPENSION':
       return 'Hola '+tutor+' 👋\n\n'
         +'⚠️ Te comunicamos que la actividad queda *suspendida* temporalmente.\n\n'
@@ -2726,6 +2744,21 @@ function _comMsgEmail(f) {
         +(nota?nota+'\n\n':'')
         +'Quedamos a tu disposición para cualquier consulta.\n\n'
         +'Un saludo,\nSM Academia\n'+_COM_BIZUM;
+    case 'AREA_PRIVADA': {
+      const _famPer = DB.personal.find(p => String(p.ROL||'').toUpperCase()==='FAMILIA' && String(p.EMAIL||'').toLowerCase()===String(f.email||'').toLowerCase());
+      const _usuario = _famPer ? String(_famPer.USERNAME||_famPer.EMAIL||'') : f.email||'[tu email]';
+      const _clave   = _famPer ? String(_famPer.PASSWORD||'') : '[clave provisional]';
+      return 'Hola '+tutor+',\n\n'
+        +'Ya puedes acceder a tu área privada de SM Academia:\n\n'
+        +'🔗 smacademia.github.io/smAPP360/\n\n'
+        +'Usuario: '+_usuario+'\n'
+        +'Contraseña: '+_clave+'\n\n'
+        +'Desde tu área podrás consultar datos de tus hijos/as, facturas, pagos y asistencias.\n\n'
+        +(nota?nota+'\n\n':'')
+        +'Puedes cambiar la contraseña desde tu perfil una vez hayas entrado.\n\n'
+        +'Para cualquier duda estamos disponibles en el '+_COM_BIZUM+'.\n\n'
+        +'Un saludo,\nSM Academia';
+    }
     default:
       return _comMsgWA(f).replace(/\*([^*]+)\*/g,'$1').replace(/_([^_]+)_/g,'$1');
   }

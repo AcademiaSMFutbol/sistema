@@ -2569,15 +2569,20 @@ function _comFamilias() {
 
     const alumnos = aluIds.map(id=>DB.alumnos.find(a=>String(a.ID_ALUMNO)===id)).filter(Boolean);
     const { importe, concepto } = _comImporte(cliId, aluIds, data.inscs);
+    // Si no hay nada a cobrar (ej. todas las inscripciones son bonos de usos prepago), omitir
+    if (!importe && !concepto && !tienePendiente) return null;
     const apellido = (cli.APELLIDOS||cli.NOMBRE||'').split(' ')[0].toUpperCase();
-    const mesAbrev = (_comFiltros.mes||'').split(' ')[0].slice(0,3).toUpperCase();
+    const _mesesAbrev = ['ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'];
+    const _mesN = _mesNorm(_comFiltros.mes||'');
+    const _mesM = _mesN.match(/^(\d{4})-(\d{2})/);
+    const mesAbrev = _mesM ? _mesesAbrev[parseInt(_mesM[2])-1] : sinTildes(_comFiltros.mes||'').split(' ')[0].slice(0,3);
     return {
       cliId, alumnos,
       nombre:   (cli.NOMBRE+' '+(cli.APELLIDOS||'')).trim(),
       email:    cli.EMAIL||'',
       telefono: cli['TELÉFONO']||cli.TELEFONO||'',
       importe,
-      concepto: concepto || ('SM '+mesAbrev+' '+apellido),
+      concepto: concepto || ('SM'+(mesAbrev?' '+mesAbrev:'')+' '+apellido),
       mes:      _comFiltros.mes,
       pagoParcial: tienePagado && tienePendiente,
     };

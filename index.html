@@ -3891,6 +3891,7 @@ function personal() {
   document.getElementById('topbar-actions').innerHTML = '';
   if (!isAdmin()) { render('<div class="stub"><div class="stub-icon">🔒</div><h2>Acceso restringido</h2><p>Solo administradores y coordinadores.</p></div>'); return; }
   topbarBtn('+ Nuevo trabajador', () => modalPersonal());
+  topbarBtn('👨‍👩‍👧 Crear accesos familias', _generarAccesosFamilias, 'btn-secondary');
 
   const trabajadores = DB.personal.filter(p => String(p.ROL||'').toUpperCase() !== 'AMPA');
 
@@ -3934,6 +3935,93 @@ function personal() {
     </div>`);
 }
 
+function _generarAccesosFamilias() {
+  // Calcular iniciales del nombre completo
+  function _iniciales(nombre, apellidos) {
+    return ((nombre||'')+' '+(apellidos||'')).trim()
+      .split(/\s+/).map(w=>w[0]||'').join('').toUpperCase();
+  }
+  // DDMM desde YYYY-MM-DD
+  function _ddmm(fecha) {
+    const m = String(fecha||'').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[3]+m[2] : '';
+  }
+
+  const yaExisten = new Set(
+    DB.personal.filter(p=>String(p.ROL||'').toUpperCase()==='FAMILIA')
+      .map(p=>String(p.EMAIL||'').toLowerCase())
+  );
+
+  const lista = DB.clientes
+    .filter(c => String(c.ACTIVO||'').toUpperCase().startsWith('S') && c.EMAIL && c.EMAIL.includes('@'))
+    .map(c => {
+      const email = String(c.EMAIL||'').toLowerCase().trim();
+      if (yaExisten.has(email)) return null; // ya tiene acceso
+      // Primer alumno activo del cliente
+      const alu = DB.alumnos.find(a => String(a.ID_CLIENTE)===String(c.ID_CLIENTE) && String(a.ACTIVO||'').toUpperCase().startsWith('S'))
+                  || DB.alumnos.find(a => String(a.ID_CLIENTE)===String(c.ID_CLIENTE));
+      const ini  = _iniciales(c.NOMBRE, c.APELLIDOS);
+      const ddmm = alu ? _ddmm(alu.FECHA_NAC) : '';
+      const pass = ini + ddmm;
+      if (!pass || pass.length < 4) return null; // datos insuficientes
+      return { cli: c, alu, email, username: email, pass, nombre: c.NOMBRE, apellidos: c.APELLIDOS||'' };
+    }).filter(Boolean);
+
+  if (!lista.length) {
+    showToast('Todas las familias activas con email ya tienen acceso.', 'info'); return;
+  }
+
+  const filas = lista.map((f,i) => `
+    <tr>
+      <td><strong>${esc((f.nombre+' '+f.apellidos).trim())}</strong></td>
+      <td style="font-size:12px">${esc(f.email)}</td>
+      <td>${esc(f.alu?(f.alu.NOMBRE+' '+f.alu.APELLIDOS||'').trim():'—')}</td>
+      <td style="font-family:monospace;font-size:13px;font-weight:700;color:var(--blue)">${esc(f.pass)}</td>
+    </tr>`).join('');
+
+  openModal('👨‍👩‍👧 Crear accesos para familias',
+    `<p style="font-size:13px;color:var(--text3);margin-bottom:12px">Se crearán <strong>${lista.length}</strong> accesos nuevos. La contraseña es: <em>iniciales del tutor + DDMM de nacimiento del alumno</em>. Podrán cambiarla desde su portal.</p>
+    <div class="table-wrap" style="max-height:320px;overflow-y:auto">
+      <table style="font-size:12px">
+        <thead><tr><th>Familia</th><th>Email / usuario</th><th>Alumno ref.</th><th>Contraseña</th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table>
+    </div>`,
+    `<button class="btn btn-primary" onclick="_ejecutarAccesosFamilias()">Crear ${lista.length} accesos</button>
+     <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>`
+  );
+  window._famListaPendiente = lista;
+}
+
+async function _ejecutarAccesosFamilias() {
+  const lista = window._famListaPendiente || [];
+  if (!lista.length) { closeModal(); return; }
+  const btnEl = document.querySelector('.modal-footer .btn-primary');
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = `Creando 0/${lista.length}…`; }
+  let ok = 0, err = 0;
+  for (const f of lista) {
+    const row = {
+      NOMBRE:    f.nombre,
+      APELLIDOS: f.apellidos,
+      EMAIL:     f.email,
+      ROL:       'FAMILIA',
+      USERNAME:  f.username,
+      PASSWORD:  f.pass,
+      ACTIVO:    'SÍ',
+      FECHA_ALTA: new Date().toISOString().slice(0,10),
+    };
+    try {
+      await writeToSheet('PERSONAL', row, null);
+      ok++;
+    } catch(e) { err++; }
+    if (btnEl) btnEl.textContent = `Creando ${ok+err}/${lista.length}…`;
+  }
+  closeModal();
+  showToast(`${ok} accesos creados${err?' · '+err+' errores':''}`);
+  window._famListaPendiente = [];
+  loadAllData().then(personal);
+}
+
 function modalPersonal(p) {
   p = p || {};
   const isNew = !p.ID_MONITOR;
@@ -3945,7 +4033,7 @@ function modalPersonal(p) {
         <input id="per-ape" class="upper" value="${esc(p.APELLIDOS||'')}"></div>
       <div class="field"><label>Rol</label>
         <select id="per-rol">
-          ${['ADMIN','COORDINADOR','MONITOR','ENTRENADOR','AMPA'].map(r=>`<option value="${r}" ${p.ROL===r?'selected':''}>${r}</option>`).join('')}
+          ${['ADMIN','COORDINADOR','MONITOR','ENTRENADOR','AMPA','FAMILIA'].map(r=>`<option value="${r}" ${p.ROL===r?'selected':''}>${r}</option>`).join('')}
         </select></div>
       <div class="field"><label>Email (para login Gmail)</label>
         <input id="per-email" type="email" value="${esc(p.EMAIL||'')}"></div>

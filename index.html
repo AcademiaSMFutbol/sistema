@@ -5388,7 +5388,7 @@ function rankingFutbol() {
     if (!byAlu[aId]) byAlu[aId] = { aId, nombre: a.NOMBRE_ALUMNO||'', sesiones: 0, evalSum: 0, evalN: 0, mejores: 0 };
     if (String(a.PRESENTE||'N').toUpperCase() === 'S') byAlu[aId].sesiones++;
     const med = parseFloat(a.MEDIA_DIARIA||'');
-    if (!isNaN(med) && med > 0) { byAlu[aId].evalSum += med; byAlu[aId].evalN++; }
+    if (!isNaN(med) && med >= 1 && med <= 4) { byAlu[aId].evalSum += med; byAlu[aId].evalN++; }
     if (String(a.ES_MEJOR||'N').toUpperCase() === 'S') byAlu[aId].mejores++;
   });
 

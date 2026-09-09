@@ -170,6 +170,7 @@ tr:hover td{background:#f8f8f8}
 #modal-overlay.open{display:flex}
 .modal{background:var(--white);border-radius:var(--r2);width:100%;max-width:580px;box-shadow:0 12px 40px rgba(0,0,0,.22);display:flex;flex-direction:column}
 .modal.wide{max-width:780px}
+.modal.xl{max-width:1060px}
 .modal-header{padding:16px 20px;background:var(--black);border-radius:var(--r2) var(--r2) 0 0;display:flex;align-items:center;justify-content:space-between}
 .modal-header h3{font-size:14px;font-weight:600;color:#fff;letter-spacing:.01em}
 .modal-close{background:none;border:none;font-size:18px;color:rgba(255,255,255,.6);cursor:pointer;line-height:1;padding:2px 6px;transition:color .15s}
@@ -289,7 +290,7 @@ tr:hover td{background:#f8f8f8}
           <span class="nav-icon">⚽</span><span>Sesiones</span>
         </div>
         <div class="nav-item" onclick="navigate('asistencias-futbol')" data-page="asistencias-futbol">
-          <span class="nav-icon">📝</span><span>Pase de lista</span>
+          <span class="nav-icon">🏆</span><span>Ranking</span>
         </div>
       </div>
 
@@ -736,7 +737,7 @@ const PAGE_META = {
   'pagos':              { title: 'Pagos',                sub: 'Control de cobros' },
   'facturas':           { title: 'Facturas',             sub: 'Registro VeriFactu' },
   'sesiones':           { title: 'Sesiones',             sub: 'SM Tecnificación Fútbol' },
-  'asistencias-futbol': { title: 'Pase de lista',        sub: 'Asistencia sesiones fútbol' },
+  'asistencias-futbol': { title: 'Ranking',               sub: 'Clasificación y estadísticas fútbol' },
   'extra-resumen':      { title: 'SM Extraescolares',    sub: 'Panel de actividades y asistencia' },
   'asistencias-extra':  { title: 'Asistencia',           sub: 'SM Extraescolares' },
   'personal':           { title: 'Trabajadores',         sub: 'Ficha de personal' },
@@ -796,12 +797,12 @@ function render(html) { document.getElementById('page-content').innerHTML = html
 // ══════════════════════════════════════════════════════════════════════════
 //  UI UTILIDADES
 // ══════════════════════════════════════════════════════════════════════════
-function openModal(title, bodyHTML, footerHTML, wide) {
+function openModal(title, bodyHTML, footerHTML, size) {
   document.getElementById('modal-title').textContent  = title;
   document.getElementById('modal-body').innerHTML     = bodyHTML;
   document.getElementById('modal-footer').innerHTML   = footerHTML || '';
   const box = document.getElementById('modal-box');
-  box.className = wide ? 'modal wide' : 'modal';
+  box.className = size === 'xl' ? 'modal xl' : (size === 'wide' || size === true) ? 'modal wide' : 'modal';
   document.getElementById('modal-overlay').classList.add('open');
 }
 function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
@@ -5319,177 +5320,85 @@ function guardarAsistenciaExtra() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-//  MÓDULO: ASISTENCIAS FÚTBOL
+//  MÓDULO: RANKING FÚTBOL
 // ══════════════════════════════════════════════════════════════════════════
-function asistenciasFutbol() {
-  const DAYS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
-  const MAX_POR_GRUPO = 8;
-  const MAX_TOTAL     = 16; // 2 grupos de 8
-  const sesionesOrd = [...DB.sesiones].sort((a,b)=>String(b.FECHA||'').localeCompare(String(a.FECHA||'')));
+function asistenciasFutbol() { rankingFutbol(); }
 
-  // Agrupar ASISTENCIAS_FUTBOL por sesión para la tabla resumen
-  const bySes = {};
+function rankingFutbol() {
+  document.getElementById('topbar-actions').innerHTML = '';
+
+  // Agrupar por alumno
+  const byAlu = {};
   DB.asistenciasFutbol.forEach(a => {
-    const sid = String(a.ID_SESION||'');
-    if (!sid) return;
-    if (!bySes[sid]) bySes[sid] = { sesId: sid, fecha: a.FECHA, presentes: 0 };
-    if (String(a.PRESENTE||'N').toUpperCase()==='S') bySes[sid].presentes++;
+    const aId = String(a.ID_ALUMNO||'');
+    if (!aId) return;
+    if (!byAlu[aId]) byAlu[aId] = { aId, nombre: a.NOMBRE_ALUMNO||'', sesiones: 0, presentes: 0, evalSum: 0, evalN: 0, mejores: 0 };
+    byAlu[aId].sesiones++;
+    if (String(a.PRESENTE||'N').toUpperCase() === 'S') byAlu[aId].presentes++;
+    const med = parseFloat(a.MEDIA_DIARIA||'');
+    if (!isNaN(med) && med > 0) { byAlu[aId].evalSum += med; byAlu[aId].evalN++; }
+    if (String(a.ES_MEJOR||'N').toUpperCase() === 'S') byAlu[aId].mejores++;
   });
-  const resumen = Object.values(bySes)
-    .sort((a,b)=>String(b.fecha||'').localeCompare(String(a.fecha||'')))
-    .slice(0,15);
+
+  const ranking = Object.values(byAlu).map(r => {
+    const alumno = DB.alumnos.find(a => String(a.ID_ALUMNO) === r.aId);
+    return {
+      ...r,
+      nombre: alumno ? (alumno.NOMBRE+' '+(alumno.APELLIDOS||'')).trim() : r.nombre,
+      pct:   r.sesiones > 0 ? Math.round(r.presentes / r.sesiones * 100) : 0,
+      media: r.evalN > 0 ? (r.evalSum / r.evalN).toFixed(1) : null,
+    };
+  }).sort((a,b) => b.presentes - a.presentes || (parseFloat(b.media)||0) - (parseFloat(a.media)||0));
+
+  const totalSes = DB.sesiones.length;
+  const mesK     = new Date().toISOString().slice(0,7);
+  const sesMes   = DB.sesiones.filter(s => String(s.FECHA||'').startsWith(mesK)).length;
 
   render(`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div class="card">
-        <div class="card-title">Pase de lista</div>
-        <div class="field" style="margin-bottom:14px">
-          <label>Sesión</label>
-          <select id="af-ses" onchange="cargarListaFutbol()">
-            <option value="">— Selecciona sesión —</option>
-            ${sesionesOrd.map(s=>{
-              const d = s.FECHA ? new Date(s.FECHA+'T12:00:00') : null;
-              const dia = d&&!isNaN(d) ? DAYS[d.getDay()] : '';
-              const hora = s.HORA_INICIO ? ' · '+s.HORA_INICIO : '';
-              return `<option value="${esc(s.ID)}">${esc(s.ID)} — ${dia} ${fmtFecha(s.FECHA)}${hora}</option>`;
-            }).join('')}
-          </select>
-        </div>
-        <div id="lista-alumnos-futbol"><p style="color:var(--text3);font-size:13px">Selecciona una sesión para ver el listado.</p></div>
-        <div id="af-guardar-wrap" style="display:none;margin-top:16px">
-          <button class="btn btn-primary" style="width:100%" onclick="guardarAsistenciaFutbol()">Guardar asistencia</button>
-        </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
+      <div class="card" style="padding:16px;text-align:center">
+        <div style="font-size:28px;font-weight:700">${totalSes}</div>
+        <div style="font-size:12px;color:var(--text3)">Sesiones totales</div>
       </div>
-      <div class="card">
-        <div class="card-title">Últimos entrenamientos</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Sesión</th><th>Fecha</th><th>Asistencia</th></tr></thead>
-            <tbody>
-              ${resumen.map(r=>{
-                const ses     = DB.sesiones.find(s=>String(s.ID)===r.sesId);
-                const dosGrupos = r.presentes > MAX_POR_GRUPO;
-                const aforo   = dosGrupos ? MAX_TOTAL : MAX_POR_GRUPO;
-                const pct     = Math.round(r.presentes / aforo * 100);
-                const alerta  = dosGrupos
-                  ? `<span title="Requiere 2 monitores" style="color:var(--amber);font-size:11px;font-weight:700;margin-left:6px">⚠ 2 monitores</span>`
-                  : '';
-                return `<tr>
-                  <td class="mono">${esc(r.sesId)}</td>
-                  <td>${fmtFecha(ses?.FECHA||r.fecha)}</td>
-                  <td><strong>${r.presentes}/${aforo}</strong> <span style="color:var(--text3)">(${pct}%)</span>${alerta}</td>
-                </tr>`;
-              }).join('') || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:16px">Sin registros</td></tr>'}
-            </tbody>
-          </table>
-        </div>
+      <div class="card" style="padding:16px;text-align:center">
+        <div style="font-size:28px;font-weight:700">${sesMes}</div>
+        <div style="font-size:12px;color:var(--text3)">Este mes</div>
+      </div>
+      <div class="card" style="padding:16px;text-align:center">
+        <div style="font-size:28px;font-weight:700">${ranking.length}</div>
+        <div style="font-size:12px;color:var(--text3)">Jugadores</div>
+      </div>
+    </div>
+    <div class="card" style="padding:14px 20px">
+      <div class="card-title">Ranking de asistencia</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>#</th><th>Jugador</th><th>Sesiones</th><th>Presencias</th><th>% Asistencia</th><th>⭐ Mejores</th><th>Media eval.</th></tr></thead>
+          <tbody>
+            ${ranking.map((r,i) => {
+              const medNum  = parseFloat(r.media);
+              const medClr  = !isNaN(medNum) ? (medNum>=3.5?'var(--green)':medNum>=2.5?'var(--amber)':'var(--red)') : 'var(--text3)';
+              const pctBar  = `<div style="display:flex;align-items:center;gap:6px">
+                <div style="width:70px;height:6px;background:var(--border2);border-radius:3px;overflow:hidden">
+                  <div style="width:${r.pct}%;height:100%;background:${r.pct>=80?'var(--green)':r.pct>=50?'var(--amber)':'var(--red)'}"></div>
+                </div>
+                <span style="font-size:12px">${r.pct}%</span>
+              </div>`;
+              const medal   = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `<span style="color:var(--text3);font-weight:600">${i+1}</span>`;
+              return `<tr>
+                <td style="text-align:center">${medal}</td>
+                <td><strong>${esc(r.nombre)}</strong></td>
+                <td class="mono">${r.sesiones}</td>
+                <td class="mono"><strong>${r.presentes}</strong></td>
+                <td>${pctBar}</td>
+                <td class="mono" style="text-align:center">${r.mejores > 0 ? `<strong style="color:var(--amber)">⭐ ${r.mejores}</strong>` : '—'}</td>
+                <td><span style="font-weight:700;color:${medClr}">${r.media ?? '—'}</span></td>
+              </tr>`;
+            }).join('') || '<tr><td colspan="7" class="text-muted" style="text-align:center;padding:16px">Sin registros de asistencia</td></tr>'}
+          </tbody>
+        </table>
       </div>
     </div>`);
-}
-
-function cargarListaFutbol() {
-  const sesId = document.getElementById('af-ses')?.value;
-  const cont  = document.getElementById('lista-alumnos-futbol');
-  const wrap  = document.getElementById('af-guardar-wrap');
-  if (!sesId || !cont) return;
-
-  // Todos los alumnos con inscripción activa en cualquier actividad de fútbol/tecnificación
-  const idsSeen = new Set();
-  const alumnos = DB.inscripciones
-    .filter(i => {
-      const act = DB.actividades.find(a=>String(a.ID)===String(i.ID_ACTIVIDAD));
-      return act && esFutbol(act.LINEA||'') && String(i.ESTADO||'').toUpperCase()==='ACTIVA';
-    })
-    .map(i => DB.alumnos.find(a=>String(a.ID_ALUMNO)===String(i.ID_ALUMNO)))
-    .filter(a => a && !idsSeen.has(String(a.ID_ALUMNO)) && idsSeen.add(String(a.ID_ALUMNO)))
-    .sort((a,b) => {
-      const na = (a.NOMBRE+' '+(a.APELLIDOS||'')).trim().toUpperCase();
-      const nb = (b.NOMBRE+' '+(b.APELLIDOS||'')).trim().toUpperCase();
-      return na.localeCompare(nb,'es');
-    });
-
-  if (!alumnos.length) {
-    cont.innerHTML='<p style="color:var(--amber);font-size:13px">No hay alumnos inscritos en actividades de fútbol.</p>';
-    if(wrap)wrap.style.display='none'; return;
-  }
-
-  const MAX_POR_GRUPO = 8;
-  const MAX_TOTAL     = 16;
-  const prevRows = DB.asistenciasFutbol.filter(a=>String(a.ID_SESION)===sesId);
-
-  const DIMS = [
-    {k:'tec', col:'EVAL_TECNICA',        label:'Técnica'},
-    {k:'com', col:'EVAL_COMPRENSION',    label:'Comprensión (táctica)'},
-    {k:'soc', col:'EVAL_SOCIOEMOCIONAL', label:'Socio-emocional'},
-  ];
-
-  const avisoCapacidad = alumnos.length > MAX_TOTAL
-    ? `<div style="background:var(--red-l,#fff0f0);border:1px solid var(--red,#d32f2f);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--red,#d32f2f);font-weight:600;margin-bottom:10px">
-        ⛔ ${alumnos.length} inscritos superan el máximo de ${MAX_TOTAL} (2 grupos). Revisar inscripciones.
-       </div>`
-    : alumnos.length > MAX_POR_GRUPO
-    ? `<div style="background:#fff8e1;border:1px solid var(--amber);border-radius:6px;padding:8px 12px;font-size:12px;color:#7a5a00;font-weight:600;margin-bottom:10px">
-        ⚠ ${alumnos.length} jugadores — se necesita un segundo monitor.
-       </div>`
-    : '';
-
-  cont.innerHTML = `
-    ${avisoCapacidad}
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <span style="font-size:13px;color:var(--text3)">${alumnos.length} jugadores</span>
-      <div>
-        <button class="btn btn-sm btn-secondary" onclick="marcarTodosFutbol(true)">✓ Todos</button>
-        <button class="btn btn-sm btn-secondary" style="margin-left:4px" onclick="marcarTodosFutbol(false)">✗ Ninguno</button>
-      </div>
-    </div>
-    <div id="lista-checks-futbol" style="display:flex;flex-direction:column;gap:8px">
-      ${alumnos.map(a=>{
-        const aId    = String(a.ID_ALUMNO);
-        const prev   = prevRows.find(r=>String(r.ID_ALUMNO)===aId);
-        const presente = !!prev && String(prev.PRESENTE||'S').toUpperCase()==='S';
-        const esMejor  = prev && String(prev.ES_MEJOR||'').toUpperCase()==='S';
-        return `
-          <div style="border:1px solid var(--border2);border-radius:6px;padding:10px 12px">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-              <input type="checkbox" data-id="${aId}" ${presente?'checked':''} style="width:16px;height:16px;flex-shrink:0">
-              <strong style="flex:1;font-size:13px">${esc(a.NOMBRE)} ${esc(a.APELLIDOS||'')}</strong>
-              <button type="button" class="mejor-btn" data-id="${aId}" onclick="setMejor('${aId}')"
-                ${esMejor?'data-sel="1"':''}
-                style="padding:2px 8px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;
-                  border:1.5px solid var(--amber);
-                  background:${esMejor?'var(--amber)':'transparent'};
-                  color:${esMejor?'white':'var(--amber)'}">⭐ Mejor</button>
-            </div>
-            <div style="padding-left:26px;display:grid;grid-template-columns:110px 1fr;gap:5px 8px;align-items:center;font-size:12px">
-              ${DIMS.map(d=>{
-                const curVal = parseInt(prev?.[d.col]||'')||0;
-                return `
-                  <span style="color:var(--text3)">${d.label}</span>
-                  <div style="display:flex;gap:4px">
-                    ${[1,2,3,4].map(v=>{
-                      const sel = curVal===v;
-                      return `<button type="button" class="eval-b" data-alumno="${aId}" data-dim="${d.k}" data-val="${v}" ${sel?'data-sel="1"':''} onclick="setEval(this)"
-                        style="width:26px;height:24px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;
-                          border:1.5px solid ${sel?'var(--green)':'var(--border)'};
-                          background:${sel?'var(--green)':'var(--bg)'};
-                          color:${sel?'white':'var(--text3)'}">${v}</button>`;
-                    }).join('')}
-                  </div>`;
-              }).join('')}
-              <span style="color:var(--text3)">Observaciones</span>
-              <input type="text" class="af-obs" data-id="${aId}" value="${esc(prev?.OBSERVACIONES||'')}"
-                style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;width:100%"
-                placeholder="Notas individuales…">
-            </div>
-          </div>`;
-      }).join('')}
-    </div>
-    ${prevRows.length?'<div class="badge badge-amber" style="margin-top:8px">⚠ Ya existe lista para esta sesión</div>':''}`;
-  if(wrap)wrap.style.display='';
-}
-
-function marcarTodosFutbol(val) {
-  document.querySelectorAll('#lista-checks-futbol input[type=checkbox]').forEach(cb=>cb.checked=val);
 }
 
 function setMejor(aId) {
@@ -5502,63 +5411,6 @@ function setMejor(aId) {
   });
 }
 
-function guardarAsistenciaFutbol() {
-  const sesId = document.getElementById('af-ses')?.value;
-  if (!sesId) return;
-  const sesion   = DB.sesiones.find(s=>String(s.ID)===sesId);
-  const prevRows = DB.asistenciasFutbol.filter(a=>String(a.ID_SESION)===sesId);
-  const mejorId  = document.querySelector('.mejor-btn[data-sel="1"]')?.dataset.id || '';
-
-  const evalMap = {};
-  document.querySelectorAll('.eval-b[data-sel="1"]').forEach(btn => {
-    const aId = btn.dataset.alumno;
-    if (!evalMap[aId]) evalMap[aId] = {};
-    evalMap[aId][btn.dataset.dim] = parseInt(btn.dataset.val)||0;
-  });
-  const obsMap = {};
-  document.querySelectorAll('.af-obs').forEach(el => { obsMap[el.dataset.id] = el.value.trim(); });
-
-  const DIMS_COL = {tec:'EVAL_TECNICA', com:'EVAL_COMPRENSION', soc:'EVAL_SOCIOEMOCIONAL'};
-
-  const checks = [...document.querySelectorAll('#lista-checks-futbol input[type=checkbox]')];
-  let presentes = 0;
-
-  // Guardar secuencialmente para evitar colisiones de ID en APPEND
-  let chain = Promise.resolve();
-  checks.forEach(cb => {
-    const aId     = cb.dataset.id;
-    const pres    = cb.checked;
-    if (pres) presentes++;
-    const prev    = prevRows.find(r=>String(r.ID_ALUMNO)===aId);
-    // Solo escribir si vino, o si ya existía fila anterior que hay que corregir
-    if (!pres && !prev) return;
-    chain = chain.then(() => {
-      const prev   = prevRows.find(r=>String(r.ID_ALUMNO)===aId);
-      const alumno = DB.alumnos.find(a=>String(a.ID_ALUMNO)===aId);
-      const ev     = evalMap[aId] || {};
-      const vals   = Object.values(ev).filter(v=>v>0);
-      const media  = vals.length ? (vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(1) : '';
-      const evals  = {};
-      Object.entries(DIMS_COL).forEach(([k,col]) => { evals[col] = ev[k]||''; });
-      const row = {
-        FECHA:         sesion?.FECHA||'',
-        ID_SESION:     sesId,
-        ID_ALUMNO:     aId,
-        NOMBRE_ALUMNO: alumno ? (alumno.NOMBRE+' '+(alumno.APELLIDOS||'')).trim() : '',
-        PRESENTE:      pres ? 'S' : 'N',
-        ES_MEJOR:      mejorId===aId ? 'S' : 'N',
-        ...evals,
-        MEDIA_DIARIA:  media,
-        OBSERVACIONES: obsMap[aId]||'',
-      };
-      return writeToSheet('ASISTENCIAS_FUTBOL', row, prev?.ID||null);
-    });
-  });
-
-  chain
-    .then(()=>{ showToast(`Asistencia guardada — ${presentes} asistente${presentes!==1?'s':''}`); loadAllData().then(asistenciasFutbol); })
-    .catch(err=>showToast('Error: '+err.message,'error'));
-}
 
 function setEval(btn) {
   const aId = btn.dataset.alumno;
@@ -5778,14 +5630,31 @@ function testEmailJS() {
 function sesiones() {
   document.getElementById('topbar-actions').innerHTML = '';
   const puedeCrea = isAdmin() || isEntrenador();
-  if (puedeCrea) topbarBtn('+ Registrar sesión', () => modalSesion());
-  const lista = isAdmin()
+  if (puedeCrea) topbarBtn('⚽ Nueva sesión', () => modalSesionLista());
+
+  const lista = (isAdmin()
     ? DB.sesiones
-    : DB.sesiones.filter(s => String(s.ID_ENTRENADOR||'') === String(currentUser.id||''));
+    : DB.sesiones.filter(s => String(s.ID_ENTRENADOR||'') === String(currentUser.id||''))
+  ).sort((a,b) => String(b.FECHA||'').localeCompare(String(a.FECHA||'')));
+
+  // Asistencia pre-calculada por sesión
+  const bySes = {};
+  DB.asistenciasFutbol.forEach(a => {
+    const sid = String(a.ID_SESION||'');
+    if (!sid) return;
+    if (!bySes[sid]) bySes[sid] = { pres: 0, total: 0 };
+    bySes[sid].total++;
+    if (String(a.PRESENTE||'N').toUpperCase() === 'S') bySes[sid].pres++;
+  });
+
   const rows = lista.map(s => {
-    const val = parseInt(s.VALORACION)||0;
+    const val      = parseInt(s.VALORACION)||0;
     const estrellas = val > 0 ? '★'.repeat(val)+'☆'.repeat(4-val) : '—';
-    const ent = DB.personal.find(p=>String(p.ID_MONITOR)===String(s.ID_ENTRENADOR));
+    const ent      = DB.personal.find(p => String(p.ID_MONITOR) === String(s.ID_ENTRENADOR));
+    const asist    = bySes[String(s.ID)];
+    const asistTxt = asist
+      ? `<strong style="color:${asist.pres>0?'var(--green)':'var(--text3)'}">${asist.pres}</strong><span style="color:var(--text3)">/${asist.total}</span>`
+      : '<span style="color:var(--text3)">—</span>';
     return `<tr>
       <td class="mono">${esc(s.ID||'')}</td>
       <td>${fmtFecha(s.FECHA)}</td>
@@ -5793,11 +5662,13 @@ function sesiones() {
       <td><strong>${esc(s.GRUPO||'—')}</strong></td>
       <td>${esc(ent ? (ent.NOMBRE+' '+(ent.APELLIDOS||'')).trim() : s.ID_ENTRENADOR||'—')}</td>
       <td>${esc(s.LUGAR||'—')}</td>
-      <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.DESCRIPCION||'—')}</td>
+      <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.DESCRIPCION||'—')}</td>
       <td style="color:var(--amber);letter-spacing:-1px">${estrellas}</td>
-      ${puedeCrea ? `<td><button class="btn btn-sm btn-secondary" onclick='modalSesion(${JSON.stringify(s)})'>Editar</button></td>` : '<td></td>'}
+      <td style="font-size:13px">${asistTxt}</td>
+      ${puedeCrea ? `<td><button class="btn btn-sm btn-primary" onclick='modalSesionLista(${JSON.stringify(s)})'>📋 Sesión&nbsp;+&nbsp;Lista</button></td>` : '<td></td>'}
     </tr>`;
-  }).join('') || `<tr><td colspan="9"><div class="empty"><div class="empty-icon">⚽</div><p>Sin sesiones registradas</p></div></td></tr>`;
+  }).join('') || `<tr><td colspan="10"><div class="empty"><div class="empty-icon">⚽</div><p>Sin sesiones registradas</p></div></td></tr>`;
+
   render(`
     <div class="card" style="padding:14px 20px">
       <div class="table-toolbar">
@@ -5806,62 +5677,99 @@ function sesiones() {
       </div>
       <div class="table-wrap">
         <table id="tbl-ses">
-          <thead><tr><th>ID</th><th>Fecha</th><th>Horario</th><th>Día</th><th>Entrenador</th><th>Lugar</th><th>Descripción</th><th>Valoración</th><th></th></tr></thead>
+          <thead><tr><th>ID</th><th>Fecha</th><th>Horario</th><th>Día</th><th>Entrenador</th><th>Lugar</th><th>Descripción</th><th>Val.</th><th>Asist.</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
     </div>`);
 }
 
-function modalSesion(s) {
+function modalSesionLista(s) {
   s = s || {};
-  const isNew = !s.ID;
+  const isNew    = !s.ID;
   const fechaVal = s.FECHA || new Date().toISOString().slice(0,10);
-  const entrenadores = DB.personal.filter(p=>['ENTRENADOR','ADMIN','COORDINADOR'].includes(String(p.ROL||'').toUpperCase()))
-    .map(p=>`<option value="${esc(p.ID_MONITOR)}" ${String(s.ID_ENTRENADOR||'')===String(p.ID_MONITOR)?'selected':''}>${esc(p.NOMBRE||'')} ${esc(p.APELLIDOS||'')}</option>`).join('');
+
+  const entrenadores = DB.personal
+    .filter(p => ['ENTRENADOR','ADMIN','COORDINADOR'].includes(String(p.ROL||'').toUpperCase()))
+    .map(p => `<option value="${esc(p.ID_MONITOR)}" ${String(s.ID_ENTRENADOR||'')===String(p.ID_MONITOR)?'selected':''}>${esc(p.NOMBRE||'')} ${esc(p.APELLIDOS||'')}</option>`)
+    .join('');
+
   const DIAS_SEM = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
   const DAYS_ES  = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
   const dFecha   = fechaVal ? new Date(fechaVal + 'T12:00:00') : null;
   const dayName  = dFecha && !isNaN(dFecha) ? DAYS_ES[dFecha.getDay()] : '';
   const grupoDefault = s.GRUPO || dayName;
-  const grupoOpts = DIAS_SEM.map(g => `<option value="${g}" ${grupoDefault===g?'selected':''}>${g}</option>`);
-  const val = parseInt(s.VALORACION)||0;
-  const LABELS_VAL = ['Mejorable','Regular','Bueno','Excelente'];
+  const grupoOpts    = DIAS_SEM.map(g => `<option value="${g}" ${grupoDefault===g?'selected':''}>${g}</option>`);
 
-  openModal(isNew ? 'Registrar sesión' : 'Editar sesión', `
-    <div class="form-grid">
-      <div class="field"><label>Fecha <span class="req">*</span></label>
-        <input type="date" id="ses-fecha" value="${esc(fechaVal)}" oninput="updateSesionDia()">
-      </div>
-      <div class="field"><label>Hora inicio</label>
-        <input type="time" id="ses-hi" value="${esc(s.HORA_INICIO||'17:00')}"></div>
-      <div class="field"><label>Hora fin</label>
-        <input type="time" id="ses-hf" value="${esc(s.HORA_FIN||'18:30')}"></div>
-      <div class="field"><label>Día <span class="req">*</span></label>
-        <select id="ses-grupo">${grupoOpts.join('')}</select></div>
-      <div class="field"><label>Entrenador</label>
-        <select id="ses-ent">${entrenadores}</select></div>
-      <div class="field"><label>Lugar</label>
-        <input id="ses-lugar" value="${esc(s.LUGAR||'')}"></div>
-      <div class="field" style="grid-column:span 2"><label>Descripción / contenido</label>
-        <input id="ses-desc" value="${esc(s.DESCRIPCION||'')}"></div>
-      <div class="field" style="grid-column:span 2">
-        <label>Autoevaluación del entrenador</label>
-        <div style="display:flex;gap:8px;margin-top:6px">
-          ${[1,2,3,4].map(v=>`
-            <button id="ses-val-${v}" type="button" onclick="selectSesVal(${v})"
-              style="flex:1;padding:8px 4px;border:2px solid ${val===v?'var(--green)':'var(--border)'};border-radius:6px;background:${val===v?'var(--green-l)':'var(--bg)'};cursor:pointer;text-align:center;font-size:12px;font-weight:${val===v?700:400};transition:all .15s">
-              <div style="font-size:18px;letter-spacing:-2px">${'★'.repeat(v)}${'☆'.repeat(4-v)}</div>
-              <div style="color:var(--text3);font-size:11px;margin-top:2px">${LABELS_VAL[v-1]}</div>
-            </button>`).join('')}
+  const val        = parseInt(s.VALORACION)||0;
+  const LABELS_VAL = ['Mejorable','Regular','Bueno','Excelente'];
+  const titulo     = isNew ? 'Nueva sesión + pase de lista' : `Sesión ${s.ID||''} — ${fmtFecha(s.FECHA)}`;
+
+  openModal(titulo, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+      <!-- ── Datos de la sesión ── -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Datos de la sesión</div>
+        <div class="form-grid" style="grid-template-columns:1fr 1fr">
+          <div class="field" style="grid-column:span 2">
+            <label>Fecha <span class="req">*</span></label>
+            <input type="date" id="ses-fecha" value="${esc(fechaVal)}"
+              oninput="updateSesionDia();_sesModalCargarLista(${JSON.stringify(s.ID||null)})">
+          </div>
+          <div class="field">
+            <label>Hora inicio</label>
+            <input type="time" id="ses-hi" value="${esc(s.HORA_INICIO||'17:00')}">
+          </div>
+          <div class="field">
+            <label>Hora fin</label>
+            <input type="time" id="ses-hf" value="${esc(s.HORA_FIN||'18:30')}">
+          </div>
+          <div class="field" style="grid-column:span 2">
+            <label>Día (auto)</label>
+            <select id="ses-grupo">${grupoOpts.join('')}</select>
+          </div>
+          <div class="field" style="grid-column:span 2">
+            <label>Entrenador</label>
+            <select id="ses-ent">${entrenadores}</select>
+          </div>
+          <div class="field" style="grid-column:span 2">
+            <label>Lugar</label>
+            <input id="ses-lugar" value="${esc(s.LUGAR||'')}">
+          </div>
+          <div class="field" style="grid-column:span 2">
+            <label>Descripción / contenido</label>
+            <input id="ses-desc" value="${esc(s.DESCRIPCION||'')}">
+          </div>
         </div>
-        <input type="hidden" id="ses-val" value="${val||''}">
+        <div style="margin-top:10px">
+          <label style="font-size:12px;font-weight:600;color:var(--text2);display:block;margin-bottom:8px">Autoevaluación del entrenador</label>
+          <div style="display:flex;gap:6px">
+            ${[1,2,3,4].map(v=>`
+              <button id="ses-val-${v}" type="button" onclick="selectSesVal(${v})"
+                style="flex:1;padding:6px 2px;border:2px solid ${val===v?'var(--green)':'var(--border)'};border-radius:6px;
+                  background:${val===v?'var(--green-l)':'var(--bg)'};cursor:pointer;text-align:center;
+                  font-size:11px;font-weight:${val===v?700:400}">
+                <div style="font-size:16px;letter-spacing:-2px">${'★'.repeat(v)}${'☆'.repeat(4-v)}</div>
+                <div style="color:var(--text3);font-size:10px;margin-top:1px">${LABELS_VAL[v-1]}</div>
+              </button>`).join('')}
+          </div>
+          <input type="hidden" id="ses-val" value="${val||''}">
+        </div>
+      </div>
+      <!-- ── Pase de lista ── -->
+      <div>
+        <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px">Pase de lista</div>
+        <div id="ses-lista-cont"><p style="font-size:13px;color:var(--text3)">Cargando jugadores…</p></div>
       </div>
     </div>`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-     <button class="btn btn-primary" onclick="saveSesion(${isNew},${JSON.stringify(s.ID||null)})">${isNew?'Guardar sesión':'Actualizar'}</button>`);
+     <button class="btn btn-primary" onclick="guardarSesionCompleta(${isNew},${JSON.stringify(s.ID||null)})">
+       ${isNew ? '⚽ Crear sesión y guardar lista' : '💾 Guardar sesión y lista'}
+     </button>`,
+    'xl');
 
   updateSesionDia();
+  setTimeout(() => _sesModalCargarLista(s.ID||null), 0);
 }
 
 function updateSesionDia() {
@@ -5872,6 +5780,105 @@ function updateSesionDia() {
   const d = fEl.value ? new Date(fEl.value + 'T12:00:00') : null;
   const dayName = d && !isNaN(d) ? DAYS[d.getDay()] : '';
   if (dayName) gEl.value = dayName;
+}
+
+function _sesModalCargarLista(sesionId) {
+  const cont = document.getElementById('ses-lista-cont');
+  if (!cont) return;
+
+  const idsSeen = new Set();
+  const alumnos = DB.inscripciones
+    .filter(i => {
+      const act = DB.actividades.find(a => String(a.ID) === String(i.ID_ACTIVIDAD));
+      return act && esFutbol(act.LINEA||'') && String(i.ESTADO||'').toUpperCase() === 'ACTIVA';
+    })
+    .map(i => DB.alumnos.find(a => String(a.ID_ALUMNO) === String(i.ID_ALUMNO)))
+    .filter(a => a && !idsSeen.has(String(a.ID_ALUMNO)) && idsSeen.add(String(a.ID_ALUMNO)))
+    .sort((a,b) => (a.NOMBRE+' '+(a.APELLIDOS||'')).trim().toUpperCase()
+                    .localeCompare((b.NOMBRE+' '+(b.APELLIDOS||'')).trim().toUpperCase(), 'es'));
+
+  if (!alumnos.length) {
+    cont.innerHTML = '<p style="color:var(--amber);font-size:13px">No hay alumnos inscritos en fútbol.</p>';
+    return;
+  }
+
+  const MAX_POR_GRUPO = 8, MAX_TOTAL = 16;
+  const prevRows = sesionId
+    ? DB.asistenciasFutbol.filter(a => String(a.ID_SESION) === String(sesionId))
+    : [];
+
+  const DIMS = [
+    {k:'tec', col:'EVAL_TECNICA',        label:'Técnica'},
+    {k:'com', col:'EVAL_COMPRENSION',    label:'Comprensión'},
+    {k:'soc', col:'EVAL_SOCIOEMOCIONAL', label:'Soc.-Emocional'},
+  ];
+
+  const avisoCapacidad = alumnos.length > MAX_TOTAL
+    ? `<div style="background:var(--red-l,#fff0f0);border:1px solid var(--red);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--red);font-weight:600;margin-bottom:8px">
+        ⛔ ${alumnos.length} inscritos superan el máximo de ${MAX_TOTAL}. Revisar inscripciones.</div>`
+    : alumnos.length > MAX_POR_GRUPO
+    ? `<div style="background:#fff8e1;border:1px solid var(--amber);border-radius:6px;padding:6px 10px;font-size:12px;color:#7a5a00;font-weight:600;margin-bottom:8px">
+        ⚠ ${alumnos.length} jugadores — necesita 2 monitores.</div>`
+    : '';
+
+  cont.innerHTML = `
+    ${avisoCapacidad}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;color:var(--text3)">${alumnos.length} jugadores</span>
+      <div>
+        <button class="btn btn-sm btn-secondary" onclick="_sesMarcarTodos(true)">✓ Todos</button>
+        <button class="btn btn-sm btn-secondary" style="margin-left:4px" onclick="_sesMarcarTodos(false)">✗ Ninguno</button>
+      </div>
+    </div>
+    <div id="ses-lista-checks" style="display:flex;flex-direction:column;gap:6px;max-height:420px;overflow-y:auto">
+      ${alumnos.map(a => {
+        const aId     = String(a.ID_ALUMNO);
+        const prev    = prevRows.find(r => String(r.ID_ALUMNO) === aId);
+        const presente = prev ? String(prev.PRESENTE||'S').toUpperCase() === 'S' : true;
+        const esMejor  = prev ? String(prev.ES_MEJOR||'').toUpperCase() === 'S' : false;
+        return `
+          <div style="border:1px solid var(--border2);border-radius:6px;padding:8px 10px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+              <input type="checkbox" data-id="${aId}" ${presente?'checked':''} style="width:15px;height:15px;flex-shrink:0">
+              <strong style="flex:1;font-size:12px">${esc(a.NOMBRE)} ${esc(a.APELLIDOS||'')}</strong>
+              <button type="button" class="mejor-btn" data-id="${aId}" onclick="setMejor('${aId}')"
+                ${esMejor?'data-sel="1"':''}
+                title="Mejor jugador"
+                style="padding:1px 6px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;
+                  border:1.5px solid var(--amber);
+                  background:${esMejor?'var(--amber)':'transparent'};
+                  color:${esMejor?'white':'var(--amber)'}">⭐</button>
+            </div>
+            <div style="padding-left:22px;display:grid;grid-template-columns:90px 1fr;gap:3px 6px;align-items:center;font-size:11px">
+              ${DIMS.map(d => {
+                const curVal = parseInt(prev?.[d.col]||'')||0;
+                return `
+                  <span style="color:var(--text3)">${d.label}</span>
+                  <div style="display:flex;gap:3px">
+                    ${[1,2,3,4].map(v => {
+                      const sel = curVal === v;
+                      return `<button type="button" class="eval-b" data-alumno="${aId}" data-dim="${d.k}" data-val="${v}"
+                        ${sel?'data-sel="1"':''} onclick="setEval(this)"
+                        style="width:24px;height:22px;font-size:11px;font-weight:600;border-radius:4px;cursor:pointer;
+                          border:1.5px solid ${sel?'var(--green)':'var(--border)'};
+                          background:${sel?'var(--green)':'var(--bg)'};
+                          color:${sel?'white':'var(--text3)'}">${v}</button>`;
+                    }).join('')}
+                  </div>`;
+              }).join('')}
+              <span style="color:var(--text3)">Notas</span>
+              <input type="text" class="af-obs" data-id="${aId}" value="${esc(prev?.OBSERVACIONES||'')}"
+                style="font-size:11px;padding:2px 5px;border:1px solid var(--border);border-radius:4px;width:100%"
+                placeholder="Observaciones individuales…">
+            </div>
+          </div>`;
+      }).join('')}
+    </div>
+    ${prevRows.length ? '<div class="badge badge-amber" style="margin-top:8px">⚠ Ya existe lista para esta sesión — guardar la actualizará</div>' : ''}`;
+}
+
+function _sesMarcarTodos(val) {
+  document.querySelectorAll('#ses-lista-checks input[type=checkbox]').forEach(cb => cb.checked = val);
 }
 
 function selectSesVal(v) {
@@ -5886,11 +5893,12 @@ function selectSesVal(v) {
   if (hi) hi.value = v;
 }
 
-function saveSesion(isNew, id) {
-  const fecha  = document.getElementById('ses-fecha')?.value||'';
-  const grupo  = document.getElementById('ses-grupo')?.value||'';
-  if (!fecha||!grupo) { showToast('Fecha y grupo son obligatorios','error'); return; }
-  const row = {
+async function guardarSesionCompleta(isNew, sesionId) {
+  const fecha = document.getElementById('ses-fecha')?.value||'';
+  const grupo = document.getElementById('ses-grupo')?.value||'';
+  if (!fecha||!grupo) { showToast('Fecha y día son obligatorios','error'); return; }
+
+  const sesRow = {
     FECHA:         fecha,
     HORA_INICIO:   document.getElementById('ses-hi')?.value||'',
     HORA_FIN:      document.getElementById('ses-hf')?.value||'',
@@ -5901,9 +5909,74 @@ function saveSesion(isNew, id) {
     ESTADO:        'REALIZADA',
     VALORACION:    document.getElementById('ses-val')?.value||'',
   };
-  writeToSheet('SESIONES', row, isNew ? null : id)
-    .then(()=>{ showToast(isNew?'Sesión registrada':'Sesión actualizada'); closeModal(); loadAllData().then(sesiones); })
-    .catch(err=>showToast('Error: '+err.message,'error'));
+
+  try {
+    await writeToSheet('SESIONES', sesRow, isNew ? null : sesionId);
+
+    let finalId = sesionId;
+    if (isNew) {
+      await loadAllData();
+      // Buscar la sesión recién creada (la más reciente con esa fecha+grupo)
+      const match = [...DB.sesiones]
+        .filter(s => s.FECHA === fecha && s.GRUPO === grupo)
+        .sort((a,b) => String(b.ID||'').localeCompare(String(a.ID||''), undefined, {numeric:true}))[0];
+      finalId = match?.ID || null;
+    }
+
+    if (finalId) await _guardarListaEnModal(finalId, fecha);
+
+    showToast(isNew ? 'Sesión creada y lista guardada' : 'Sesión y lista actualizadas');
+    closeModal();
+    loadAllData().then(sesiones);
+  } catch(err) {
+    showToast('Error: '+err.message, 'error');
+  }
+}
+
+async function _guardarListaEnModal(sesionId, fecha) {
+  const checks = [...document.querySelectorAll('#ses-lista-checks input[type=checkbox]')];
+  if (!checks.length) return;
+
+  const mejorId = document.querySelector('.mejor-btn[data-sel="1"]')?.dataset.id || '';
+  const evalMap = {};
+  document.querySelectorAll('.eval-b[data-sel="1"]').forEach(btn => {
+    const aId = btn.dataset.alumno;
+    if (!evalMap[aId]) evalMap[aId] = {};
+    evalMap[aId][btn.dataset.dim] = parseInt(btn.dataset.val)||0;
+  });
+  const obsMap = {};
+  document.querySelectorAll('.af-obs').forEach(el => { obsMap[el.dataset.id] = el.value.trim(); });
+
+  const prevRows = DB.asistenciasFutbol.filter(a => String(a.ID_SESION) === String(sesionId));
+  const DIMS_COL = {tec:'EVAL_TECNICA', com:'EVAL_COMPRENSION', soc:'EVAL_SOCIOEMOCIONAL'};
+
+  let chain = Promise.resolve();
+  checks.forEach(cb => {
+    const aId  = cb.dataset.id;
+    const pres = cb.checked;
+    const prev = prevRows.find(r => String(r.ID_ALUMNO) === aId);
+    if (!pres && !prev) return;
+    chain = chain.then(() => {
+      const alumno = DB.alumnos.find(a => String(a.ID_ALUMNO) === aId);
+      const ev     = evalMap[aId] || {};
+      const vals   = Object.values(ev).filter(v => v > 0);
+      const media  = vals.length ? (vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(1) : '';
+      const evals  = {};
+      Object.entries(DIMS_COL).forEach(([k,col]) => { evals[col] = ev[k]||''; });
+      return writeToSheet('ASISTENCIAS_FUTBOL', {
+        FECHA:         fecha,
+        ID_SESION:     sesionId,
+        ID_ALUMNO:     aId,
+        NOMBRE_ALUMNO: alumno ? (alumno.NOMBRE+' '+(alumno.APELLIDOS||'')).trim() : '',
+        PRESENTE:      pres ? 'S' : 'N',
+        ES_MEJOR:      mejorId === aId ? 'S' : 'N',
+        ...evals,
+        MEDIA_DIARIA:  media,
+        OBSERVACIONES: obsMap[aId]||'',
+      }, prev?.ID||null);
+    });
+  });
+  return chain;
 }
 
 // ══════════════════════════════════════════════════════════════════════════

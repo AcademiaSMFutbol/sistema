@@ -3568,15 +3568,15 @@ function modalPago(p) {
       </div>
       <div class="field">
         <label>Importe base (€)</label>
-        <input id="p-fact" type="number" step="0.01" readonly value="${esc(p.IMPORTE||'')}">
+        <input id="p-fact" type="number" step="0.01" value="${esc(p.IMPORTE||'')}" oninput="calcNetoAlumno()">
       </div>
       <div class="field">
         <label>Descuento (€)</label>
-        <input id="p-desc" type="number" step="0.01" readonly value="${esc(p.DESC_EUR||'0')}">
+        <input id="p-desc" type="number" step="0.01" min="0" value="${esc(p.DESC_EUR||'0')}" oninput="calcNetoAlumno()">
       </div>
       <div class="field">
         <label>Total esperado (€)</label>
-        <input id="p-neto" type="number" step="0.01" readonly value="${esc(p.TOTAL_ESPERADO||p.IMPORTE||'')}">
+        <input id="p-neto" type="number" step="0.01" readonly value="${esc(p.TOTAL_ESPERADO||p.IMPORTE||'')}" style="font-weight:700">
       </div>
     </div>
 
@@ -3661,6 +3661,14 @@ function setPagoModo(modo) {
   bA.style.color = esAlumno ? '#fff' : 'var(--text1)';
   bE.style.background = esAlumno ? 'var(--bg2)' : 'var(--g1)';
   bE.style.color = esAlumno ? 'var(--text1)' : '#fff';
+}
+
+function calcNetoAlumno() {
+  const imp  = parseFloat(document.getElementById('p-fact')?.value||0)||0;
+  const desc = parseFloat(document.getElementById('p-desc')?.value||0)||0;
+  const neto = Math.max(0, parseFloat((imp - desc).toFixed(2)));
+  const el   = document.getElementById('p-neto');
+  if (el) el.value = neto.toFixed(2);
 }
 
 function calcNetoExterno() {

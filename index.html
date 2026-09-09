@@ -3055,6 +3055,43 @@ function _waLinkPago(p) {
     class="btn btn-sm" style="background:#25D366;color:#fff;white-space:nowrap">📲 WA</a>`;
 }
 
+function _waConfirmPagoUrl(p) {
+  const alu    = DB.alumnos.find(a => String(a.ID_ALUMNO) === String(p.ID_ALUMNO));
+  const cli    = DB.clientes.find(c => String(c.ID_CLIENTE) === String(alu?.ID_CLIENTE || p.ID_CLIENTE));
+  const telRaw = (cli?.['TELÉFONO'] || cli?.TELEFONO || '').replace(/\D/g,'');
+  if (!telRaw) return null;
+  const tel     = telRaw.length === 9 ? '34'+telRaw : telRaw;
+  const tutor   = (cli?.NOMBRE||'').split(' ')[0] || '';
+  const importe = fmtEur(p.TOTAL_RECIBIDO || p.TOTAL_ESPERADO || p.IMPORTE);
+  const servicio = p.SERVICIO || 'actividad';
+  const sufMes  = p.MES ? ` (${p.MES})` : '';
+  const texto   = `Hola ${tutor}, hemos recibido tu pago de ${importe} correspondiente a ${servicio}${sufMes}. ¡Muchas gracias! 🙏\nSM Academia`;
+  return { href: `https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, tutor };
+}
+
+function _waConfirmPago(p) {
+  const wa = _waConfirmPagoUrl(p);
+  if (!wa) return '';
+  return `<a href="${wa.href}" target="_blank"
+    class="btn btn-sm" style="background:#25D366;color:#fff;white-space:nowrap" title="Enviar confirmación de pago">📲 Confirmar</a>`;
+}
+
+function _ofrecerWAConfirmPago(row) {
+  const wa = _waConfirmPagoUrl(row);
+  if (!wa) return;
+  openModal('Pago guardado', `
+    <div style="text-align:center;padding:8px 0 4px">
+      <div style="font-size:36px;margin-bottom:10px">✅</div>
+      <p style="margin-bottom:6px">¿Enviar confirmación de recepción a <strong>${esc(wa.tutor)}</strong>?</p>
+      <p style="color:var(--text3);font-size:12px;margin-bottom:20px">${esc(row.SERVICIO||'')}${row.MES?' · '+row.MES:''} — ${fmtEur(row.TOTAL_RECIBIDO||row.TOTAL_ESPERADO||row.IMPORTE)}</p>
+      <a href="${wa.href}" target="_blank" class="btn"
+        style="background:#25D366;border-color:#25D366;color:#fff;font-size:14px;padding:10px 28px"
+        onclick="closeModal()">📲 Enviar por WhatsApp</a>
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cerrar sin enviar</button>`
+  );
+}
+
 function _opcionesInscPago(aluId, selId, forceId) {
   const inscs = DB.inscripciones.filter(i => {
     if (String(i.ID_ALUMNO) !== String(aluId)) return false;
@@ -3156,7 +3193,9 @@ function pagos(filtro) {
   const rows = pagosFiltrados.map(p => {
     const alu = DB.alumnos.find(a => String(a.ID_ALUMNO) === String(p.ID_ALUMNO));
     const pendiente = String(p.ESTADO||'').toUpperCase() === 'PENDIENTE';
-    const btnWA = reclamacionActiva && pendiente ? _waLinkPago(p) : '';
+    const pagado    = String(p.ESTADO||'').toUpperCase() === 'PAGADO';
+    const btnWA     = reclamacionActiva && pendiente ? _waLinkPago(p) : '';
+    const btnWAconf = pagado && p.ID_ALUMNO ? _waConfirmPago(p) : '';
     const lineaBadge = p.LINEA ? `<span class="badge badge-blue" style="font-size:10px;margin-right:4px">${esc(p.LINEA)}</span>` : '';
     const pJson = JSON.stringify(p).replace(/'/g,"&#39;");
     const facVinc = p.ID_FACTURA ? DB.facturas.find(f => String(f.ID_FACTURA) === String(p.ID_FACTURA)) : null;
@@ -3180,6 +3219,7 @@ function pagos(filtro) {
         <button class="btn btn-sm btn-secondary" onclick='modalPago(${pJson})'>Editar</button>
         ${btnFac}
         ${btnWA}
+        ${btnWAconf}
       </td>
     </tr>`;
   }).join('') || `<tr><td colspan="11"><div class="empty"><div class="empty-icon">💳</div><p>Sin pagos registrados</p></div></td></tr>`;
@@ -3471,8 +3511,13 @@ function guardarPago(id) {
   }
 
   if (!id) row.FECHA_REGISTRO = new Date().toISOString().slice(0,10);
+  const esConfirmado = String(row.ESTADO||'').toUpperCase() === 'PAGADO' && !!row.ID_ALUMNO;
   writeToSheet('PAGOS', row, id)
-    .then(() => { showToast(id ? 'Pago actualizado' : 'Pago registrado'); closeModal(); loadAllData().then(pagos); })
+    .then(() => {
+      showToast(id ? 'Pago actualizado' : 'Pago registrado');
+      closeModal();
+      loadAllData().then(() => { pagos(); if (esConfirmado) _ofrecerWAConfirmPago(row); });
+    })
     .catch(err => { showToast('Error: '+err.message, 'error'); if (btn) { btn.disabled=false; btn.textContent='Guardar'; } });
 }
 

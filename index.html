@@ -3105,17 +3105,19 @@ function actualizarInscPago() {
   document.getElementById('p-cli')    && (document.getElementById('p-cli').value    = '');
 }
 
-function autorellenarPago() {
+function autorellenarPago(mantenerImportes) {
   const sel = document.getElementById('p-insc');
   if (!sel || !sel.value) return;
   const o = sel.options[sel.selectedIndex];
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-  set('p-linea', o.dataset.linea  || '');
+  set('p-linea', o.dataset.linea    || '');
   set('p-serv',  o.dataset.servicio || '');
-  set('p-fact',  o.dataset.importe || '');
-  set('p-desc',  o.dataset.desc    || '');
-  set('p-neto',  o.dataset.neto    || '');
-  set('p-cli',   o.dataset.cliente || '');
+  set('p-cli',   o.dataset.cliente  || '');
+  if (!mantenerImportes) {
+    set('p-fact', o.dataset.importe || '');
+    set('p-desc', o.dataset.desc    || '');
+    set('p-neto', o.dataset.neto    || '');
+  }
 }
 
 const LINEAS_EXT = ['AMPA','CLUB','ENTRENADOR','EXTERNO'];
@@ -3298,7 +3300,7 @@ function modalPago(p) {
       </div>
       <div class="field span2">
         <label>Inscripción / Concepto <span class="req">*</span></label>
-        <select id="p-insc" onchange="autorellenarPago()">
+        <select id="p-insc" onchange="autorellenarPago(${!isNew})">
           ${insOps}
         </select>
       </div>

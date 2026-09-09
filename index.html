@@ -4952,8 +4952,13 @@ function extraResumen() {
   const mesActK  = hoy.toISOString().slice(0,7);
   const mesAntK  = new Date(hoy.getFullYear(), hoy.getMonth()-1, 1).toISOString().slice(0,7);
   const añoActK  = String(hoy.getFullYear());
-  const mesAntLabel = new Date(mesAntK+'-15').toLocaleDateString('es-ES',{month:'long',year:'numeric'});
   const colorTasa = t => t===null?'var(--text3)':t>=75?'var(--green)':t>=50?'var(--amber)':'var(--red)';
+  // Mes de referencia para asistencia: el más reciente con registros (fallback: mes anterior)
+  const mesesConAsist = [...new Set(DB.asistenciasExtra.map(a=>String(a.FECHA||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  const mesAsistK = mesesConAsist[0] || mesAntK;
+  const mesAsistLabel = new Date(mesAsistK+'-15').toLocaleDateString('es-ES',{month:'long',year:'numeric'});
+  // Actividades de custodia (recogida, temprana, tardía) — no aplica % asistencia
+  const esCustodia = nom => { const n=sinTildes(nom||''); return n.includes('RECOGIDA')||n.includes('TEMPRANA')||n.includes('TARDIA'); };
 
   // Actividades extraescolares activas
   const actExtras = DB.actividades.filter(a =>
@@ -4985,11 +4990,13 @@ function extraResumen() {
   const totalDonutVal = cobradoMes + pendienteMes || 1;
   const pctCobrado = cobradoMes / totalDonutVal;
 
-  // KPI: asistencia mes anterior por actividad
-  const sesAnt = DB.asistenciasExtra.filter(a => String(a.FECHA||'').startsWith(mesAntK));
-  const asistActMes = actExtras.map(act => {
+  // KPI: asistencia por actividad — excluye custodia, usa el mes más reciente con datos
+  const sesRef = DB.asistenciasExtra.filter(a => String(a.FECHA||'').startsWith(mesAsistK));
+  const actExtrasAsist = actExtras.filter(a => !esCustodia(a.NOMBRE||''));
+  const asistActIds = new Set(actExtrasAsist.map(a => String(a.ID)));
+  const asistActMes = actExtrasAsist.map(act => {
     const aId   = String(act.ID);
-    const sesSel = sesAnt.filter(s => String(s.ID_ACTIVIDAD)===aId);
+    const sesSel = sesRef.filter(s => String(s.ID_ACTIVIDAD)===aId);
     const tp    = sesSel.reduce((s,a) => s+(parseInt(a.TOTAL_PRESENTES)||0), 0);
     const to    = sesSel.reduce((s,a) => s+(parseInt(a.TOTAL_ALUMNOS)||0), 0);
     return {act, tasa: to ? Math.round(tp/to*100) : null};
@@ -4998,13 +5005,13 @@ function extraResumen() {
   const tasaMed = tasasValidas.length
     ? Math.round(tasasValidas.reduce((s,v)=>s+v,0)/tasasValidas.length) : null;
 
-  // Asistencia por alumno (mes anterior)
+  // Asistencia por alumno — excluye actividades de custodia
   const aluAsistMes = alusExtrasIds.map(aluId => {
     const alu    = DB.alumnos.find(a => String(a.ID_ALUMNO||a.ID)===aluId);
-    const actIds = [...new Set(insExtras.filter(i => String(i.ID_ALUMNO)===aluId).map(i => String(i.ID_ACTIVIDAD)))];
+    const actIds = [...new Set(insExtras.filter(i => String(i.ID_ALUMNO)===aluId && asistActIds.has(String(i.ID_ACTIVIDAD))).map(i => String(i.ID_ACTIVIDAD)))];
     let totSes = 0, totPres = 0;
     actIds.forEach(aId => {
-      const sesSel = sesAnt.filter(s => String(s.ID_ACTIVIDAD)===aId);
+      const sesSel = sesRef.filter(s => String(s.ID_ACTIVIDAD)===aId);
       totSes += sesSel.length;
       sesSel.forEach(s => {
         const presentes = String(s.ALUMNOS_PRESENTES||'').split(',').map(x=>x.trim()).filter(Boolean);
@@ -5064,7 +5071,7 @@ function extraResumen() {
       <td style="text-align:center"><span style="font-weight:700;color:${colorTasa(x.tasa)}">${x.tasa!==null?x.tasa+'%':'—'}</span></td>
       <td style="text-align:center">${alerta?'<span class="badge" style="background:var(--red-l);color:var(--red);font-size:11px">&#9888; &lt;50%</span>':''}</td>
     </tr>`;
-  }).join('') || `<tr><td colspan="4" style="text-align:center;color:var(--text3);font-size:13px;padding:16px">Sin sesiones registradas en ${mesAntLabel}</td></tr>`;
+  }).join('') || `<tr><td colspan="4" style="text-align:center;color:var(--text3);font-size:13px;padding:16px">Sin sesiones registradas en ${mesAsistLabel}</td></tr>`;
 
   // PDF export (registered after computing all vars)
   topbarBtn('↓ Exportar PDF', () => {
@@ -5083,7 +5090,7 @@ function extraResumen() {
       <td><strong style="color:${colorTasa(x.tasa)}">${x.tasa!==null?x.tasa+'%':'—'}</strong></td>
       <td>${x.tasa!==null&&x.tasa<50?'⚠ Alerta':''}</td>
     </tr>`).join('');
-    exportarPDF(`Dashboard AMPA — ${mesAntLabel}`, kHtml+`
+    exportarPDF(`Dashboard AMPA — ${mesAsistLabel}`, kHtml+`
       <table><thead><tr><th>Alumno</th><th>Sesiones</th><th>% Asistencia</th><th>Alerta</th></tr></thead>
       <tbody>${filasPDF||'<tr><td colspan="4">Sin datos</td></tr>'}</tbody></table>`);
   }, 'btn-secondary');
@@ -5123,7 +5130,7 @@ function extraResumen() {
         </div>
         <div class="kpi">
           <div class="kpi-n" style="color:${colorTasa(tasaMed)}">${tasaMed!==null?tasaMed+'%':'—'}</div>
-          <div class="kpi-l">Asistencia ${mesAntLabel}</div>
+          <div class="kpi-l">Asistencia ${mesAsistLabel}</div>
         </div>
         <div class="kpi">
           <div class="kpi-n" style="color:${kAlertaAsist>0?'var(--red)':'var(--green)'}">${kAlertaAsist}</div>
@@ -5138,7 +5145,7 @@ function extraResumen() {
           <div style="margin-top:12px">${barrasInsH}</div>
         </div>
         <div class="card">
-          <div class="card-title">Asistencia por actividad — ${mesAntLabel}</div>
+          <div class="card-title">Asistencia por actividad — ${mesAsistLabel}</div>
           <div style="display:flex;align-items:flex-end;gap:6px;height:96px;margin-top:12px">${barrasTasaV}</div>
           <div style="display:flex;gap:10px;margin-top:8px;font-size:11px">
             <span style="color:var(--green)">● ≥75%</span>
@@ -5171,11 +5178,11 @@ function extraResumen() {
       <!-- Tabla asistencia por alumno mes anterior -->
       <div class="card" style="padding:14px 20px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <div class="card-title" style="margin:0">Asistencia por alumno — ${mesAntLabel}</div>
+          <div class="card-title" style="margin:0">Asistencia por alumno — ${mesAsistLabel}</div>
           ${!isAmpa()?`<button class="btn btn-primary btn-sm" onclick="navigate('asistencias-extra')">Pasar lista hoy</button>`:''}
         </div>
         ${kAlertaAsist>0?`<div style="background:var(--amber-l);border:1px solid var(--amber);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px">
-          <strong>⚠ ${kAlertaAsist} alumno${kAlertaAsist>1?'s':''}</strong> con menos del 50% de asistencia en ${mesAntLabel}.
+          <strong>⚠ ${kAlertaAsist} alumno${kAlertaAsist>1?'s':''}</strong> con menos del 50% de asistencia en ${mesAsistLabel}.
           Revisa antes de emitir recibos para evitar reclamaciones.
         </div>`:''}
         <div class="table-wrap">

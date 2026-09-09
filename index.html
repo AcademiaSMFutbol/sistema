@@ -3044,7 +3044,7 @@ async function ejecutarGenerarPagosMasivo() {
 function _waLinkPago(p) {
   const alu = DB.alumnos.find(a => String(a.ID_ALUMNO) === String(p.ID_ALUMNO));
   const cli = alu ? DB.clientes.find(c => String(c.ID_CLIENTE) === String(alu.ID_CLIENTE||p.ID_CLIENTE)) : null;
-  const telRaw = (cli?.['TELÉFONO'] || cli?.TELEFONO || '').replace(/\D/g,'');
+  const telRaw = String(cli?.['TELÉFONO'] || cli?.TELEFONO || '').replace(/\D/g,'');
   if (!telRaw) return '';
   const tel     = telRaw.length === 9 ? '34'+telRaw : telRaw;
   const tutor   = cli ? (cli.NOMBRE||'').split(' ')[0] : '';
@@ -3061,7 +3061,7 @@ function _waLinkPago(p) {
 function _waConfirmPagoUrl(p) {
   const alu    = DB.alumnos.find(a => String(a.ID_ALUMNO) === String(p.ID_ALUMNO));
   const cli    = DB.clientes.find(c => String(c.ID_CLIENTE) === String(alu?.ID_CLIENTE || p.ID_CLIENTE));
-  const telRaw = (cli?.['TELÉFONO'] || cli?.TELEFONO || '').replace(/\D/g,'');
+  const telRaw = String(cli?.['TELÉFONO'] || cli?.TELEFONO || '').replace(/\D/g,'');
   if (!telRaw) return null;
   const tel     = telRaw.length === 9 ? '34'+telRaw : telRaw;
   const tutor   = (cli?.NOMBRE||'').split(' ')[0] || '';

@@ -789,7 +789,10 @@ function navigate(page) {
   document.getElementById('topbar-sub').textContent   = meta.sub;
   document.getElementById('topbar-actions').innerHTML = '';
   const fn = MODULES[page];
-  if (fn) fn();
+  if (fn) try { fn(); } catch(e) {
+    console.error('Error en módulo', page, e);
+    render(`<div class="stub"><div class="stub-icon">⚠️</div><p style="color:var(--red)">${esc(e.message||String(e))}</p><button class="btn btn-secondary" onclick="navigate('${page}')">Reintentar</button></div>`);
+  }
 }
 
 function render(html) { document.getElementById('page-content').innerHTML = html; }
@@ -3065,8 +3068,10 @@ function _waConfirmPagoUrl(p) {
   const importe = fmtEur(p.TOTAL_RECIBIDO || p.TOTAL_ESPERADO || p.IMPORTE);
   const servicio = p.SERVICIO || 'actividad';
   const sufMes  = p.MES ? ` (${p.MES})` : '';
-  const texto   = `Hola ${tutor}, hemos recibido tu pago de ${importe} correspondiente a ${servicio}${sufMes}. ¡Muchas gracias! 🙏\nSM Academia`;
-  return { href: `https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, tutor };
+  const texto   = `Hola ${tutor}, hemos recibido tu pago de ${importe} correspondiente a ${servicio}${sufMes}. ¡Muchas gracias! \nSM Academia`;
+  try {
+    return { href: `https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, tutor };
+  } catch(_) { return null; }
 }
 
 function _waConfirmPago(p) {
@@ -3190,7 +3195,7 @@ function pagos(filtro) {
       ${t.label} <span style="opacity:.65;font-weight:400">${t.n}</span></button>`).join('')}
   </div>`;
 
-  const rows = pagosFiltrados.map(p => {
+  const rows = pagosFiltrados.map(p => { try {
     const alu = DB.alumnos.find(a => String(a.ID_ALUMNO) === String(p.ID_ALUMNO));
     const pendiente = String(p.ESTADO||'').toUpperCase() === 'PENDIENTE';
     const pagado    = String(p.ESTADO||'').toUpperCase() === 'PAGADO';
@@ -3222,6 +3227,7 @@ function pagos(filtro) {
         ${btnWAconf}
       </td>
     </tr>`;
+  } catch(e) { console.error('Error en fila pago', p, e); return `<tr><td colspan="11" style="color:var(--red);font-size:11px;padding:4px 8px">Error al renderizar pago ${esc(String(p.ID_PAGO||p.ID||''))} — ${esc(e.message)}</td></tr>`; }
   }).join('') || `<tr><td colspan="11"><div class="empty"><div class="empty-icon">💳</div><p>Sin pagos registrados</p></div></td></tr>`;
 
   const totalEsperado = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE').reduce((s,p)=>s+(parseFloat(p.TOTAL_ESPERADO||p.IMPORTE)||0),0);

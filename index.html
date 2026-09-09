@@ -2164,6 +2164,14 @@ async function guardarCambioActividad() {
   const hoy = new Date().toISOString().slice(0,10);
   const t   = sinTildes(actNueva.TIPO||'');
 
+  // Capturar descuento y forma de pago ANTES de cerrar el modal
+  const selInsc = document.getElementById('ca-insc-id');
+  const oInsc   = selInsc?.options[selInsc?.selectedIndex];
+  const descPct = parseFloat(oInsc?.dataset?.dto ?? oldInsc.DESCUENTO ?? '0') || 0;
+  const fPago   = oInsc?.dataset?.fpago ?? oldInsc.FORMA_PAGO ?? '';
+  const descEur = Math.round(precio * descPct / 100 * 100) / 100;
+  const neto    = Math.round((precio - descEur) * 100) / 100;
+
   try {
     // 1. Marcar inscripción actual como BAJA
     await writeToSheet('INSCRIPCIONES',
@@ -2172,8 +2180,6 @@ async function guardarCambioActividad() {
     );
 
     // 2. Crear nueva inscripción ACTIVA con la nueva actividad
-    const selInsc = document.getElementById('ca-insc-id');
-    const oInsc   = selInsc?.options[selInsc.selectedIndex];
     const newInsc = {
       ID_ALUMNO:       aluId || oldInsc.ID_ALUMNO,
       ID_CLIENTE:      oldInsc.ID_CLIENTE || '',
@@ -2181,22 +2187,56 @@ async function guardarCambioActividad() {
       LINEA:           actNueva.LINEA || oldInsc.LINEA || '',
       GRUPO:           grupo,
       PRECIO_ACORDADO: precio,
-      DESCUENTO:       oInsc?.dataset?.dto ?? oldInsc.DESCUENTO ?? '0',
+      DESCUENTO:       String(descPct),
       TIPO_PRECIO:     t.includes('SUELTA')||t.includes('ANUAL') ? 'PAGO_ÚNICO' : 'MENSUALIDAD',
       DIAS_SEMANA:     actNueva.DIAS_SEMANA || actNueva.DIA_SEMANA || '',
       HORARIO:         actNueva.HORARIO || '',
-      FORMA_PAGO:      oInsc?.dataset?.fpago ?? oldInsc.FORMA_PAGO ?? '',
+      FORMA_PAGO:      fPago,
       FECHA_ALTA:      hoy,
       ESTADO:          'ACTIVA',
       OBSERVACIONES:   oldInsc.OBSERVACIONES || '',
     };
     await writeToSheet('INSCRIPCIONES', newInsc, null);
 
-    showToast('Cambio de actividad registrado');
+    // 3. Recargar BD para obtener el ID de la nueva inscripción
+    await loadAllData();
+
+    // 4. Localizar la inscripción recién creada
+    const nuevaInsc = DB.inscripciones.find(i =>
+      String(i.ID_ALUMNO)    === String(aluId || oldInsc.ID_ALUMNO) &&
+      String(i.ID_ACTIVIDAD) === String(actNuevaId) &&
+      String(i.ESTADO||'').toUpperCase() === 'ACTIVA' &&
+      String(i.FECHA_ALTA||'').startsWith(hoy)
+    );
+
+    // 5. Actualizar pagos PENDIENTES vinculados a la inscripción antigua
+    const pagosPend = DB.pagos.filter(p =>
+      String(p.ID_INSCRIPCION) === String(oldInsc.ID_INSCRIPCION) &&
+      String(p.ESTADO||'').toUpperCase() === 'PENDIENTE'
+    );
+
+    if (pagosPend.length && nuevaInsc) {
+      if (btn) btn.textContent = `Actualizando ${pagosPend.length} pago${pagosPend.length>1?'s':''}…`;
+      for (const pago of pagosPend) {
+        await writeToSheet('PAGOS', {
+          ...pago,
+          ID_INSCRIPCION: nuevaInsc.ID_INSCRIPCION,
+          LINEA:          actNueva.LINEA || oldInsc.LINEA || pago.LINEA || '',
+          SERVICIO:       actNueva.NOMBRE || pago.SERVICIO,
+          IMPORTE:        precio.toFixed(2),
+          DESC_EUR:       descEur.toFixed(2),
+          TOTAL_ESPERADO: neto.toFixed(2),
+        }, pago.ID_PAGO || pago.ID);
+      }
+      await loadAllData();
+      showToast(`Cambio registrado · ${pagosPend.length} pago${pagosPend.length>1?'s':''} pendiente${pagosPend.length>1?'s':''} actualizado${pagosPend.length>1?'s':''}`);
+    } else {
+      showToast('Cambio de actividad registrado');
+    }
+
     closeModal();
-    loadAllData().then(() => {
-      if (typeof inscripciones === 'function') inscripciones();
-    });
+    if (currentPage === 'pagos') pagos();
+    else if (currentPage === 'inscripciones') inscripciones();
   } catch(e) {
     showToast('Error: ' + e.message, 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Confirmar cambio'; }

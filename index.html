@@ -1252,6 +1252,31 @@ function modalAlumno(a) {
   ).join('');
 
   const esExt = esExtraescolar(a.LINEA||'');
+
+  // Inscripciones activas — solo en edición
+  let inscSeccion = '';
+  if (!isNew) {
+    const inscsAlu = DB.inscripciones.filter(i =>
+      String(i.ID_ALUMNO) === String(a.ID_ALUMNO) &&
+      String(i.ESTADO||'').toUpperCase() === 'ACTIVA'
+    );
+    const filasInsc = inscsAlu.map(i => {
+      const act = DB.actividades.find(x => String(x.ID) === String(i.ID_ACTIVIDAD));
+      return `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg2);border-radius:6px;margin-bottom:6px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">${esc(act?.NOMBRE||i.ID_ACTIVIDAD||'Actividad')}</div>
+          <div style="font-size:11px;color:var(--text3)">${fmtEur(i.PRECIO_ACORDADO)}${i.DESCUENTO&&i.DESCUENTO!=='0'?' · −'+i.DESCUENTO+'%':''}${i.GRUPO?' · Gr.'+i.GRUPO:''}${i.FORMA_PAGO?' · '+i.FORMA_PAGO:''}</div>
+        </div>
+        <button class="btn btn-sm" style="background:var(--amber,#f59e0b);color:#fff;white-space:nowrap;flex-shrink:0"
+          onclick="closeModal();modalCambioActividad('${esc(String(a.ID_ALUMNO))}','${esc(String(i.ID_INSCRIPCION))}')">🔄 Cambio</button>
+      </div>`;
+    }).join('');
+    inscSeccion = `<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:10px">Inscripciones activas</div>
+      ${filasInsc || '<p style="font-size:13px;color:var(--text3);margin:0">Sin inscripciones activas</p>'}
+    </div>`;
+  }
+
   openModal(isNew ? 'Nuevo alumno' : 'Editar alumno', `
     <div class="form-grid">
       <div class="field"><label>Nombre <span class="req">*</span></label>
@@ -1289,7 +1314,8 @@ function modalAlumno(a) {
         </select></div>
       <div class="field span2"><label>Observaciones / salud</label>
         <textarea id="a-obs">${esc(a.OBSERVACIONES||'')}</textarea></div>
-    </div>`,
+    </div>
+    ${inscSeccion}`,
     `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
      <button class="btn btn-primary" onclick="guardarAlumno(${isNew?'null':`'${a.ID_ALUMNO}'`})">Guardar</button>`
   );
@@ -1791,7 +1817,10 @@ function inscripciones() {
         <td>${esc(i.FORMA_PAGO||'—')}</td>
         <td>${fmtFecha(i.FECHA_ALTA)}</td>
         <td>${badgeEstado(i.ESTADO)}</td>
-        <td><button class="btn btn-sm btn-secondary" onclick='modalInscripcion(${JSON.stringify(i)})'>Editar</button></td>
+        <td style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-secondary" onclick='modalInscripcion(${JSON.stringify(i)})'>Editar</button>
+          ${String(i.ESTADO||'').toUpperCase()==='ACTIVA'?`<button class="btn btn-sm" style="background:var(--amber,#f59e0b);color:#fff" onclick="modalCambioActividad('${esc(String(i.ID_ALUMNO))}','${esc(String(i.ID_INSCRIPCION))}')">🔄 Cambio</button>`:''}
+        </td>
       </tr>`;
     }).join('') || `<tr><td colspan="11"><div class="empty"><div class="empty-icon">✍️</div><p>Sin inscripciones</p></div></td></tr>`;
 
@@ -1997,6 +2026,181 @@ function toggleDescuentoIns() {
   const sel = document.getElementById('i-dto-sel')?.value;
   const wrap = document.getElementById('wrap-dto-custom');
   if (wrap) wrap.style.display = sel === 'custom' ? '' : 'none';
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  CAMBIO DE ACTIVIDAD
+// ══════════════════════════════════════════════════════════════════════════
+function modalCambioActividad(aluId, inscId) {
+  const alu = DB.alumnos.find(a => String(a.ID_ALUMNO) === String(aluId));
+  const cli = alu ? DB.clientes.find(c => String(c.ID_CLIENTE) === String(alu.ID_CLIENTE)) : null;
+
+  const inscsActivas = DB.inscripciones.filter(i =>
+    String(i.ID_ALUMNO) === String(aluId) &&
+    String(i.ESTADO||'').toUpperCase() === 'ACTIVA'
+  );
+  const inscActual = inscsActivas.find(i => String(i.ID_INSCRIPCION) === String(inscId)) || inscsActivas[0];
+
+  if (!inscsActivas.length) {
+    openModal('Cambio de actividad', '<p style="padding:16px 0">Este alumno no tiene inscripciones activas.</p>',
+      '<button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>');
+    return;
+  }
+
+  const opsInsc = inscsActivas.map(i => {
+    const act = DB.actividades.find(a => String(a.ID) === String(i.ID_ACTIVIDAD));
+    return `<option value="${esc(String(i.ID_INSCRIPCION))}"
+      data-precio="${parseFloat(i.PRECIO_ACORDADO||0).toFixed(2)}"
+      data-dto="${esc(String(i.DESCUENTO||'0'))}"
+      data-fpago="${esc(i.FORMA_PAGO||'')}"
+      data-grupo="${esc(i.GRUPO||'')}"
+      data-linea="${esc(i.LINEA||'')}"
+      ${String(i.ID_INSCRIPCION) === String(inscActual?.ID_INSCRIPCION) ? 'selected' : ''}
+    >${esc(act?.NOMBRE || i.ID_ACTIVIDAD)} ${i.GRUPO ? '· Gr.' + i.GRUPO : ''} — ${fmtEur(i.PRECIO_ACORDADO)}</option>`;
+  }).join('');
+
+  // Actividades activas, preferentemente de la misma línea
+  const lineaRef = inscActual?.LINEA || '';
+  const actsDisp = DB.actividades.filter(a => String(a.ACTIVA||'').toUpperCase().startsWith('S'));
+  // Orden: misma línea primero, después el resto
+  actsDisp.sort((a,b) => {
+    if (a.LINEA === lineaRef && b.LINEA !== lineaRef) return -1;
+    if (a.LINEA !== lineaRef && b.LINEA === lineaRef) return 1;
+    return 0;
+  });
+  const opsActNueva = actsDisp.map(a =>
+    `<option value="${esc(String(a.ID))}"
+      data-precio="${parseFloat(a.PRECIO||0).toFixed(2)}"
+      data-linea="${esc(a.LINEA||'')}"
+    >${esc(a.NOMBRE)}${a.LINEA && a.LINEA !== lineaRef ? ' [' + esc(a.LINEA) + ']' : ''}</option>`
+  ).join('');
+
+  const precioInit = parseFloat(inscActual?.PRECIO_ACORDADO || 0).toFixed(2);
+  const grupoInit  = inscActual?.GRUPO || '';
+  const dtoInit    = inscActual?.DESCUENTO || '0';
+  const fpagoInit  = inscActual?.FORMA_PAGO || '—';
+
+  openModal('Cambio de actividad', `
+    <div style="background:var(--bg2);border-radius:8px;padding:12px 14px;margin-bottom:16px;display:flex;gap:10px;align-items:center">
+      <div style="font-size:22px">👤</div>
+      <div>
+        <div style="font-weight:600;font-size:14px">${esc(alu ? alu.NOMBRE+' '+(alu.APELLIDOS||'') : '—')}</div>
+        ${cli ? `<div style="font-size:12px;color:var(--text3)">Familia: ${esc(cli.NOMBRE+' '+(cli.APELLIDOS||''))}</div>` : ''}
+      </div>
+    </div>
+    <div class="form-grid">
+      <div class="field span2">
+        <label>Inscripción a cambiar <span class="req">*</span></label>
+        <select id="ca-insc-id" onchange="_caOnInscChange()">${opsInsc}</select>
+        <input type="hidden" id="ca-alu-id" value="${esc(String(aluId))}">
+      </div>
+      <div class="field span2">
+        <label>Nueva actividad <span class="req">*</span></label>
+        <select id="ca-act-nueva" onchange="_caActualizarPrecio()">${opsActNueva}</select>
+      </div>
+      <div class="field">
+        <label>Precio mensual (€)</label>
+        <input id="ca-precio" type="number" min="0" step="0.01" value="${precioInit}">
+      </div>
+      <div class="field">
+        <label>Grupo (opcional)</label>
+        <input id="ca-grupo" type="text" placeholder="Ej: A, 1, Tarde…" value="${esc(grupoInit)}">
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--text3);background:var(--bg2);border-radius:6px;padding:8px 12px;margin-top:4px">
+      Se mantienen de la inscripción original: <strong>descuento ${dtoInit}%</strong> · <strong>forma de pago: ${esc(fpagoInit)}</strong><br>
+      La inscripción actual pasará a estado <strong>BAJA</strong> (fecha de hoy).
+    </div>`,
+    `<button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+     <button id="ca-btn" class="btn btn-primary" onclick="guardarCambioActividad()">Confirmar cambio</button>`
+  );
+}
+
+function _caOnInscChange() {
+  const sel = document.getElementById('ca-insc-id');
+  if (!sel || !sel.value) return;
+  const o = sel.options[sel.selectedIndex];
+  const elP = document.getElementById('ca-precio');
+  const elG = document.getElementById('ca-grupo');
+  if (elP) elP.value = o.dataset.precio || '0.00';
+  if (elG) elG.value = o.dataset.grupo  || '';
+  // Actualizar texto del resumen descuento/fpago
+  const info = document.querySelector('#modal-body [style*="Se mantienen"]');
+  if (info) info.innerHTML = `Se mantienen de la inscripción original: <strong>descuento ${esc(o.dataset.dto||'0')}%</strong> · <strong>forma de pago: ${esc(o.dataset.fpago||'—')}</strong><br>La inscripción actual pasará a estado <strong>BAJA</strong> (fecha de hoy).`;
+}
+
+function _caActualizarPrecio() {
+  const sel = document.getElementById('ca-act-nueva');
+  if (!sel || !sel.value) return;
+  const o = sel.options[sel.selectedIndex];
+  const el = document.getElementById('ca-precio');
+  if (el) el.value = o.dataset.precio || '0.00';
+}
+
+async function guardarCambioActividad() {
+  const inscId    = document.getElementById('ca-insc-id')?.value;
+  const actNuevaId = document.getElementById('ca-act-nueva')?.value;
+  const precio    = parseFloat(document.getElementById('ca-precio')?.value || 0);
+  const grupo     = (document.getElementById('ca-grupo')?.value || '').trim();
+  const aluId     = document.getElementById('ca-alu-id')?.value;
+
+  if (!inscId)     { showToast('Selecciona la inscripción a cambiar', 'error'); return; }
+  if (!actNuevaId) { showToast('Selecciona la nueva actividad', 'error'); return; }
+
+  const oldInsc = DB.inscripciones.find(i => String(i.ID_INSCRIPCION) === String(inscId));
+  if (!oldInsc) { showToast('Inscripción no encontrada', 'error'); return; }
+
+  // Verificar que no se está cambiando a la misma actividad
+  if (String(oldInsc.ID_ACTIVIDAD) === String(actNuevaId) && (oldInsc.GRUPO||'') === grupo) {
+    showToast('La nueva actividad es igual a la actual', 'error'); return;
+  }
+
+  const actNueva = DB.actividades.find(a => String(a.ID) === String(actNuevaId));
+  if (!actNueva) { showToast('Actividad no encontrada', 'error'); return; }
+
+  const btn = document.getElementById('ca-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Guardando…'; }
+
+  const hoy = new Date().toISOString().slice(0,10);
+  const t   = sinTildes(actNueva.TIPO||'');
+
+  try {
+    // 1. Marcar inscripción actual como BAJA
+    await writeToSheet('INSCRIPCIONES',
+      { ...oldInsc, ESTADO: 'BAJA', FECHA_BAJA: hoy },
+      oldInsc.ID_INSCRIPCION
+    );
+
+    // 2. Crear nueva inscripción ACTIVA con la nueva actividad
+    const selInsc = document.getElementById('ca-insc-id');
+    const oInsc   = selInsc?.options[selInsc.selectedIndex];
+    const newInsc = {
+      ID_ALUMNO:       aluId || oldInsc.ID_ALUMNO,
+      ID_CLIENTE:      oldInsc.ID_CLIENTE || '',
+      ID_ACTIVIDAD:    actNuevaId,
+      LINEA:           actNueva.LINEA || oldInsc.LINEA || '',
+      GRUPO:           grupo,
+      PRECIO_ACORDADO: precio,
+      DESCUENTO:       oInsc?.dataset?.dto ?? oldInsc.DESCUENTO ?? '0',
+      TIPO_PRECIO:     t.includes('SUELTA')||t.includes('ANUAL') ? 'PAGO_ÚNICO' : 'MENSUALIDAD',
+      DIAS_SEMANA:     actNueva.DIAS_SEMANA || actNueva.DIA_SEMANA || '',
+      HORARIO:         actNueva.HORARIO || '',
+      FORMA_PAGO:      oInsc?.dataset?.fpago ?? oldInsc.FORMA_PAGO ?? '',
+      FECHA_ALTA:      hoy,
+      ESTADO:          'ACTIVA',
+      OBSERVACIONES:   oldInsc.OBSERVACIONES || '',
+    };
+    await writeToSheet('INSCRIPCIONES', newInsc, null);
+
+    showToast('Cambio de actividad registrado');
+    closeModal();
+    loadAllData().then(() => {
+      if (typeof inscripciones === 'function') inscripciones();
+    });
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirmar cambio'; }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════

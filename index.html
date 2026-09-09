@@ -5202,59 +5202,86 @@ function cargarListaExtra() {
   const wrap   = document.getElementById('as-guardar-wrap');
   if (!actId || !cont) return;
 
-  // Filtrar por día de la semana si la inscripción tiene DIAS_SEMANA configurado
   const diaHoy = fecha ? sinTildes(diaDeSemana(fecha)) : '';
 
-  // Alumnos inscritos en esta actividad activos y con asistencia ese día
-  const inscs = DB.inscripciones.filter(i => {
+  // 1. Inscritos directos a esta actividad
+  const inscsDirectas = DB.inscripciones.filter(i => {
     if (String(i.ID_ACTIVIDAD) !== actId) return false;
     if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
     const dias = diasInscripcion(i);
-    // Sin días configurados → se incluye siempre (compatibilidad con datos anteriores)
     if (!dias.length) return true;
     return dias.some(d => sinTildes(d) === diaHoy);
   });
-  const alumnos = inscs.map(i => DB.alumnos.find(a=>String(a.ID_ALUMNO)===String(i.ID_ALUMNO))).filter(Boolean);
+  const idsDirectos = new Set(inscsDirectas.map(i => String(i.ID_ALUMNO)));
 
-  if (!alumnos.length) {
+  // 2. Alumnos con bono de usos genérico (pueden asistir a cualquier actividad)
+  const actsBono = DB.actividades.filter(a => esBonoUsos(a.NOMBRE||''));
+  const inscsBono = DB.inscripciones.filter(i => {
+    if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
+    if (idsDirectos.has(String(i.ID_ALUMNO))) return false; // ya está como inscrito directo
+    return actsBono.some(a => String(a.ID) === String(i.ID_ACTIVIDAD));
+  });
+
+  // 3. Merge y ordenar
+  const lista = [
+    ...inscsDirectas.map(i => ({ insc: i, esBono: false })),
+    ...inscsBono.map(i => ({ insc: i, esBono: true })),
+  ].map(x => ({ ...x, alumno: DB.alumnos.find(a => String(a.ID_ALUMNO) === String(x.insc.ID_ALUMNO)) }))
+   .filter(x => x.alumno)
+   .sort((a,b) => (a.alumno.NOMBRE+' '+(a.alumno.APELLIDOS||'')).trim().toUpperCase()
+                   .localeCompare((b.alumno.NOMBRE+' '+(b.alumno.APELLIDOS||'')).trim().toUpperCase(), 'es'));
+
+  if (!lista.length) {
     cont.innerHTML = '<p style="color:var(--amber);font-size:13px">No hay alumnos inscritos en esta actividad.</p>';
     if(wrap) wrap.style.display='none';
     return;
   }
 
-  // Ver si ya hay asistencia guardada para esta fecha+actividad
-  const prev = DB.asistenciasExtra.find(a => String(a.ID_ACTIVIDAD)===actId && String(a.FECHA)===fecha);
+  const actObj    = DB.actividades.find(a => String(a.ID) === actId);
+  const actEsBono = actObj && esBonoUsos(actObj.NOMBRE||'');
+  const actBonoCap = actEsBono ? bonoCapacidad(actObj.NOMBRE) : 0;
+
+  const prev    = DB.asistenciasExtra.find(a => String(a.ID_ACTIVIDAD)===actId && String(a.FECHA)===fecha);
   const prevIds = prev ? String(prev.ALUMNOS_PRESENTES||'').split(',').filter(Boolean) : [];
 
-  const actObj   = DB.actividades.find(a => String(a.ID) === actId);
-  const esBono   = actObj && esBonoUsos(actObj.NOMBRE || '');
-  const bonoCap  = esBono ? bonoCapacidad(actObj.NOMBRE) : 0;
+  const nBono = inscsBono.length;
 
   cont.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <span style="font-size:13px;color:var(--text3)">${alumnos.length} alumnos${diaHoy?' · '+diaHoy.charAt(0)+diaHoy.slice(1).toLowerCase():''}${esBono?' · 🎫 Bono usos (auto-contador)':''}</span>
+      <span style="font-size:13px;color:var(--text3)">
+        ${lista.length} alumnos${diaHoy?' · '+diaHoy.charAt(0)+diaHoy.slice(1).toLowerCase():''}
+        ${actEsBono?' · 🎫 Bono usos':''}
+        ${nBono?` <span style="color:#7c3aed;font-weight:600">+${nBono} con bono genérico</span>`:''}
+      </span>
       <div>
         <button class="btn btn-sm btn-secondary" onclick="marcarTodosExtra(true)">✓ Todos</button>
         <button class="btn btn-sm btn-secondary" style="margin-left:4px" onclick="marcarTodosExtra(false)">✗ Ninguno</button>
       </div>
     </div>
     <div id="lista-checks-extra" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-      ${alumnos.map(a => {
-        const insc  = inscs.find(i => String(i.ID_ALUMNO) === String(a.ID_ALUMNO));
-        const usos  = esBono && insc ? bonoUsosCont(insc) : -1;
-        const rest  = esBono ? bonoCap - usos : -1;
-        const bonoHtml = esBono && insc
-          ? `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'var(--green)'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`
-          : '';
+      ${lista.map(({alumno: a, insc, esBono}) => {
+        let bonoHtml = '';
+        if (esBono) {
+          const bonoAct = actsBono.find(x => String(x.ID) === String(insc.ID_ACTIVIDAD));
+          const cap  = bonoAct ? bonoCapacidad(bonoAct.NOMBRE) : 10;
+          const usos = bonoUsosCont(insc);
+          const rest = cap - usos;
+          bonoHtml = `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'#7c3aed'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`;
+        } else if (actEsBono) {
+          const usos = bonoUsosCont(insc);
+          const rest = actBonoCap - usos;
+          bonoHtml = `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'var(--green)'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`;
+        }
+        const borderColor = esBono ? '#7c3aed' : 'var(--border2)';
         return `
-        <label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;cursor:pointer;border:1px solid var(--border2);font-size:13px;${prevIds.includes(String(a.ID_ALUMNO))?'background:var(--g4)':''}">
+        <label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;cursor:pointer;border:1px solid ${borderColor};font-size:13px;${prevIds.includes(String(a.ID_ALUMNO))?'background:var(--g4)':''}">
           <input type="checkbox" data-id="${a.ID_ALUMNO}" ${prevIds.includes(String(a.ID_ALUMNO))||!prev?'checked':''} style="width:16px;height:16px">
           <span>${esc(a.NOMBRE)} ${esc(a.APELLIDOS||'')}</span>
           ${bonoHtml}
         </label>`;
       }).join('')}
     </div>
-    ${prev ? '<div class="badge badge-amber" style="margin-top:8px">⚠️ Ya existe asistencia para esta fecha — guardar sobreescribirá y no sumará usos ya contados</div>' : ''}
+    ${prev ? '<div class="badge badge-amber" style="margin-top:8px">⚠️ Ya existe asistencia — guardar sobreescribirá y no sumará usos ya contados</div>' : ''}
   `;
   if(wrap) wrap.style.display = '';
 }
@@ -5287,32 +5314,47 @@ function guardarAsistenciaExtra() {
 
   writeToSheet('ASISTENCIAS_EXTRA', row, prev?.ID||null)
   .then(async () => {
-    // Auto-incrementar usos de bono para alumnos recién marcados presentes
-    const act = DB.actividades.find(a => String(a.ID) === actId);
-    if (act && esBonoUsos(act.NOMBRE || '')) {
-      const prevIds   = prev ? String(prev.ALUMNOS_PRESENTES||'').split(',').filter(Boolean) : [];
-      const nuevos    = presentes.filter(id => !prevIds.includes(id));
-      const cap       = bonoCapacidad(act.NOMBRE);
-      const avisos    = [];
-      for (const aluId of nuevos) {
-        const insc = DB.inscripciones.find(i =>
-          String(i.ID_ALUMNO)===aluId && String(i.ID_ACTIVIDAD)===actId &&
-          String(i.ESTADO||'').toUpperCase()==='ACTIVA'
-        );
-        if (!insc) continue;
-        const usos = bonoUsosCont(insc);
-        if (usos >= cap) { avisos.push(`Bono agotado para alumno ${aluId}`); continue; }
-        const obsBase  = String(insc.OBSERVACIONES||'').replace(/USOS:\d+;?\s*/i,'').trim();
-        const nuevaObs = 'USOS:'+(usos+1)+(obsBase?'; '+obsBase:'');
-        try {
-          await writeToSheet('INSCRIPCIONES',{OBSERVACIONES:nuevaObs}, insc.ID_INSCRIPCION||insc.ID);
-          insc.OBSERVACIONES = nuevaObs;
-          const restantes = cap - (usos+1);
-          if (restantes <= 2) avisos.push(`⚠ Bono: quedan ${restantes} uso${restantes===1?'':'s'} — ${DB.alumnos.find(a=>String(a.ID)===aluId)?.NOMBRE||aluId}`);
-        } catch(e) { /* best-effort */ }
+    // Incrementar contador de bono para alumnos recién marcados presentes
+    // (cubre tanto la actividad = bono directo como alumnos con bono genérico)
+    const prevIds = prev ? String(prev.ALUMNOS_PRESENTES||'').split(',').filter(Boolean) : [];
+    const nuevos  = presentes.filter(id => !prevIds.includes(id));
+    const avisos  = [];
+    for (const aluId of nuevos) {
+      // 1. Inscripción directa a la actividad seleccionada
+      const directInsc = DB.inscripciones.find(i =>
+        String(i.ID_ALUMNO)===aluId && String(i.ID_ACTIVIDAD)===actId &&
+        String(i.ESTADO||'').toUpperCase()==='ACTIVA'
+      );
+      // 2. Si no hay directa, buscar bono genérico activo
+      const bonoInsc = !directInsc
+        ? DB.inscripciones.find(i => {
+            if (String(i.ID_ALUMNO) !== aluId) return false;
+            if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
+            const a = DB.actividades.find(x => String(x.ID) === String(i.ID_ACTIVIDAD));
+            return a && esBonoUsos(a.NOMBRE||'');
+          })
+        : null;
+      const insc = directInsc || bonoInsc;
+      if (!insc) continue;
+      const inscAct = DB.actividades.find(a => String(a.ID) === String(insc.ID_ACTIVIDAD));
+      if (!inscAct || !esBonoUsos(inscAct.NOMBRE||'')) continue;
+      const cap  = bonoCapacidad(inscAct.NOMBRE);
+      const usos = bonoUsosCont(insc);
+      if (usos >= cap) {
+        avisos.push(`Bono agotado — ${DB.alumnos.find(a=>String(a.ID_ALUMNO)===aluId)?.NOMBRE||aluId}`);
+        continue;
       }
-      avisos.forEach(m => showToast(m, 'warn'));
+      const obsBase  = String(insc.OBSERVACIONES||'').replace(/USOS:\d+;?\s*/i,'').trim();
+      const nuevaObs = 'USOS:'+(usos+1)+(obsBase?'; '+obsBase:'');
+      try {
+        await writeToSheet('INSCRIPCIONES', {OBSERVACIONES:nuevaObs}, insc.ID_INSCRIPCION||insc.ID);
+        insc.OBSERVACIONES = nuevaObs;
+        const restantes = cap - (usos+1);
+        if (restantes <= 2)
+          avisos.push(`⚠ Bono: quedan ${restantes} uso${restantes===1?'':'s'} — ${DB.alumnos.find(a=>String(a.ID_ALUMNO)===aluId)?.NOMBRE||aluId}`);
+      } catch(e) { /* best-effort */ }
     }
+    avisos.forEach(m => showToast(m, 'warn'));
     showToast(`Asistencia guardada — ${presentes.length}/${checks.length} presentes`);
     loadAllData().then(asistenciasExtra);
   })
@@ -6291,16 +6333,58 @@ function portalFamilia() {
             <div class="table-wrap"><table>
               <thead><tr><th>Alumno</th><th>Actividad</th><th>Estado</th></tr></thead>
               <tbody>
-                ${DB.inscripciones.filter(i=>alumnoIds.has(String(i.ID_ALUMNO||''))).map(i=>{
-                  const alum = misAlumnos.find(a=>String(a.ID_ALUMNO||a.ID||'')===String(i.ID_ALUMNO||''));
-                  const act  = DB.actividades.find(a=>String(a.ID||'')===String(i.ID_ACTIVIDAD||''));
-                  const est  = String(i.ESTADO||'').toUpperCase();
-                  return `<tr>
-                    <td>${esc(alum?(alum.NOMBRE+' '+(alum.APELLIDOS||'')).trim():'—')}</td>
-                    <td>${esc(act?act.NOMBRE:i.ID_ACTIVIDAD||'—')}</td>
-                    <td><span class="badge ${est==='ACTIVA'?'badge-green':est==='BAJA'?'badge-red':'badge-amber'}">${esc(est||'—')}</span></td>
-                  </tr>`;
-                }).join('')||'<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sin inscripciones</td></tr>'}
+                ${(() => {
+                  // Separar por alumno: actividades principales vs recogida (add-on)
+                  const rows = [];
+                  misAlumnos.forEach(alum => {
+                    const aluId   = String(alum.ID_ALUMNO||alum.ID||'');
+                    const aluNom  = (alum.NOMBRE+' '+(alum.APELLIDOS||'')).trim();
+                    const aluInscs = DB.inscripciones.filter(i => String(i.ID_ALUMNO||'') === aluId);
+
+                    // Separar en principales y recogidas
+                    const principales = [], recogidas = [];
+                    aluInscs.forEach(i => {
+                      const act = DB.actividades.find(a => String(a.ID||'') === String(i.ID_ACTIVIDAD||''));
+                      if (act && sinTildes(act.NOMBRE||'').includes('RECOGIDA'))
+                        recogidas.push({ i, act });
+                      else
+                        principales.push({ i, act });
+                    });
+
+                    // Badge de recogida (combina tipo + bono)
+                    let recogidaBadge = '';
+                    if (recogidas.length) {
+                      const tieneBono = recogidas.some(({act}) => act && sinTildes(act.NOMBRE||'').includes('BONO'));
+                      const tipo = recogidas.find(({act}) => act && !sinTildes(act.NOMBRE||'').includes('BONO'));
+                      const tipoNom = tipo?.act?.NOMBRE || '';
+                      const tipoLabel = sinTildes(tipoNom).includes('TEMPRANA') ? 'temprana'
+                        : sinTildes(tipoNom).includes('TARD') ? 'tardía' : 'recogida';
+                      recogidaBadge = `<span style="margin-left:6px;font-size:11px;padding:1px 7px;border-radius:10px;
+                        background:var(--amber);color:#fff;font-weight:600;white-space:nowrap">
+                        🚗 ${tipoLabel}${tieneBono?' · bono':''}</span>`;
+                    }
+
+                    // Generar filas solo para actividades principales
+                    if (!principales.length && recogidas.length) {
+                      // Sólo recogida, sin actividad principal — mostrar como fila informativa
+                      rows.push(`<tr>
+                        <td>${esc(aluNom)}</td>
+                        <td><em style="color:var(--text3)">Solo recogida</em> ${recogidaBadge}</td>
+                        <td>—</td>
+                      </tr>`);
+                    } else {
+                      principales.forEach(({i, act}) => {
+                        const est = String(i.ESTADO||'').toUpperCase();
+                        rows.push(`<tr>
+                          <td>${esc(aluNom)}</td>
+                          <td>${esc(act?act.NOMBRE:i.ID_ACTIVIDAD||'—')} ${recogidaBadge}</td>
+                          <td><span class="badge ${est==='ACTIVA'?'badge-green':est==='BAJA'?'badge-red':'badge-amber'}">${esc(est||'—')}</span></td>
+                        </tr>`);
+                      });
+                    }
+                  });
+                  return rows.join('') || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:12px">Sin inscripciones</td></tr>';
+                })()}
               </tbody>
             </table></div>
           </div>

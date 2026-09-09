@@ -799,7 +799,9 @@ function render(html) { document.getElementById('page-content').innerHTML = html
 // ══════════════════════════════════════════════════════════════════════════
 function openModal(title, bodyHTML, footerHTML, size) {
   document.getElementById('modal-title').textContent  = title;
-  document.getElementById('modal-body').innerHTML     = bodyHTML;
+  const bodyEl = document.getElementById('modal-body');
+  bodyEl.innerHTML = bodyHTML;
+  bodyEl.scrollTop = 0;
   document.getElementById('modal-footer').innerHTML   = footerHTML || '';
   const box = document.getElementById('modal-box');
   box.className = size === 'xl' ? 'modal xl' : (size === 'wide' || size === true) ? 'modal wide' : 'modal';
@@ -934,8 +936,12 @@ function fmtHora(v) {
   // GAS serializa TIME de Sheets como fecha base 1899-12-30 (ej: "1899-12-30T16:00:00.000Z")
   try {
     const d = new Date(s);
-    if (!isNaN(d) && d.getFullYear() <= 1900) {
-      return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    if (!isNaN(d)) {
+      if (d.getFullYear() <= 1900) {
+        // Usar UTC para evitar desfase por zona horaria del navegador
+        return String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
+      }
+      return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' });
     }
   } catch(_) {}
   return s;
@@ -3049,10 +3055,13 @@ function _waLinkPago(p) {
     class="btn btn-sm" style="background:#25D366;color:#fff;white-space:nowrap">📲 WA</a>`;
 }
 
-function _opcionesInscPago(aluId, selId) {
-  const inscs = DB.inscripciones.filter(i =>
-    String(i.ID_ALUMNO) === String(aluId) && String(i.ESTADO||'').toUpperCase() === 'ACTIVA'
-  );
+function _opcionesInscPago(aluId, selId, forceId) {
+  const inscs = DB.inscripciones.filter(i => {
+    if (String(i.ID_ALUMNO) !== String(aluId)) return false;
+    if (String(i.ESTADO||'').toUpperCase() === 'ACTIVA') return true;
+    if (forceId && String(i.ID_INSCRIPCION||i.ID) === String(forceId)) return true;
+    return false;
+  });
   const opts = inscs.map(i => {
     const act   = DB.actividades.find(a => String(a.ID) === String(i.ID_ACTIVIDAD));
     const nom   = act ? act.NOMBRE : (i.ID_ACTIVIDAD||'Actividad');
@@ -3256,7 +3265,7 @@ function modalPago(p) {
     .join('');
 
   const insOps = p.ID_ALUMNO
-    ? '<option value="">— Selecciona —</option>' + _opcionesInscPago(String(p.ID_ALUMNO), p.ID_INSCRIPCION||'')
+    ? '<option value="">— Selecciona —</option>' + _opcionesInscPago(String(p.ID_ALUMNO), p.ID_INSCRIPCION||'', p.ID_INSCRIPCION||'')
     : '<option value="">— Selecciona primero un alumno —</option>';
 
   // Para externo: payer name = primera línea de NOTAS (sin prefijo "Pagador: ")
@@ -3289,7 +3298,7 @@ function modalPago(p) {
       </div>
       <div class="field span2">
         <label>Inscripción / Concepto <span class="req">*</span></label>
-        <select id="p-insc" onchange="autorellenarPago()" ${!isNew?'disabled':''}>
+        <select id="p-insc" onchange="autorellenarPago()">
           ${insOps}
         </select>
       </div>

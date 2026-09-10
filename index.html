@@ -5938,8 +5938,42 @@ function guardarAsistenciaExtra() {
           avisos.push(`⚠ Bono: quedan ${restantes} uso${restantes===1?'':'s'} — ${DB.alumnos.find(a=>String(a.ID_ALUMNO)===aluId)?.NOMBRE||aluId}`);
       } catch(e) { /* best-effort */ }
     }
+    // Baja automática de inscripciones de día suelto una vez pasada la sesión
+    const todoIds = checks.map(c => c.dataset.id);
+    const bajasDiaSuelto = [];
+    for (const aluId of todoIds) {
+      // Inscripción directa PAGO_ÚNICO a esta actividad, aún ACTIVA
+      const insc = DB.inscripciones.find(i =>
+        String(i.ID_ALUMNO) === aluId &&
+        String(i.ID_ACTIVIDAD) === actId &&
+        String(i.TIPO_PRECIO||'').toUpperCase() === 'PAGO_ÚNICO' &&
+        String(i.ESTADO||'').toUpperCase() === 'ACTIVA'
+      );
+      if (!insc) {
+        // Inscripción en actividad SUELTA de la misma línea
+        const actsSueltas = DB.actividades.filter(a =>
+          sinTildes(a.TIPO||'').includes('SUELTA') && esExtraescolar(a.LINEA||a.NOMBRE||'')
+        );
+        const inscSuelta = DB.inscripciones.find(i =>
+          String(i.ID_ALUMNO) === aluId &&
+          String(i.ESTADO||'').toUpperCase() === 'ACTIVA' &&
+          actsSueltas.some(a => String(a.ID) === String(i.ID_ACTIVIDAD))
+        );
+        if (inscSuelta) bajasDiaSuelto.push(inscSuelta);
+      } else {
+        bajasDiaSuelto.push(insc);
+      }
+    }
+    let nBajas = 0;
+    for (const insc of bajasDiaSuelto) {
+      try {
+        await writeToSheet('INSCRIPCIONES', { ...insc, ESTADO: 'BAJA', FECHA_BAJA: fecha }, insc.ID_INSCRIPCION || insc.ID);
+        nBajas++;
+      } catch(e) { /* best-effort */ }
+    }
+
     avisos.forEach(m => showToast(m, 'warn'));
-    showToast(`Asistencia guardada — ${presentes.length}/${checks.length} presentes`);
+    showToast(`Asistencia guardada — ${presentes.length}/${checks.length} presentes${nBajas?' · '+nBajas+' día suelto → baja':''}`);
     loadAllData().then(asistenciasExtra);
   })
   .catch(err=>showToast('Error: '+err.message,'error'));

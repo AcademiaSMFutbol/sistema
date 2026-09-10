@@ -5751,10 +5751,12 @@ function cargarListaExtra() {
 
   const diaHoy = fecha ? sinTildes(diaDeSemana(fecha)) : '';
 
-  // 1. Inscritos directos a esta actividad
+  // 1. Inscritos directos a esta actividad (mensuales + día suelto inscrito directamente)
   const inscsDirectas = DB.inscripciones.filter(i => {
     if (String(i.ID_ACTIVIDAD) !== actId) return false;
     if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
+    // Día suelto (PAGO_ÚNICO): aparece siempre independientemente del día
+    if (String(i.TIPO_PRECIO||'').toUpperCase() === 'PAGO_ÚNICO') return true;
     const dias = diasInscripcion(i);
     if (!dias.length) return true;
     return dias.some(d => sinTildes(d) === diaHoy);
@@ -5768,11 +5770,29 @@ function cargarListaExtra() {
     if (idsDirectos.has(String(i.ID_ALUMNO))) return false; // ya está como inscrito directo
     return actsBono.some(a => String(a.ID) === String(i.ID_ACTIVIDAD));
   });
+  const idsBono = new Set(inscsBono.map(i => String(i.ID_ALUMNO)));
 
-  // 3. Merge y ordenar
+  // 3. Alumnos con inscripción de día suelto en actividad SUELTA de la misma línea
+  const actSelObj = DB.actividades.find(a => String(a.ID) === actId);
+  const linea = actSelObj?.LINEA || '';
+  const actsSueltas = DB.actividades.filter(a =>
+    String(a.ID) !== actId &&
+    sinTildes(a.TIPO||'').includes('SUELTA') &&
+    esExtraescolar(a.LINEA||a.NOMBRE||'') &&
+    (!linea || a.LINEA === linea)
+  );
+  const inscsSueltas = DB.inscripciones.filter(i => {
+    if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
+    if (idsDirectos.has(String(i.ID_ALUMNO))) return false;
+    if (idsBono.has(String(i.ID_ALUMNO))) return false;
+    return actsSueltas.some(a => String(a.ID) === String(i.ID_ACTIVIDAD));
+  });
+
+  // 4. Merge y ordenar
   const lista = [
-    ...inscsDirectas.map(i => ({ insc: i, esBono: false })),
-    ...inscsBono.map(i => ({ insc: i, esBono: true })),
+    ...inscsDirectas.map(i => ({ insc: i, esBono: false, esSuelto: String(i.TIPO_PRECIO||'').toUpperCase() === 'PAGO_ÚNICO' })),
+    ...inscsBono.map(i => ({ insc: i, esBono: true,  esSuelto: false })),
+    ...inscsSueltas.map(i => ({ insc: i, esBono: false, esSuelto: true })),
   ].map(x => ({ ...x, alumno: DB.alumnos.find(a => String(a.ID_ALUMNO) === String(x.insc.ID_ALUMNO)) }))
    .filter(x => x.alumno)
    .sort((a,b) => (a.alumno.NOMBRE+' '+(a.alumno.APELLIDOS||'')).trim().toUpperCase()
@@ -5784,21 +5804,23 @@ function cargarListaExtra() {
     return;
   }
 
-  const actObj    = DB.actividades.find(a => String(a.ID) === actId);
+  const actObj    = actSelObj;
   const actEsBono = actObj && esBonoUsos(actObj.NOMBRE||'');
   const actBonoCap = actEsBono ? bonoCapacidad(actObj.NOMBRE) : 0;
 
   const prev    = DB.asistenciasExtra.find(a => String(a.ID_ACTIVIDAD)===actId && String(a.FECHA)===fecha);
   const prevIds = prev ? String(prev.ALUMNOS_PRESENTES||'').split(',').filter(Boolean) : [];
 
-  const nBono = inscsBono.length;
+  const nBono    = inscsBono.length;
+  const nSueltos = inscsSueltas.length;
 
   cont.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
       <span style="font-size:13px;color:var(--text3)">
         ${lista.length} alumnos${diaHoy?' · '+diaHoy.charAt(0)+diaHoy.slice(1).toLowerCase():''}
         ${actEsBono?' · 🎫 Bono usos':''}
-        ${nBono?` <span style="color:#7c3aed;font-weight:600">+${nBono} con bono genérico</span>`:''}
+        ${nBono?` <span style="color:#7c3aed;font-weight:600">+${nBono} bono genérico</span>`:''}
+        ${nSueltos?` <span style="color:var(--amber);font-weight:600">+${nSueltos} día suelto</span>`:''}
       </span>
       <div>
         <button class="btn btn-sm btn-secondary" onclick="marcarTodosExtra(true)">✓ Todos</button>
@@ -5806,25 +5828,28 @@ function cargarListaExtra() {
       </div>
     </div>
     <div id="lista-checks-extra" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
-      ${lista.map(({alumno: a, insc, esBono}) => {
-        let bonoHtml = '';
+      ${lista.map(({alumno: a, insc, esBono, esSuelto}) => {
+        let badgeHtml = '';
         if (esBono) {
           const bonoAct = actsBono.find(x => String(x.ID) === String(insc.ID_ACTIVIDAD));
           const cap  = bonoAct ? bonoCapacidad(bonoAct.NOMBRE) : 10;
           const usos = bonoUsosCont(insc);
           const rest = cap - usos;
-          bonoHtml = `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'#7c3aed'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`;
+          badgeHtml = `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'#7c3aed'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`;
         } else if (actEsBono) {
           const usos = bonoUsosCont(insc);
           const rest = actBonoCap - usos;
-          bonoHtml = `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'var(--green)'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`;
+          badgeHtml = `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:${rest<=0?'var(--text3)':rest<=2?'var(--red)':rest<=4?'var(--amber)':'var(--green)'};color:#fff">${rest<=0?'Agotado':rest+' usos'}</span>`;
+        } else if (esSuelto) {
+          const actSuelta = actsSueltas.find(x => String(x.ID) === String(insc.ID_ACTIVIDAD)) || actSelObj;
+          badgeHtml = `<span style="margin-left:auto;font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;background:var(--amber);color:#fff" title="${esc(actSuelta?.NOMBRE||'Día suelto')}">Día suelto</span>`;
         }
-        const borderColor = esBono ? '#7c3aed' : 'var(--border2)';
+        const borderColor = esBono ? '#7c3aed' : esSuelto ? 'var(--amber)' : 'var(--border2)';
         return `
         <label style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;cursor:pointer;border:1px solid ${borderColor};font-size:13px;${prevIds.includes(String(a.ID_ALUMNO))?'background:var(--g4)':''}">
           <input type="checkbox" data-id="${a.ID_ALUMNO}" ${prevIds.includes(String(a.ID_ALUMNO))||!prev?'checked':''} style="width:16px;height:16px">
           <span>${esc(a.NOMBRE)} ${esc(a.APELLIDOS||'')}</span>
-          ${bonoHtml}
+          ${badgeHtml}
         </label>`;
       }).join('')}
     </div>

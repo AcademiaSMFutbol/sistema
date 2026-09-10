@@ -276,6 +276,9 @@ tr:hover td{background:#f8f8f8}
         <div class="nav-item" onclick="navigate('pagos')" data-page="pagos">
           <span class="nav-icon">💳</span><span>Pagos</span>
         </div>
+        <div class="nav-item" onclick="navigate('analisis-ingresos')" data-page="analisis-ingresos">
+          <span class="nav-icon">📊</span><span>Análisis</span>
+        </div>
         <div class="nav-item" onclick="navigate('facturas')" data-page="facturas">
           <span class="nav-icon">🧾</span><span>Facturas</span>
         </div>
@@ -735,6 +738,7 @@ const PAGE_META = {
   'actividades':        { title: 'Actividades',          sub: 'Catálogo de actividades' },
   'inscripciones':      { title: 'Inscripciones',        sub: 'Matrículas activas y bajas' },
   'pagos':              { title: 'Pagos',                sub: 'Control de cobros' },
+  'analisis-ingresos':  { title: 'Análisis de ingresos', sub: 'Evolución y proyección de cobros' },
   'facturas':           { title: 'Facturas',             sub: 'Registro VeriFactu' },
   'sesiones':           { title: 'Sesiones',             sub: 'SM Tecnificación Fútbol' },
   'asistencias-futbol': { title: 'Ranking',               sub: 'Clasificación y estadísticas fútbol' },
@@ -761,6 +765,7 @@ const MODULES = {
   'actividades':        actividadesCatalogo,
   'inscripciones':      inscripciones,
   'pagos':              pagos,
+  'analisis-ingresos':  analisisIngresos,
   'facturas':           facturas,
   'sesiones':           sesiones,
   'asistencias-futbol': asistenciasFutbol,
@@ -3474,9 +3479,10 @@ function pagos(filtro) {
   } catch(e) { console.error('Error en fila pago', p, e); return `<tr><td colspan="11" style="color:var(--red);font-size:11px;padding:4px 8px">Error al renderizar pago ${esc(String(p.ID_PAGO||p.ID||''))} — ${esc(e.message)}</td></tr>`; }
   }).join('') || `<tr><td colspan="11"><div class="empty"><div class="empty-icon">💳</div><p>Sin pagos registrados</p></div></td></tr>`;
 
-  const totalEsperado = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE').reduce((s,p)=>s+(parseFloat(p.TOTAL_ESPERADO||p.IMPORTE)||0),0);
-  const totalCobr     = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+(parseFloat(p.TOTAL_RECIBIDO)||0),0);
-  const nPendMes      = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE'&&_mesNorm(p.MES)===mesActK).length;
+  const totalEsperado  = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE').reduce((s,p)=>s+(parseFloat(p.TOTAL_ESPERADO||p.IMPORTE)||0),0);
+  const totalCobr      = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PAGADO').reduce((s,p)=>s+(parseFloat(p.TOTAL_RECIBIDO)||0),0);
+  const nPendMes       = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PENDIENTE'&&_mesNorm(p.MES)===mesActK).length;
+  const totalCobrMes   = DB.pagos.filter(p=>String(p.ESTADO||'').toUpperCase()==='PAGADO'&&_mesNorm(p.MES)===mesActK).reduce((s,p)=>s+(parseFloat(p.TOTAL_RECIBIDO)||0),0);
 
   const bannerReclamacion = reclamacionActiva && nPendMes > 0
     ? `<div style="background:#e7f7e8;border:1px solid #25D366;border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px">
@@ -3488,6 +3494,7 @@ function pagos(filtro) {
     <div class="kpis" style="margin-bottom:16px">
       <div class="kpi"><div class="kpi-n">${DB.pagos.length}</div><div class="kpi-l">Total pagos</div></div>
       <div class="kpi"><div class="kpi-n" style="color:var(--green)">${fmtEur(totalCobr)}</div><div class="kpi-l">Total cobrado</div></div>
+      <div class="kpi"><div class="kpi-n" style="color:var(--green)">${fmtEur(totalCobrMes)}</div><div class="kpi-l">Cobrado este mes</div></div>
       <div class="kpi"><div class="kpi-n" style="color:${totalEsperado>0?'var(--amber)':'var(--text1)'}">${fmtEur(totalEsperado)}</div><div class="kpi-l">Pendiente de cobro</div></div>
       <div class="kpi"><div class="kpi-n" style="color:${nPendMes>0?'var(--red)':'var(--green)'}">${nPendMes}</div><div class="kpi-l">Pendientes mes actual</div></div>
     </div>
@@ -3777,6 +3784,225 @@ function guardarPago(id) {
       loadAllData().then(() => { pagos(); if (esConfirmado) _ofrecerWAConfirmPago(row); });
     })
     .catch(err => { showToast('Error: '+err.message, 'error'); if (btn) { btn.disabled=false; btn.textContent='Guardar'; } });
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+//  MÓDULO: ANÁLISIS DE INGRESOS
+// ══════════════════════════════════════════════════════════════════════════
+function analisisIngresos() {
+  const hoy    = new Date();
+  const anoAct = hoy.getFullYear();
+  const mesAct = hoy.getMonth() + 1; // 1-12
+
+  // Genera claves YYYY-MM de los últimos 12 meses incluyendo el actual
+  const ultimos12 = [];
+  for (let i = 11; i >= 0; i--) {
+    const d = new Date(anoAct, mesAct - 1 - i, 1);
+    ultimos12.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+  }
+
+  const mesActKey = `${anoAct}-${String(mesAct).padStart(2,'0')}`;
+
+  // Nombres legibles de meses
+  const MESES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  function labelMes(k) {
+    const [y,m] = k.split('-');
+    return MESES_ES[parseInt(m,10)-1]+'<br>'+y.slice(2);
+  }
+  function labelMesLargo(k) {
+    const [y,m] = k.split('-');
+    return MESES_ES[parseInt(m,10)-1]+' '+y;
+  }
+
+  // Agrupa pagos por mes
+  const byMes = {};
+  for (const p of DB.pagos) {
+    const k = _mesNorm(p.MES);
+    if (!k) continue;
+    if (!byMes[k]) byMes[k] = { esperado: 0, cobrado: 0, pendiente: 0 };
+    const estado = String(p.ESTADO||'').toUpperCase();
+    const esp    = parseFloat(p.TOTAL_ESPERADO||p.IMPORTE) || 0;
+    const rec    = parseFloat(p.TOTAL_RECIBIDO||p.TOTAL_ESPERADO||p.IMPORTE) || 0;
+    if (estado === 'PAGADO')    { byMes[k].cobrado   += rec; byMes[k].esperado += esp; }
+    else if (estado === 'PENDIENTE') { byMes[k].pendiente += esp; byMes[k].esperado += esp; }
+    else                             { byMes[k].esperado  += esp; }
+  }
+
+  // KPIs
+  const mesesPasados = ultimos12.filter(k => k < mesActKey && byMes[k] && byMes[k].cobrado > 0);
+  const mediaUlt6    = mesesPasados.length
+    ? mesesPasados.slice(-6).reduce((s,k) => s + (byMes[k]?.cobrado||0), 0) / Math.min(6, mesesPasados.slice(-6).length)
+    : 0;
+  const mejorMes     = Object.entries(byMes).sort((a,b) => b[1].cobrado - a[1].cobrado)[0];
+  const cobradoMesAct= (byMes[mesActKey]?.cobrado||0);
+  const pendienteMes = (byMes[mesActKey]?.pendiente||0);
+
+  // Proyección recurrente: sum de inscripciones ACTIVAS con MENSUALIDAD
+  const proyeccion = DB.inscripciones
+    .filter(i => String(i.ESTADO||'').toUpperCase() === 'ACTIVA' &&
+                 String(i.TIPO_PAGO||i.FORMA_PAGO||'').toUpperCase().includes('MENSUAL'))
+    .reduce((s,i) => {
+      const precio = parseFloat(i.PRECIO_ACORDADO||0) || 0;
+      const dto    = parseFloat(i.DESCUENTO||0) || 0;
+      return s + precio * (1 - dto/100);
+    }, 0);
+
+  // Desglose por línea (meses actuales)
+  const byLinea = {};
+  for (const p of DB.pagos) {
+    if (String(p.ESTADO||'').toUpperCase() !== 'PAGADO') continue;
+    const linea = String(p.LINEA||'Sin línea').toUpperCase() || 'SIN LÍNEA';
+    byLinea[linea] = (byLinea[linea]||0) + (parseFloat(p.TOTAL_RECIBIDO||p.IMPORTE)||0);
+  }
+  const lineasOrdenadas = Object.entries(byLinea).sort((a,b) => b[1]-a[1]);
+  const totalLineas     = lineasOrdenadas.reduce((s,[,v]) => s+v, 0);
+
+  // SVG gráfico barras
+  const W = 700, H = 200, PAD_L = 50, PAD_B = 32, PAD_T = 16, PAD_R = 10;
+  const plotW = W - PAD_L - PAD_R;
+  const plotH = H - PAD_B - PAD_T;
+  const nBars = ultimos12.length;
+  const maxVal = Math.max(...ultimos12.map(k => (byMes[k]?.esperado||0)), 1);
+  const barW   = Math.floor(plotW / nBars);
+  const gap    = Math.max(2, Math.floor(barW * 0.15));
+  const bW     = barW - gap;
+
+  let rectsCobrado = '', rectsPend = '', labels = '', gridLines = '';
+  const gridSteps = 4;
+  for (let g = 0; g <= gridSteps; g++) {
+    const yv   = (maxVal / gridSteps) * g;
+    const yPos = PAD_T + plotH - (yv / maxVal * plotH);
+    gridLines += `<line x1="${PAD_L}" y1="${yPos.toFixed(1)}" x2="${W-PAD_R}" y2="${yPos.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
+    gridLines += `<text x="${PAD_L-4}" y="${(yPos+4).toFixed(1)}" text-anchor="end" font-size="9" fill="var(--text3)">${yv>=1000?(yv/1000).toFixed(0)+'k':(yv).toFixed(0)}</text>`;
+  }
+
+  ultimos12.forEach((k, idx) => {
+    const x      = PAD_L + idx * barW + Math.floor(gap/2);
+    const cob    = byMes[k]?.cobrado   || 0;
+    const pend   = byMes[k]?.pendiente || 0;
+    const hCob   = (cob  / maxVal * plotH);
+    const hPend  = (pend / maxVal * plotH);
+    const yBase  = PAD_T + plotH;
+    const isCurr = k === mesActKey;
+
+    rectsCobrado += `<rect x="${x}" y="${(yBase-hCob).toFixed(1)}" width="${bW}" height="${Math.max(0,hCob).toFixed(1)}" fill="${isCurr?'var(--accent)':'var(--green)'}80" rx="2"/>`;
+    if (hPend > 0.5) {
+      rectsPend += `<rect x="${x}" y="${(yBase-hCob-hPend).toFixed(1)}" width="${bW}" height="${hPend.toFixed(1)}" fill="var(--amber)" opacity="0.5" rx="2"/>`;
+    }
+    const [,m] = k.split('-');
+    labels += `<text x="${(x+bW/2).toFixed(1)}" y="${(yBase+12).toFixed(1)}" text-anchor="middle" font-size="9" fill="${isCurr?'var(--accent)':'var(--text3)'}" font-weight="${isCurr?'700':'400'}">${MESES_ES[parseInt(m,10)-1]}</text>`;
+    labels += `<text x="${(x+bW/2).toFixed(1)}" y="${(yBase+22).toFixed(1)}" text-anchor="middle" font-size="8" fill="var(--text3)">${k.slice(2,4)}</text>`;
+  });
+
+  const svgChart = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;height:${H}px;overflow:visible">
+    ${gridLines}${rectsPend}${rectsCobrado}${labels}
+    <rect x="${PAD_L}" y="${PAD_T+plotH}" width="${plotW}" height="1" fill="var(--border)"/>
+  </svg>`;
+
+  // Tabla mensual
+  const filasMes = ultimos12.map(k => {
+    const d      = byMes[k] || { esperado:0, cobrado:0, pendiente:0 };
+    const tasa   = d.esperado > 0 ? Math.round(d.cobrado / d.esperado * 100) : (d.cobrado > 0 ? 100 : 0);
+    const color  = tasa >= 90 ? 'var(--green)' : tasa >= 60 ? 'var(--amber)' : 'var(--red)';
+    const isAct  = k === mesActKey;
+    return `<tr style="${isAct?'font-weight:600;background:var(--accent)10':''}" >
+      <td style="padding:6px 8px;font-size:13px">${labelMesLargo(k)}${isAct?' <span style="font-size:10px;background:var(--accent);color:#fff;padding:1px 5px;border-radius:9px;margin-left:4px">actual</span>':''}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums">${fmtEur(d.esperado)}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:13px;color:var(--green);font-variant-numeric:tabular-nums">${fmtEur(d.cobrado)}</td>
+      <td style="padding:6px 8px;text-align:right;font-size:13px;color:var(--amber);font-variant-numeric:tabular-nums">${d.pendiente>0?fmtEur(d.pendiente):'—'}</td>
+      <td style="padding:6px 8px;text-align:right">
+        <span style="font-size:12px;font-weight:700;color:${color}">${tasa}%</span>
+      </td>
+    </tr>`;
+  }).reverse().join('');
+
+  // Desglose por línea
+  const lineasHtml = lineasOrdenadas.map(([lin, tot]) => {
+    const pct = totalLineas > 0 ? (tot / totalLineas * 100) : 0;
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px">
+        <span style="font-weight:600">${esc(lin)}</span>
+        <span style="color:var(--text2)">${fmtEur(tot)} · ${pct.toFixed(1)}%</span>
+      </div>
+      <div style="height:7px;background:var(--bg2);border-radius:4px;overflow:hidden">
+        <div style="height:100%;width:${pct.toFixed(1)}%;background:var(--accent);border-radius:4px;transition:width .4s"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  render(`
+    <div class="kpis" style="margin-bottom:20px">
+      <div class="kpi">
+        <div class="kpi-n" style="color:var(--green)">${fmtEur(cobradoMesAct)}</div>
+        <div class="kpi-l">Cobrado este mes</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-n" style="color:${pendienteMes>0?'var(--amber)':'var(--text1)'}">${fmtEur(pendienteMes)}</div>
+        <div class="kpi-l">Pendiente este mes</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-n">${fmtEur(Math.round(mediaUlt6))}</div>
+        <div class="kpi-l">Media últimos 6 meses</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-n" style="color:var(--accent)">${fmtEur(Math.round(proyeccion))}</div>
+        <div class="kpi-l">Proyección recurrente</div>
+      </div>
+      ${mejorMes ? `<div class="kpi">
+        <div class="kpi-n" style="font-size:15px;color:var(--green)">${fmtEur(Math.round(mejorMes[1].cobrado))}</div>
+        <div class="kpi-l">Mejor mes (${labelMesLargo(mejorMes[0])})</div>
+      </div>` : ''}
+    </div>
+
+    <div class="card" style="padding:18px 20px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:14px">Evolución 12 meses
+        <span style="margin-left:10px;font-size:11px;font-weight:400;color:var(--text3)">
+          <span style="display:inline-block;width:10px;height:10px;background:var(--green);opacity:.6;border-radius:2px;margin-right:3px"></span>Cobrado
+          <span style="display:inline-block;width:10px;height:10px;background:var(--amber);opacity:.5;border-radius:2px;margin-left:8px;margin-right:3px"></span>Pendiente
+          <span style="display:inline-block;width:10px;height:10px;background:var(--accent);opacity:.7;border-radius:2px;margin-left:8px;margin-right:3px"></span>Mes actual
+        </span>
+      </div>
+      <div style="overflow-x:auto">${svgChart}</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px" class="analisis-grid">
+      <div class="card" style="padding:18px 20px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:14px">Desglose por línea (total histórico cobrado)</div>
+        ${lineasHtml || '<p style="font-size:13px;color:var(--text3)">Sin datos</p>'}
+      </div>
+      <div class="card" style="padding:18px 20px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:14px">Proyección recurrente mensual</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">Basada en inscripciones activas con pago mensual.</p>
+        <div style="font-size:28px;font-weight:800;color:var(--accent);margin-bottom:6px">${fmtEur(Math.round(proyeccion))}</div>
+        <div style="font-size:12px;color:var(--text2)">${DB.inscripciones.filter(i=>String(i.ESTADO||'').toUpperCase()==='ACTIVA'&&String(i.TIPO_PAGO||i.FORMA_PAGO||'').toUpperCase().includes('MENSUAL')).length} inscripciones activas de tipo mensual</div>
+        ${mediaUlt6 > 0 ? `<div style="margin-top:12px;padding:10px;background:var(--bg2);border-radius:6px;font-size:12px">
+          <div style="color:var(--text2);margin-bottom:3px">Diferencia proyección vs. media real</div>
+          <div style="font-weight:700;color:${proyeccion>=mediaUlt6?'var(--green)':'var(--red)'}">
+            ${proyeccion>=mediaUlt6?'▲ +':'▼ '}${fmtEur(Math.abs(Math.round(proyeccion-mediaUlt6)))}
+          </div>
+        </div>` : ''}
+      </div>
+    </div>
+
+    <div class="card" style="padding:18px 20px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:12px">Detalle mensual</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:6px 8px;text-align:left;font-size:11px;color:var(--text3);font-weight:600">Mes</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--text3);font-weight:600">Esperado</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--text3);font-weight:600">Cobrado</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--text3);font-weight:600">Pendiente</th>
+              <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--text3);font-weight:600">Tasa</th>
+            </tr>
+          </thead>
+          <tbody>${filasMes}</tbody>
+        </table>
+      </div>
+    </div>
+    <style>.analisis-grid{grid-template-columns:1fr 1fr}@media(max-width:600px){.analisis-grid{grid-template-columns:1fr}}</style>
+  `);
 }
 
 // ══════════════════════════════════════════════════════════════════════════

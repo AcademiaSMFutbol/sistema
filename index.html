@@ -7080,7 +7080,8 @@ function _gasLoaded(raw) {
       String(x.ACTIVO || '').toUpperCase().startsWith('S')
     );
     if (!activo) { logout(); return; }
-    navigate(currentPage);
+    // Navegar a dashboard al cargar (currentPage puede ser 'dashboard' sin datos aún)
+    navigate(currentUser.rol === 'FAMILIA' ? 'portal-familia' : (currentPage || 'dashboard'));
     return;
   }
 
@@ -7120,6 +7121,13 @@ function _gasFailed() {
   if (_gasRetry <= 3) {
     const seg = _gasRetry * 5;
     if (lm) lm.textContent = `Sin respuesta. Reintentando (${_gasRetry}/3) en ${seg}s…`;
+    // Actualizar también el spinner en el área de contenido si hay sesión activa
+    if (currentUser) {
+      const pc = document.getElementById('page-content');
+      if (pc && pc.querySelector('[style*="spin"]')) {
+        pc.querySelector('p').textContent = `Conectando… intento ${_gasRetry}/3`;
+      }
+    }
     setTimeout(loadGasData, seg * 1000);
   } else {
     window._gasLoading = false;
@@ -7128,6 +7136,17 @@ function _gasFailed() {
       '<button onclick="_gasRetry=0;loadGasData()" ' +
       'style="background:var(--green);color:#fff;border:none;border-radius:4px;' +
       'padding:3px 10px;font-size:12px;cursor:pointer;margin-left:6px">Reintentar</button>';
+    // Si hay sesión activa, mostrar el error en el área de contenido
+    if (currentUser) {
+      const pc = document.getElementById('page-content');
+      if (pc) pc.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px">
+          <div style="font-size:36px">📡</div>
+          <p style="font-size:15px;color:var(--red);margin:0;font-weight:600">Sin conexión al servidor</p>
+          <p style="font-size:13px;color:var(--text2);margin:0">Comprueba la conexión a internet y vuelve a intentarlo.</p>
+          <button class="btn btn-primary" onclick="_gasRetry=0;loadGasData();_showAppLoading()">Reintentar</button>
+        </div>`;
+    }
     // Desbloquear cualquier intento de login en cola
     if (_pendingCreds) {
       const err = document.getElementById('login-err');
@@ -7168,6 +7187,16 @@ function loadGasData() {
     });
 }
 
+function _showAppLoading() {
+  const pc = document.getElementById('page-content');
+  if (pc) pc.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:20px">
+      <div style="width:48px;height:48px;border:4px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:spin 0.9s linear infinite"></div>
+      <p style="font-size:14px;color:var(--text3);margin:0">Cargando datos…</p>
+    </div>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+}
+
 function startApp() {
   initEmailJS();
 
@@ -7181,7 +7210,8 @@ function startApp() {
       document.getElementById('sidebar-nombre').textContent = currentUser.nombre || '';
       document.getElementById('sidebar-rol').textContent    = currentUser.rol    || '';
       applyRoleVisibility();
-      navigate(currentUser.rol === 'FAMILIA' ? 'portal-familia' : 'dashboard');
+      // Mostrar spinner mientras GAS carga — _gasLoaded navegará cuando estén los datos
+      _showAppLoading();
     }
   } catch(_) {}
 

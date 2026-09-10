@@ -5751,11 +5751,23 @@ function cargarListaExtra() {
 
   const diaHoy = fecha ? sinTildes(diaDeSemana(fecha)) : '';
 
+  // Inscripción activa en la fecha seleccionada (consciente de FECHA_ALTA y FECHA_BAJA).
+  // Regla de mismo día: BAJA el mismo día → ya fuera; ALTA el mismo día → ya dentro.
+  const activaEnFecha = (i) => {
+    const alta  = i.FECHA_ALTA || '';
+    const baja  = i.FECHA_BAJA || '';
+    const estado = String(i.ESTADO||'').toUpperCase();
+    if (alta && fecha && alta > fecha) return false;   // aún no había empezado
+    if (baja && fecha && baja <= fecha) return false;  // ya se había ido (mismo día = fuera)
+    if (!baja && estado === 'BAJA') return false;      // dada de baja sin fecha conocida
+    return true;
+  };
+
   // 1. Inscritos directos a esta actividad (mensuales + día suelto inscrito directamente)
   const inscsDirectas = DB.inscripciones.filter(i => {
     if (String(i.ID_ACTIVIDAD) !== actId) return false;
-    if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
-    // Día suelto (PAGO_ÚNICO): aparece siempre independientemente del día
+    if (!activaEnFecha(i)) return false;
+    // Día suelto (PAGO_ÚNICO): aparece siempre independientemente del día de la semana
     if (String(i.TIPO_PRECIO||'').toUpperCase() === 'PAGO_ÚNICO') return true;
     const dias = diasInscripcion(i);
     if (!dias.length) return true;
@@ -5766,8 +5778,8 @@ function cargarListaExtra() {
   // 2. Alumnos con bono de usos genérico (pueden asistir a cualquier actividad)
   const actsBono = DB.actividades.filter(a => esBonoUsos(a.NOMBRE||''));
   const inscsBono = DB.inscripciones.filter(i => {
-    if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
-    if (idsDirectos.has(String(i.ID_ALUMNO))) return false; // ya está como inscrito directo
+    if (!activaEnFecha(i)) return false;
+    if (idsDirectos.has(String(i.ID_ALUMNO))) return false;
     return actsBono.some(a => String(a.ID) === String(i.ID_ACTIVIDAD));
   });
   const idsBono = new Set(inscsBono.map(i => String(i.ID_ALUMNO)));
@@ -5782,7 +5794,7 @@ function cargarListaExtra() {
     (!linea || a.LINEA === linea)
   );
   const inscsSueltas = DB.inscripciones.filter(i => {
-    if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
+    if (!activaEnFecha(i)) return false;
     if (idsDirectos.has(String(i.ID_ALUMNO))) return false;
     if (idsBono.has(String(i.ID_ALUMNO))) return false;
     return actsSueltas.some(a => String(a.ID) === String(i.ID_ACTIVIDAD));

@@ -5791,20 +5791,25 @@ function cargarListaExtra() {
   });
   const idsBono = new Set(inscsBono.map(i => String(i.ID_ALUMNO)));
 
-  // 3. Alumnos con inscripción de día suelto (SUELTA) del mismo mundo
-  // Extraescolares: aparecen en cualquier lista extraescolar (actividades + recogidas)
-  // Fútbol/Tecnificación: solo en listas de fútbol
-  const actsSueltas = DB.actividades.filter(a =>
-    String(a.ID) !== actId &&
-    sinTildes(a.TIPO||'').includes('SUELTA') &&
-    mundoAct(a) === mundoSel
-  );
+  // 3. Alumnos con inscripción de día suelto del mismo mundo.
+  // Se detecta por TIPO_PRECIO='PAGO_ÚNICO' en la inscripción (más fiable que el TIPO
+  // de la actividad, que puede estar vacío o con cualquier valor en el catálogo).
+  // Extraescolares → aparecen en cualquier lista extraescolar (actividades + recogidas).
+  // Fútbol/Tecnificación → solo en listas de fútbol.
   const inscsSueltas = DB.inscripciones.filter(i => {
     if (!activaEnFecha(i)) return false;
     if (idsDirectos.has(String(i.ID_ALUMNO))) return false;
     if (idsBono.has(String(i.ID_ALUMNO))) return false;
-    return actsSueltas.some(a => String(a.ID) === String(i.ID_ACTIVIDAD));
+    if (String(i.TIPO_PRECIO||'').toUpperCase() !== 'PAGO_ÚNICO') return false;
+    if (String(i.ID_ACTIVIDAD) === actId) return false; // ya en grupo 1
+    const actInsc = DB.actividades.find(a => String(a.ID) === String(i.ID_ACTIVIDAD));
+    return mundoAct(actInsc) === mundoSel;
   });
+  // actsSueltas sigue disponible para el badge visual
+  const actsSueltas = DB.actividades.filter(a =>
+    String(a.ID) !== actId && mundoAct(a) === mundoSel &&
+    inscsSueltas.some(i => String(i.ID_ACTIVIDAD) === String(a.ID))
+  );
 
   // 4. Merge y ordenar
   const lista = [
@@ -5956,18 +5961,16 @@ function guardarAsistenciaExtra() {
         String(i.ESTADO||'').toUpperCase() === 'ACTIVA'
       );
       if (!insc) {
-        // Inscripción en actividad SUELTA del mismo mundo (extra o fútbol)
+        // Buscar inscripción PAGO_ÚNICO del mismo mundo (sin depender del TIPO de la actividad)
         const actSel2 = DB.actividades.find(a => String(a.ID) === actId);
         const mundo2  = esFutbol(actSel2?.LINEA||actSel2?.NOMBRE||'') ? 'FUTBOL' : 'EXTRA';
-        const actsSueltas = DB.actividades.filter(a =>
-          sinTildes(a.TIPO||'').includes('SUELTA') &&
-          (esFutbol(a.LINEA||a.NOMBRE||'') ? 'FUTBOL' : 'EXTRA') === mundo2
-        );
-        const inscSuelta = DB.inscripciones.find(i =>
-          String(i.ID_ALUMNO) === aluId &&
-          String(i.ESTADO||'').toUpperCase() === 'ACTIVA' &&
-          actsSueltas.some(a => String(a.ID) === String(i.ID_ACTIVIDAD))
-        );
+        const inscSuelta = DB.inscripciones.find(i => {
+          if (String(i.ID_ALUMNO) !== aluId) return false;
+          if (String(i.ESTADO||'').toUpperCase() !== 'ACTIVA') return false;
+          if (String(i.TIPO_PRECIO||'').toUpperCase() !== 'PAGO_ÚNICO') return false;
+          const aInsc = DB.actividades.find(a => String(a.ID) === String(i.ID_ACTIVIDAD));
+          return (esFutbol(aInsc?.LINEA||aInsc?.NOMBRE||'') ? 'FUTBOL' : 'EXTRA') === mundo2;
+        });
         if (inscSuelta) bajasDiaSuelto.push(inscSuelta);
       } else {
         bajasDiaSuelto.push(insc);

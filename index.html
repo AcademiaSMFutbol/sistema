@@ -5784,14 +5784,13 @@ function cargarListaExtra() {
   });
   const idsBono = new Set(inscsBono.map(i => String(i.ID_ALUMNO)));
 
-  // 3. Alumnos con inscripción de día suelto en actividad SUELTA de la misma línea
+  // 3. Alumnos con inscripción de día suelto en cualquier actividad de tipo SUELTA
+  // (sin restricción de línea: un alumno con día suelto en cualquier actividad del centro
+  //  puede necesitar recogida tardía, AMPA, etc.)
   const actSelObj = DB.actividades.find(a => String(a.ID) === actId);
-  const linea = actSelObj?.LINEA || '';
   const actsSueltas = DB.actividades.filter(a =>
     String(a.ID) !== actId &&
-    sinTildes(a.TIPO||'').includes('SUELTA') &&
-    esExtraescolar(a.LINEA||a.NOMBRE||'') &&
-    (!linea || a.LINEA === linea)
+    sinTildes(a.TIPO||'').includes('SUELTA')
   );
   const inscsSueltas = DB.inscripciones.filter(i => {
     if (!activaEnFecha(i)) return false;
@@ -5950,9 +5949,9 @@ function guardarAsistenciaExtra() {
         String(i.ESTADO||'').toUpperCase() === 'ACTIVA'
       );
       if (!insc) {
-        // Inscripción en actividad SUELTA de la misma línea
+        // Inscripción en cualquier actividad de tipo SUELTA
         const actsSueltas = DB.actividades.filter(a =>
-          sinTildes(a.TIPO||'').includes('SUELTA') && esExtraescolar(a.LINEA||a.NOMBRE||'')
+          sinTildes(a.TIPO||'').includes('SUELTA')
         );
         const inscSuelta = DB.inscripciones.find(i =>
           String(i.ID_ALUMNO) === aluId &&

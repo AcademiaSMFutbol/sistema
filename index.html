@@ -5775,8 +5775,15 @@ function cargarListaExtra() {
   });
   const idsDirectos = new Set(inscsDirectas.map(i => String(i.ID_ALUMNO)));
 
-  // 2. Alumnos con bono de usos genérico (pueden asistir a cualquier actividad)
-  const actsBono = DB.actividades.filter(a => esBonoUsos(a.NOMBRE||''));
+  // Determina el "mundo" de una actividad: 'FUTBOL' o 'EXTRA' (extraescolares + recogida + AMPA)
+  const actSelObj  = DB.actividades.find(a => String(a.ID) === actId);
+  const mundoAct = (a) => esFutbol(a?.LINEA||a?.NOMBRE||'') ? 'FUTBOL' : 'EXTRA';
+  const mundoSel = mundoAct(actSelObj);
+
+  // 2. Alumnos con bono de usos genérico del mismo mundo
+  const actsBono = DB.actividades.filter(a =>
+    esBonoUsos(a.NOMBRE||'') && mundoAct(a) === mundoSel
+  );
   const inscsBono = DB.inscripciones.filter(i => {
     if (!activaEnFecha(i)) return false;
     if (idsDirectos.has(String(i.ID_ALUMNO))) return false;
@@ -5784,13 +5791,13 @@ function cargarListaExtra() {
   });
   const idsBono = new Set(inscsBono.map(i => String(i.ID_ALUMNO)));
 
-  // 3. Alumnos con inscripción de día suelto en cualquier actividad de tipo SUELTA
-  // (sin restricción de línea: un alumno con día suelto en cualquier actividad del centro
-  //  puede necesitar recogida tardía, AMPA, etc.)
-  const actSelObj = DB.actividades.find(a => String(a.ID) === actId);
+  // 3. Alumnos con inscripción de día suelto (SUELTA) del mismo mundo
+  // Extraescolares: aparecen en cualquier lista extraescolar (actividades + recogidas)
+  // Fútbol/Tecnificación: solo en listas de fútbol
   const actsSueltas = DB.actividades.filter(a =>
     String(a.ID) !== actId &&
-    sinTildes(a.TIPO||'').includes('SUELTA')
+    sinTildes(a.TIPO||'').includes('SUELTA') &&
+    mundoAct(a) === mundoSel
   );
   const inscsSueltas = DB.inscripciones.filter(i => {
     if (!activaEnFecha(i)) return false;
@@ -5949,9 +5956,12 @@ function guardarAsistenciaExtra() {
         String(i.ESTADO||'').toUpperCase() === 'ACTIVA'
       );
       if (!insc) {
-        // Inscripción en cualquier actividad de tipo SUELTA
+        // Inscripción en actividad SUELTA del mismo mundo (extra o fútbol)
+        const actSel2 = DB.actividades.find(a => String(a.ID) === actId);
+        const mundo2  = esFutbol(actSel2?.LINEA||actSel2?.NOMBRE||'') ? 'FUTBOL' : 'EXTRA';
         const actsSueltas = DB.actividades.filter(a =>
-          sinTildes(a.TIPO||'').includes('SUELTA')
+          sinTildes(a.TIPO||'').includes('SUELTA') &&
+          (esFutbol(a.LINEA||a.NOMBRE||'') ? 'FUTBOL' : 'EXTRA') === mundo2
         );
         const inscSuelta = DB.inscripciones.find(i =>
           String(i.ID_ALUMNO) === aluId &&

@@ -521,7 +521,8 @@ function normalizarDB(raw) {
   DB.asistenciasExtra     = raw.asistenciasExtra     || [];
   DB.preinscripciones     = raw.preinscripciones     || [];
   DB.nominas              = raw.nominas              || [];
-  DB.ampaSocios           = raw.ampaSocios           || [];
+  DB.ampaSocios              = raw.ampaSocios              || [];
+  DB.encuestasSatisfaccion   = raw.encuestasSatisfaccion   || [];
 
   // Cachear PERSONAL para login inmediato sin esperar a GAS en próximas cargas
   try {
@@ -936,17 +937,22 @@ function fmtFecha(v) {
 }
 
 function fmtHora(v) {
-  if (!v) return '—';
+  if (v === null || v === undefined || v === '') return '—';
   const s = String(v).trim();
   if (!s || s === '—') return '—';
   // Ya en formato HH:MM
   if (/^\d{1,2}:\d{2}/.test(s)) return s.slice(0,5);
-  // GAS serializa TIME de Sheets como fecha base 1899-12-30 (ej: "1899-12-30T16:00:00.000Z")
+  // Fracción decimal de día (formato interno de Sheets: 17:00 → 0.7083...)
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 0 && n < 1 && !s.includes('T') && !s.includes(':')) {
+    const totalMin = Math.round(n * 1440);
+    return String(Math.floor(totalMin / 60)).padStart(2,'0') + ':' + String(totalMin % 60).padStart(2,'0');
+  }
+  // GAS serializa TIME como fecha base 1899-12-30 (ej: "1899-12-30T16:00:00.000Z")
   try {
     const d = new Date(s);
     if (!isNaN(d)) {
       if (d.getFullYear() <= 1900) {
-        // Usar UTC para evitar desfase por zona horaria del navegador
         return String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
       }
       return d.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Madrid' });
@@ -1083,6 +1089,58 @@ function dashboard() {
         + '<thead><tr><th>Actividad</th><th>Línea</th><th style="min-width:120px"></th><th style="text-align:right">Alumnos</th></tr></thead>'
         + '<tbody>' + filas + '</tbody>'
         + '</table></div></div>';
+    })()}
+
+    ${(() => {
+      const encs = DB.encuestasSatisfaccion || [];
+      if (!encs.length) return '';
+      const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30);
+      const cutoffStr = cutoff.toISOString().slice(0,10);
+      const recientes = encs.filter(e => String(e.FECHA||'') >= cutoffStr);
+      if (!recientes.length) return '';
+      const avgSat = arr => {
+        const vals = arr.map(e => parseFloat(e.SATISFACCION)).filter(n => !isNaN(n) && n > 0);
+        return vals.length ? vals.reduce((s,v) => s+v, 0) / vals.length : null;
+      };
+      const CARA_EMOJI = avg => avg === null ? '—' : avg >= 3.5 ? '😁' : avg >= 2.5 ? '😊' : avg >= 1.5 ? '😕' : '😢';
+      const fut = recientes.filter(e => e.TIPO === 'FUTBOL');
+      const ext = recientes.filter(e => e.TIPO === 'EXTRA');
+      const avgFut = avgSat(fut); const avgExt = avgSat(ext);
+      const aluNom = aId => {
+        const a = DB.alumnos.find(x => String(x.ID_ALUMNO||x.ID||'') === String(aId));
+        return a ? (a.NOMBRE+' '+(a.APELLIDOS||'')).trim() : 'Alumno';
+      };
+      const comentarios = recientes
+        .filter(e => e.COMENTARIO_ALUMNO || e.COMENTARIO_TUTOR)
+        .slice().sort((a,b) => b.FECHA > a.FECHA ? 1 : -1).slice(0, 5);
+      return '<div class="card" style="margin-top:0">'
+        + '<div class="card-title">Valoraciones familiares <span style="font-size:11px;font-weight:400;color:var(--text3)">últimos 30 días: '
+        + recientes.length + ' respuestas</span></div>'
+        + '<div style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:' + (comentarios.length?'16px':'0') + '">'
+        + (avgFut !== null ? '<div style="display:flex;align-items:center;gap:10px">'
+          + '<span style="font-size:32px">' + CARA_EMOJI(avgFut) + '</span>'
+          + '<div><div style="font-size:11px;color:var(--text3)">⚽ Fútbol (' + fut.length + ')</div>'
+          + '<div style="font-size:20px;font-weight:700">' + avgFut.toFixed(1) + '<span style="font-size:12px;font-weight:400;color:var(--text3)">/4</span></div></div>'
+          + '</div>' : '')
+        + (avgExt !== null ? '<div style="display:flex;align-items:center;gap:10px">'
+          + '<span style="font-size:32px">' + CARA_EMOJI(avgExt) + '</span>'
+          + '<div><div style="font-size:11px;color:var(--text3)">🎨 Extraescolares (' + ext.length + ')</div>'
+          + '<div style="font-size:20px;font-weight:700">' + avgExt.toFixed(1) + '<span style="font-size:12px;font-weight:400;color:var(--text3)">/4</span></div></div>'
+          + '</div>' : '')
+        + '</div>'
+        + (comentarios.length ? '<div style="font-size:12px;font-weight:600;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">Comentarios recientes</div>'
+          + '<div style="display:flex;flex-direction:column;gap:8px">'
+          + comentarios.map(e => {
+              const txt = [e.COMENTARIO_ALUMNO, e.COMENTARIO_TUTOR].filter(Boolean).join(' · ');
+              return '<div style="padding:8px 12px;background:var(--bg2);border-radius:8px;border-left:3px solid '
+                + (e.TIPO==='FUTBOL'?'var(--green)':'var(--blue)') + '">'
+                + '<div style="font-size:11px;color:var(--text3);margin-bottom:3px">'
+                + (e.TIPO==='FUTBOL'?'⚽':'🎨') + ' ' + esc(aluNom(e.ID_ALUMNO)) + ' · ' + fmtFecha(e.FECHA) + '</div>'
+                + '<div style="font-size:13px">' + esc(txt) + '</div>'
+                + '</div>';
+            }).join('')
+          + '</div>' : '')
+        + '</div>';
     })()}
   `);
 }
@@ -6766,7 +6824,18 @@ function portalFamilia() {
     return;
   }
 
-  const CARAS = [{v:'1',e:'😔',l:'Regular'},{v:'2',e:'😊',l:'Bien'},{v:'3',e:'🤩',l:'Genial'}];
+  const CARAS_SAT = [
+    {v:'1',e:'😢',l:'Mal',    color:'#ef4444'},
+    {v:'2',e:'😕',l:'Regular',color:'#f97316'},
+    {v:'3',e:'😊',l:'Bien',   color:'#eab308'},
+    {v:'4',e:'😁',l:'Genial', color:'#22c55e'},
+  ];
+  const CARAS_CAN = [
+    {v:'1',e:'😁',l:'Fresco',  color:'#22c55e'},
+    {v:'2',e:'😊',l:'Un poco', color:'#eab308'},
+    {v:'3',e:'😅',l:'Bastante',color:'#f97316'},
+    {v:'4',e:'😩',l:'Agotado', color:'#ef4444'},
+  ];
 
   const tarjetas = misAlumnos.map(alumno => {
     const aId   = String(alumno.ID_ALUMNO||alumno.ID||'');
@@ -6774,25 +6843,26 @@ function portalFamilia() {
       String(i.ID_ALUMNO||'')===aId && String(i.ESTADO||'').toUpperCase()==='ACTIVA'
     );
 
-    // Sesiones de fútbol hoy: una fila por alumno en ASISTENCIAS_FUTBOL
+    // Sesiones de fútbol hoy
     const futHoy = DB.asistenciasFutbol.filter(af =>
       String(af.ID_ALUMNO||'') === aId &&
       String(af.FECHA||'') === today &&
       String(af.PRESENTE||'').toUpperCase() === 'S'
     );
 
-    // Actividades extraescolares hoy
+    // Actividades extraescolares hoy (no recogidas)
     const extraHoy = inscs.map(insc => {
       const act = DB.actividades.find(a=>String(a.ID||'')===String(insc.ID_ACTIVIDAD||''));
       if (!act) return null;
       const linea = act.LINEA||act.NOMBRE||'';
       if (esFutbol(linea)) return null;
       if (!esExtraescolar(linea)) return null;
+      if (sinTildes(act.NOMBRE||'').includes('RECOGIDA')) return null;
       const asist = DB.asistenciasExtra.find(ae =>
         String(ae.ID_ACTIVIDAD||'')===String(act.ID||'') && String(ae.FECHA||'')===today
       );
       if (!asist) return null;
-      return {act, icono:'🎨'};
+      return {act, insc};
     }).filter(Boolean);
 
     const nombre = `${alumno.NOMBRE||''} ${alumno.APELLIDOS||''}`.trim();
@@ -6805,93 +6875,56 @@ function portalFamilia() {
     const curso = alumno.CURSO_ESCOLAR||'';
     const tieneHoy = futHoy.length > 0 || extraHoy.length > 0;
 
-    // Bloques fútbol: satisfacción (caritas) + Borg
+    const _encuestaKey = (tipo, refId) => `sm_enc_${aId}_${tipo}_${refId}_${today}`;
+    const _savedEnc    = (tipo, refId) => {
+      const fromDB = DB.encuestasSatisfaccion.find(e =>
+        String(e.ID_ALUMNO)===aId && String(e.FECHA)===today &&
+        String(e.ID_REF||e.ID_ASISTENCIA||e.ID_ACTIVIDAD)===String(refId) && e.TIPO===tipo
+      );
+      if (fromDB) return fromDB;
+      try { const s = localStorage.getItem(_encuestaKey(tipo,refId)); return s ? JSON.parse(s) : null; }
+      catch(_) { return null; }
+    };
+
+    const _bloqueValorado = (enc, label) => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--bg2);border-radius:8px;border:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-size:26px">${CARAS_SAT.find(c=>c.v===String(enc.SATISFACCION||enc.satisfaccion||''))?.e||'😊'}</span>
+          <div>
+            <div style="font-size:13px;font-weight:600">${label}</div>
+            <div style="font-size:11px;color:var(--text3)">Valoración enviada ✓</div>
+          </div>
+        </div>
+      </div>`;
+
+    const _botonValorar = (tipo, refId, actNom) => `
+      <button onclick="modalEncuesta('${aId}','${tipo}','${refId}','${esc(actNom)}','${cliId}')" type="button"
+        style="width:100%;padding:12px;border:2px dashed var(--accent);border-radius:8px;background:transparent;
+               cursor:pointer;font-size:14px;font-weight:600;color:var(--accent);text-align:center">
+        ⭐ Valorar la sesión de hoy
+      </button>`;
+
+    // Bloque fútbol
     const bloquesFut = futHoy.map((asist, idx) => {
-      const asistId  = String(asist.ID||'');
-      const ses      = DB.sesiones.find(s=>String(s.ID)===String(asist.ID_SESION||''));
-      const grupNom  = ses?.GRUPO || asist.GRUPO || 'SM Fútbol';
-      const savedSat = (() => { try { return localStorage.getItem(`sm_fam_sat_${asistId}`); } catch(_) { return null; } })();
-      const savedBorg= (() => { try { return localStorage.getItem(`sm_fam_borg_${asistId}`); } catch(_) { return null; } })();
-      const cara     = CARAS.find(c=>c.v===savedSat);
-
-      const satHtml = savedSat
-        ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--green-l);border-radius:8px;margin-bottom:10px">
-            <span style="font-size:28px">${cara.e}</span>
-            <div><div style="font-weight:600">${cara.l}</div><div style="font-size:11px;color:var(--text3)">Satisfacción guardada ✓</div></div>
-           </div>`
-        : `<div style="margin-bottom:10px">
-            <p style="margin:0 0 8px;font-size:13px;color:var(--text2)">¿Cómo fue el entrenamiento?</p>
-            <div style="display:flex;gap:8px">
-              ${CARAS.map(c=>`<button onclick="famRating('${aId}','${asistId}','${c.v}')" type="button"
-                style="flex:1;padding:10px 6px;border:2px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;text-align:center">
-                <div style="font-size:26px">${c.e}</div>
-                <div style="font-size:11px;color:var(--text2);margin-top:3px">${c.l}</div>
-              </button>`).join('')}
-            </div>
-           </div>`;
-
-      const borgHtml = savedBorg
-        ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--bg-card,var(--bg));border:1px solid var(--border);border-radius:8px">
-            <span style="font-size:20px">💪</span>
-            <div><div style="font-weight:600">Esfuerzo: ${savedBorg}/10</div><div style="font-size:11px;color:var(--text3)">Percepción de esfuerzo guardada ✓</div></div>
-           </div>`
-        : `<details style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
-            <summary style="padding:10px 12px;cursor:pointer;font-size:13px;font-weight:600;list-style:none;display:flex;justify-content:space-between;align-items:center">
-              <span>💪 ¿Cuánto esfuerzo percibió?</span><span style="font-size:11px;color:var(--text3)">Escala Borg CR10 ▸</span>
-            </summary>
-            <div style="padding:12px;border-top:1px solid var(--border)">
-              <p style="margin:0 0 10px;font-size:12px;color:var(--text2);line-height:1.55">
-                La <strong>escala de Borg CR10</strong> mide cómo de duro resultó el entrenamiento
-                según la <em>percepción del propio jugador/a</em>, no sus estadísticas.
-                Pregúntale directamente: <strong>"Del 1 al 10, ¿cómo de cansado/a saliste del entrenamiento?"</strong><br>
-                Un 1 significa que le sobró energía; un 10, esfuerzo máximo sin poder más.
-                Valores habituales en entrenamientos están entre 5 y 8.
-              </p>
-              <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">
-                ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<button onclick="famBorg('${aId}','${asistId}',${n})" type="button"
-                  style="padding:8px 2px;border:2px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:16px;font-weight:700;color:var(--text1)">${n}</button>`).join('')}
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 12px;font-size:11px;color:var(--text3);line-height:1.6">
-                <span>1 – Muy suave</span><span>2 – Suave</span>
-                <span>3 – Moderado</span><span>4-5 – Algo intenso</span>
-                <span>6-7 – Intenso</span><span>8-9 – Muy intenso</span>
-                <span style="grid-column:1/-1">10 – Máximo esfuerzo</span>
-              </div>
-            </div>
-          </details>`;
-
-      const sep = idx > 0 ? '<div style="border-top:1px dashed var(--border);margin:12px 0"></div>' : '';
+      const asistId = String(asist.ID||'');
+      const ses     = DB.sesiones.find(s=>String(s.ID)===String(asist.ID_SESION||''));
+      const grupNom = ses?.GRUPO || asist.GRUPO || 'SM Fútbol';
+      const enc     = _savedEnc('FUTBOL', asistId);
+      const sep     = idx > 0 ? '<div style="border-top:1px dashed var(--border);margin:12px 0"></div>' : '';
       return `${sep}<div>
         <div style="font-size:12px;font-weight:600;color:var(--text3);margin-bottom:8px">⚽ ${esc(grupNom)}</div>
-        ${satHtml}${borgHtml}
+        ${enc ? _bloqueValorado(enc, 'Entrenamiento valorado') : _botonValorar('FUTBOL', asistId, grupNom)}
       </div>`;
     }).join('');
 
-    // Bloques extraescolares (solo satisfacción, guardada en localStorage)
+    // Bloque extraescolar
     const bloquesExtra = extraHoy.map((item, idx) => {
       const actId = String(item.act.ID||'');
-      const rKey  = `sm_fam_val_${aId}_${actId}_${today}`;
-      const saved = (() => { try { return localStorage.getItem(rKey); } catch(_) { return null; } })();
-      const cara  = CARAS.find(c=>c.v===saved);
-      const sep = (futHoy.length > 0 || idx > 0) ? '<div style="border-top:1px dashed var(--border);margin:12px 0"></div>' : '';
-      const ratingHtml = saved
-        ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--green-l);border-radius:8px">
-            <span style="font-size:28px">${cara.e}</span>
-            <div><div style="font-weight:600">${cara.l}</div><div style="font-size:11px;color:var(--text3)">Valorado hoy ✓</div></div>
-           </div>`
-        : `<div>
-            <p style="margin:0 0 8px;font-size:13px;color:var(--text2)">¿Cómo fue la actividad?</p>
-            <div style="display:flex;gap:8px">
-              ${CARAS.map(c=>`<button onclick="famRatingExtra('${aId}','${actId}','${c.v}')" type="button"
-                style="flex:1;padding:10px 6px;border:2px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer;text-align:center">
-                <div style="font-size:26px">${c.e}</div>
-                <div style="font-size:11px;color:var(--text2);margin-top:3px">${c.l}</div>
-              </button>`).join('')}
-            </div>
-           </div>`;
+      const enc   = _savedEnc('EXTRA', actId);
+      const sep   = (futHoy.length > 0 || idx > 0) ? '<div style="border-top:1px dashed var(--border);margin:12px 0"></div>' : '';
       return `${sep}<div>
-        <div style="font-size:12px;font-weight:600;color:var(--text3);margin-bottom:6px">${item.icono} ${esc(item.act.NOMBRE||'')}</div>
-        ${ratingHtml}
+        <div style="font-size:12px;font-weight:600;color:var(--text3);margin-bottom:8px">🎨 ${esc(item.act.NOMBRE||'')}</div>
+        ${enc ? _bloqueValorado(enc, 'Actividad valorada') : _botonValorar('EXTRA', actId, item.act.NOMBRE||'')}
       </div>`;
     }).join('');
 
@@ -7025,32 +7058,147 @@ function portalFamilia() {
               </tbody>
             </table></div>
           </div>
+          ${(() => {
+            const alumnoIds = new Set(misAlumnos.map(a => String(a.ID_ALUMNO||a.ID||'')));
+            const hists = (DB.encuestasSatisfaccion||[])
+              .filter(e => alumnoIds.has(String(e.ID_ALUMNO||'')))
+              .slice().sort((a,b) => b.FECHA > a.FECHA ? 1 : -1)
+              .slice(0, 20);
+            if (!hists.length) return '';
+            const CARAS_SAT_MAP = {'1':'😢','2':'😕','3':'😊','4':'😁'};
+            const CARAS_CAN_MAP = {'1':'😁','2':'😊','3':'😅','4':'😩'};
+            const aluNomCorto = aId => {
+              const a = misAlumnos.find(x => String(x.ID_ALUMNO||x.ID||'') === String(aId));
+              return a ? (a.NOMBRE||'').split(' ')[0] : 'Alumno';
+            };
+            return '<div class="card"><div class="card-title">Historial de valoraciones</div>'
+              + '<div style="display:flex;flex-direction:column;gap:8px">'
+              + hists.map(e => {
+                  const satEmoji = CARAS_SAT_MAP[String(e.SATISFACCION||'')] || '';
+                  const canEmoji = e.CANSANCIO && e.TIPO==='FUTBOL' ? ' '+CARAS_CAN_MAP[String(e.CANSANCIO||'')] : '';
+                  const comAlu  = e.COMENTARIO_ALUMNO||'';
+                  const comTut  = e.COMENTARIO_TUTOR||'';
+                  return '<div style="padding:8px 12px;background:var(--bg);border-radius:8px;border:1px solid var(--border2)">'
+                    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:' + (comAlu||comTut?'6':'0') + 'px">'
+                    + '<span style="font-size:12px;font-weight:600">'+(e.TIPO==='FUTBOL'?'⚽':'🎨')+' '+esc(aluNomCorto(e.ID_ALUMNO))+' · '+fmtFecha(e.FECHA)+'</span>'
+                    + '<span style="font-size:22px">'+satEmoji+canEmoji+'</span>'
+                    + '</div>'
+                    + (comAlu ? '<div style="font-size:12px;color:var(--text3)">👤 '+esc(comAlu)+'</div>' : '')
+                    + (comTut ? '<div style="font-size:12px;color:var(--text3)">👨‍👩‍👧 '+esc(comTut)+'</div>' : '')
+                    + '</div>';
+                }).join('')
+              + '</div></div>';
+          })()}
         </div>
       </details>
     </div>`);
 }
 
-// Satisfacción fútbol: guarda en localStorage Y en Sheets (ASISTENCIAS_FUTBOL.SATISFACCION)
-function famRating(aId, asistId, val) {
-  try { localStorage.setItem(`sm_fam_sat_${asistId}`, val); } catch(_) {}
-  writeToSheet('ASISTENCIAS_FUTBOL', {SATISFACCION: val}, asistId)
-    .catch(err => showToast('No se pudo guardar la satisfacción: '+err.message, 'error'));
-  portalFamilia();
+// ══════════════════════════════════════════════════════════════════════════
+//  ENCUESTA DE SATISFACCIÓN FAMILIAR
+// ══════════════════════════════════════════════════════════════════════════
+
+function modalEncuesta(aluId, tipo, refId, actNom, cliId) {
+  const esFut = tipo === 'FUTBOL';
+  const CARAS_SAT = [
+    {v:'1',e:'😢',l:'Mal',     color:'#ef4444'},
+    {v:'2',e:'😕',l:'Regular', color:'#f97316'},
+    {v:'3',e:'😊',l:'Bien',    color:'#eab308'},
+    {v:'4',e:'😁',l:'Genial',  color:'#22c55e'},
+  ];
+  const CARAS_CAN = [
+    {v:'1',e:'😁',l:'Fresco',   color:'#22c55e'},
+    {v:'2',e:'😊',l:'Un poco',  color:'#eab308'},
+    {v:'3',e:'😅',l:'Bastante', color:'#f97316'},
+    {v:'4',e:'😩',l:'Agotado',  color:'#ef4444'},
+  ];
+  const caraBtn = (group, cara) =>
+    `<button type="button" onclick="selEncuesta('${group}','${cara.v}')" id="enc-${group}-${cara.v}"
+      style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 6px;
+             border:2px solid var(--border2);border-radius:10px;background:var(--bg2);
+             cursor:pointer;flex:1;transition:border-color .15s,background .15s">
+      <span style="font-size:30px;line-height:1">${cara.e}</span>
+      <span style="font-size:11px;font-weight:600;color:var(--text3)">${cara.l}</span>
+    </button>`;
+  const filaCaras = (group, caras) =>
+    `<div style="display:flex;gap:8px;margin-bottom:20px">${caras.map(c => caraBtn(group, c)).join('')}</div>`;
+
+  const bodyHTML = `
+    <div id="enc-modal-body" style="padding:4px 0">
+      <p style="text-align:center;font-size:13px;color:var(--text3);margin:0 0 18px">
+        ${esFut ? '⚽' : '🎨'} <strong>${esc(actNom)}</strong>
+      </p>
+      <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:10px;text-align:center">
+        ¿Qué tal lo pasaste hoy?
+      </div>
+      ${filaCaras('SAT', CARAS_SAT)}
+      ${esFut ? `
+      <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:10px;text-align:center">
+        ¿Cómo te quedaste de cansancio?
+      </div>
+      ${filaCaras('CAN', CARAS_CAN)}` : ''}
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;font-weight:600;color:var(--text3);display:block;margin-bottom:5px">
+          Comentario del alumno/a <span style="font-weight:400;color:var(--text3)">(opcional)</span>
+        </label>
+        <textarea id="enc-com-alu" rows="2" placeholder="¿Qué fue lo mejor? ¿Algo que mejorar?"
+          style="width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:8px;
+                 background:var(--bg);color:var(--text);font-size:14px;resize:none;box-sizing:border-box"></textarea>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:600;color:var(--text3);display:block;margin-bottom:5px">
+          Comentario del padre/madre/tutor <span style="font-weight:400;color:var(--text3)">(opcional)</span>
+        </label>
+        <textarea id="enc-com-tut" rows="2" placeholder="Tu opinión como familia"
+          style="width:100%;padding:8px 10px;border:1px solid var(--border2);border-radius:8px;
+                 background:var(--bg);color:var(--text);font-size:14px;resize:none;box-sizing:border-box"></textarea>
+      </div>
+    </div>`;
+
+  openModal('¿Cómo fue la sesión?', bodyHTML,
+    `<button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+     <button class="btn btn-primary" onclick="guardarEncuesta('${aluId}','${tipo}','${refId}','${cliId}')">Enviar valoración</button>`);
 }
 
-// Borg fútbol: guarda en localStorage Y en Sheets (ASISTENCIAS_FUTBOL.BORG)
-function famBorg(aId, asistId, borg) {
-  try { localStorage.setItem(`sm_fam_borg_${asistId}`, String(borg)); } catch(_) {}
-  writeToSheet('ASISTENCIAS_FUTBOL', {BORG: borg}, asistId)
-    .catch(err => showToast('No se pudo guardar el esfuerzo: '+err.message, 'error'));
-  portalFamilia();
+function selEncuesta(group, val) {
+  const colorsSAT = {'1':'#ef4444','2':'#f97316','3':'#eab308','4':'#22c55e'};
+  const colorsCAN = {'1':'#22c55e','2':'#eab308','3':'#f97316','4':'#ef4444'};
+  const colors = group === 'SAT' ? colorsSAT : colorsCAN;
+  ['1','2','3','4'].forEach(v => {
+    const btn = document.getElementById(`enc-${group}-${v}`);
+    if (!btn) return;
+    btn.style.borderColor = v === val ? colors[v] : 'var(--border2)';
+    btn.style.background  = v === val ? colors[v] + '22' : 'var(--bg2)';
+  });
+  const body = document.getElementById('enc-modal-body');
+  if (body) body.dataset['sel' + group] = val;
 }
 
-// Satisfacción extraescolares: solo localStorage
-function famRatingExtra(aId, actId, val) {
+async function guardarEncuesta(aluId, tipo, refId, cliId) {
+  const body   = document.getElementById('enc-modal-body');
+  const sat    = body?.dataset?.selSAT || '';
+  const can    = body?.dataset?.selCAN || '';
+  const comAlu = (document.getElementById('enc-com-alu')?.value || '').trim();
+  const comTut = (document.getElementById('enc-com-tut')?.value || '').trim();
+  if (!sat) { showToast('Selecciona cómo te fue hoy', 'error'); return; }
+  if (tipo === 'FUTBOL' && !can) { showToast('Selecciona el nivel de cansancio', 'error'); return; }
   const today = new Date().toISOString().slice(0,10);
-  try { localStorage.setItem(`sm_fam_val_${aId}_${actId}_${today}`, val); } catch(_) {}
+  const data = {
+    FECHA: today, ID_CLIENTE: cliId, ID_ALUMNO: aluId,
+    ID_REF: refId, TIPO: tipo, SATISFACCION: sat,
+    CANSANCIO: can, COMENTARIO_ALUMNO: comAlu, COMENTARIO_TUTOR: comTut,
+    TIMESTAMP: new Date().toISOString()
+  };
+  // Cache inmediato en localStorage para que el portal muestre el estado sin esperar GAS
+  try { localStorage.setItem(`sm_enc_${aluId}_${tipo}_${refId}_${today}`, JSON.stringify(data)); } catch(_) {}
+  closeModal();
   portalFamilia();
+  try {
+    await writeToSheet('ENCUESTAS_SATISFACCION', data, null);
+    showToast('¡Valoración enviada! Gracias 🙏', 'success');
+  } catch(err) {
+    showToast('Guardado localmente. Se sincronizará al recargar.', 'error');
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════════════

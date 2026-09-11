@@ -6862,6 +6862,9 @@ function portalFamilia() {
         String(ae.ID_ACTIVIDAD||'')===String(act.ID||'') && String(ae.FECHA||'')===today
       );
       if (!asist) return null;
+      // Verificar que este alumno concreto estaba presente
+      const presenteIds = String(asist.ALUMNOS_PRESENTES||'').split(',').map(x=>x.trim());
+      if (!presenteIds.includes(aId)) return null;
       return {act, insc};
     }).filter(Boolean);
 
@@ -6897,8 +6900,9 @@ function portalFamilia() {
         </div>
       </div>`;
 
+    const _escJs = s => String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const _botonValorar = (tipo, refId, actNom) => `
-      <button onclick="modalEncuesta('${aId}','${tipo}','${refId}','${esc(actNom)}','${cliId}')" type="button"
+      <button onclick="modalEncuesta('${aId}','${tipo}','${refId}','${_escJs(actNom)}','${cliId}')" type="button"
         style="width:100%;padding:12px;border:2px dashed var(--accent);border-radius:8px;background:transparent;
                cursor:pointer;font-size:14px;font-weight:600;color:var(--accent);text-align:center">
         ⭐ Valorar la sesión de hoy
